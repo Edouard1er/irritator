@@ -715,6 +715,8 @@ auto application::show_menu() noexcept -> show_result_t
 
             ImGui::MenuItem("Show memory usage", nullptr, &memory_wnd.is_open);
             ImGui::MenuItem("Show task usage", nullptr, &task_wnd.is_open);
+            if (ImGui::MenuItem("Experiment Request Editor"))
+                experiment_request_ed.is_open = true;
             ImGui::EndMenu();
         }
 
@@ -762,6 +764,8 @@ void application::show_dock() noexcept
 
         ImGui::DockBuilderDockWindow(component_editor::name, main_dock_id);
         ImGui::DockBuilderDockWindow(output_editor::name, main_dock_id);
+        ImGui::DockBuilderDockWindow(experiment_request_editor::name,
+                                     main_dock_id);
 
         ImGui::DockBuilderDockWindow(library_wnd.name, right_dock_id);
 
@@ -847,6 +851,9 @@ void application::show_dock() noexcept
 
     if (library_wnd.is_open)
         library_wnd.show();
+
+    if (experiment_request_ed.is_open)
+        experiment_request_ed.show(*this);
 }
 
 auto application::show() noexcept -> show_result_t

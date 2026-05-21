@@ -730,10 +730,12 @@ file_path_id file_access::alloc_file(const dir_path_id          id,
         if (file_paths.can_alloc(1) or file_paths.grow<3, 2>()) {
             auto& file     = file_paths.alloc();
             auto  fid      = file_paths.get_id(file);
-            file.path      = name;
-            file.component = compo_id;
-            file.pj_id     = project_id;
-            file.parent    = id;
+            file.path   = name;
+            file.parent = id;
+            if (type == file_path::file_type::project_file)
+                file.pj_id = project_id;
+            else
+                file.component = compo_id;
             file.type      = type;
             d->children.push_back(fid);
             return fid;

@@ -7,6 +7,8 @@ set(public_irritator_header
     include/irritator/core.hpp
     include/irritator/dot-parser.hpp
     include/irritator/error.hpp
+    include/irritator/experiment-plan.hpp
+    include/irritator/experiment-request.hpp
     include/irritator/ext.hpp
     include/irritator/file.hpp
     include/irritator/format.hpp
@@ -25,6 +27,8 @@ set(private_irritator_sources
     src/archiver.cpp
     src/dot-parser.cpp
     src/error.cpp
+    src/experiment-plan.cpp
+    src/experiment-request.cpp
     src/external_source.cpp
     src/filesystem.cpp
     src/file.cpp
@@ -170,3 +174,6 @@ irritator_add_test(test-mod-to-sim test/mod-to-sim.cpp)
 irritator_add_test(test-thread test/threading.cpp)
 irritator_add_test(test-simulations test/simulations.cpp)
 irritator_add_test(test-dot-parser test/dot-parser-test.cpp)
+irritator_add_test(test-experiment-plan test/experiment-plan.cpp)
+irritator_add_test(test-experiment-request test/experiment-request.cpp)
+irritator_add_test(test-integration-experiment-pipeline test/integration-experiment-pipeline.cpp)

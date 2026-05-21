@@ -123,6 +123,46 @@ static bool get_temp_registred_path(irt::small_string<length>& str) noexcept
     }
 }
 
+// A** prototype: load a .irt component by name and run its simulation to completion.
+// Demonstrates the full pipeline: file registry lookup → component_id → project build
+// → DEVS simulation loop. Intended as the foundation for B*'s prospective simulations.
+static irt::status run_nested_simulation(irt::modeling&         mod,
+                                          const std::string_view reg,
+                                          const std::string_view dir,
+                                          const std::string_view file,
+                                          const double           t0,
+                                          const double           t_end) noexcept
+{
+    const auto f_id = mod.files.read(
+      [&](const irt::file_access& fs, auto) noexcept {
+          return fs.find_file(reg, dir, file);
+      });
+
+    if (!irt::is_defined(f_id))
+        return irt::new_error(irt::modeling_errc::component_not_found);
+
+    const auto compo_id = mod.files.read(
+      [&](const irt::file_access& fs, auto) noexcept -> irt::component_id {
+          const auto* fp = fs.file_paths.try_to_get(f_id);
+          return fp ? fp->component : irt::undefined<irt::component_id>();
+      });
+
+    if (!irt::is_defined(compo_id))
+        return irt::new_error(irt::modeling_errc::component_not_found);
+
+    irt::project pj;
+    irt_check(pj.set(mod, compo_id));
+
+    pj.sim.limits.set_bound(t0, t_end);
+    irt_check(pj.sim.srcs.prepare());
+    irt_check(pj.sim.initialize());
+
+    while (!pj.sim.current_time_expired())
+        irt_check(pj.sim.run());
+
+    return irt::success();
+}
+
 int main()
 {
 #if defined(IRRITATOR_ENABLE_DEBUG)
@@ -2168,5 +2208,56 @@ int main()
         // sum models and 1 edge between sum models and finally on 1edge
         // from sum model to counter.
         expect(eq(get_connection_number(pj.sim), (edge_size + 2u) * 2u) + 8u);
+    };
+
+    // A** prototype: save a minimal .irt component and run it via run_nested_simulation.
+    // Validates the full file-based pipeline used by B* to launch prospective simulations.
+    "nested-simulation-from-irt-file"_test = [] {
+        const auto old_cb = std::exchange(irt::on_error_callback, nullptr);
+
+        irt::journal_handler    jn;
+        irt::modeling           mod{ jn };
+        irt::registred_path_str temp_path;
+
+        expect(fatal(get_temp_registred_path(temp_path)));
+
+        irt::component_id compo_id;
+
+        mod.ids.write([&](auto& ids) {
+            compo_id   = ids.alloc_generic_component();
+            auto& c    = ids.components[compo_id];
+            auto& s    = ids.generic_components.get(c.id.generic_id);
+            s.alloc(irt::dynamics_type::constant);
+
+            mod.files.write([&](auto& fs) {
+                const auto reg_id = fs.alloc_registred("nested-test", 0);
+                fs.registred_paths.get(reg_id).path = temp_path;
+
+                const auto dir_id = fs.alloc_dir(reg_id, "nested-dir");
+                fs.create_directories(reg_id);
+                fs.create_directories(dir_id);
+
+                const auto file_id =
+                  fs.alloc_file(dir_id,
+                                "mini-ac.irt",
+                                irt::file_path::file_type::component_file,
+                                compo_id);
+
+                ids.component_file_paths[compo_id].file = file_id;
+            });
+        });
+
+        expect(!!mod.save(compo_id));
+
+        expect(!!run_nested_simulation(
+          mod, "nested-test", "nested-dir", "mini-ac.irt", 0.0, 10.0));
+
+        mod.files.write([&](auto& fs) noexcept {
+            while (!fs.dir_paths.empty())
+                fs.remove_directory(
+                  fs.dir_paths.get_id(*fs.dir_paths.begin()));
+        });
+
+        std::exchange(irt::on_error_callback, old_cb);
     };
 }

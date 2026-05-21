@@ -17,6 +17,7 @@
 #include <filesystem>
 
 #include "dialog.hpp"
+#include "experiment/request-editor.hpp"
 
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imnodes.h"
@@ -1414,6 +1415,7 @@ public:
     void add_graph_component_data() noexcept;
     void add_hsm_component_data() noexcept;
     void add_simulation_component_data() noexcept;
+    void add_experiment_plan_data() noexcept;
 
     bool is_component_open(const component_id id) const noexcept;
 
@@ -1792,6 +1794,7 @@ public:
     memory_window   memory_wnd;
     window_logger   log_wnd;
     task_window     task_wnd;
+    experiment_request_editor experiment_request_ed;
 
     simulation_to_cpp sim_to_cpp;
 

@@ -4,3 +4,10 @@ CMakeSettings.json
 .cache
 build
 compile_commands.json
+/out
+/.claude
+/docs
+test_output.txt
+irt-mem.txt
+experiment_plan.json
+experiment_request.json

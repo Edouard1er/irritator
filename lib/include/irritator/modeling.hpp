@@ -89,10 +89,11 @@ enum class internal_component : u8 {
     qss3_negative_lif,
     qss3_seirs,
     qss3_van_der_pol,
+    experiment_plan, ///< T* — ExperimentPlan: design-of-experiments for B*.
 };
 
 constexpr int internal_component_count =
-  ordinal(internal_component::qss3_van_der_pol) + 1;
+  ordinal(internal_component::experiment_plan) + 1;
 
 enum class component_type : u8 {
     none,      ///< The component does not reference any container.

@@ -10,6 +10,8 @@ set(gui_sources application.cpp application.hpp component-editor.cpp
     plot-observation-widget.cpp project-external-source-editor.cpp
     project-settings-editor.cpp settings-window.cpp simulation-component.cpp
     project-editor.cpp task-window.cpp window-logger.cpp
+    experiment/request-editor.cpp
+    experiment/request-editor.hpp
 
     generic/modeling.cpp
     generic/simulation.cpp
@@ -117,6 +119,7 @@ target_compile_definitions(irritator-gui
     VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     VERSION_MINOR=${PROJECT_VERSION_MINOR}
     VERSION_PATCH=${PROJECT_VERSION_PATCH}
+    IRT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"
     IRT_DATAROOTDIR="${CMAKE_INSTALL_FULL_DATAROOTDIR}")
 
 set_target_properties(irritator-gui PROPERTIES

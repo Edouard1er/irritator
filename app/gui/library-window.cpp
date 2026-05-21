@@ -57,6 +57,9 @@ static void show_component_popup_menu(application& app,
         if (ImGui::MenuItem("New simulation component"))
             app.component_ed.add_simulation_component_data();
 
+        if (ImGui::MenuItem("New experiment plan"))
+            app.component_ed.add_experiment_plan_data();
+
         ImGui::Separator();
 
         if (ImGui::MenuItem("Copy")) {
@@ -616,6 +619,11 @@ void library_window::show_menu() noexcept
 
             if (ImGui::MenuItem("simulation component"))
                 app.component_ed.add_simulation_component_data();
+
+            ImGui::Separator();
+
+            if (ImGui::MenuItem("experiment plan"))
+                app.component_ed.add_experiment_plan_data();
 
             ImGui::EndMenu();
         }

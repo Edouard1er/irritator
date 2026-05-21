@@ -43,7 +43,8 @@ static constexpr inline const char* internal_component_names[] = {
     "qss2_izhikevich",   "qss2_lif",   "qss2_lotka_volterra",
     "qss2_negative_lif", "qss2_seirs", "qss2_van_der_pol",
     "qss3_izhikevich",   "qss3_lif",   "qss3_lotka_volterra",
-    "qss3_negative_lif", "qss3_seirs", "qss3_van_der_pol"
+    "qss3_negative_lif", "qss3_seirs", "qss3_van_der_pol",
+    "experiment_plan"
 };
 
 //! Try to get internal component type from a string. If the string is unknown,

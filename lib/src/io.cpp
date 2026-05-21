@@ -25,6 +25,7 @@ auto get_internal_component_type(std::string_view name) noexcept
     };
 
     static constexpr string_to_type table[] = {
+        { "experiment_plan", internal_component::experiment_plan },
         { "qss1_izhikevich", internal_component::qss1_izhikevich },
         { "qss1_lif", internal_component::qss1_lif },
         { "qss1_lotka_volterra", internal_component::qss1_lotka_volterra },

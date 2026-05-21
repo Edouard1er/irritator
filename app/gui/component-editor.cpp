@@ -2646,4 +2646,36 @@ void component_editor::add_simulation_component_data() noexcept
     });
 }
 
+void component_editor::add_experiment_plan_data() noexcept
+{
+    auto& app = container_of(this, &application::component_ed);
+
+    app.add_gui_task([&]() {
+        app.mod.ids.write([&](auto& ids) noexcept {
+            const auto compo_id = ids.alloc_generic_component();
+
+            if (is_undefined(compo_id)) {
+                app.jn.push(log_level::error, [](auto& t, auto& m) {
+                    t = "Library: new experiment plan";
+                    m = "Can not allocate a new component";
+                });
+                return;
+            }
+
+            if (const auto ret =
+                  ids.copy(internal_component::experiment_plan, compo_id);
+                ret.has_error()) {
+                app.jn.push(log_level::error, [](auto& t, auto& m) {
+                    t = "Library: new experiment plan";
+                    m = "Fail to apply experiment_plan template";
+                });
+                return;
+            }
+
+            request_to_open(compo_id);
+            app.component_sel.update();
+        });
+    });
+}
+
 } // namespace irt

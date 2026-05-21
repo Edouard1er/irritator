@@ -432,6 +432,33 @@ status add_seirs(component& dst, generic_component& com) noexcept
     return success();
 }
 
+// T* architecture — ExperimentPlan component.
+// Creates three configurable constant sources (n_candidate, B0, H) each
+// exposed as a Y output port. B* will later use these values to parameterise
+// A** (nested simulation) for each candidate decision evaluation.
+static status add_experiment_plan(component&         dst,
+                                  generic_component& com) noexcept
+{
+    dst.name = "experiment_plan";
+
+    const auto n_id  = alloc<constant>(com, "n_candidate");
+    const auto B0_id = alloc<constant>(com, "B0");
+    const auto H_id  = alloc<constant>(com, "H");
+
+    const auto yn  = dst.get_or_add_y("n");
+    const auto yB0 = dst.get_or_add_y("B0");
+    const auto yH  = dst.get_or_add_y("H");
+
+    irt_check(com.connect_output(
+      yn, com.children.get(n_id), connection::port{ .model = 0 }));
+    irt_check(com.connect_output(
+      yB0, com.children.get(B0_id), connection::port{ .model = 0 }));
+    irt_check(com.connect_output(
+      yH, com.children.get(H_id), connection::port{ .model = 0 }));
+
+    return success();
+}
+
 status component_access::copy(const internal_component src,
                               const component_id       id) noexcept
 {
@@ -498,6 +525,9 @@ status component_access::copy(const internal_component src,
         break;
     case internal_component::qss3_van_der_pol:
         irt_check(add_van_der_pol<3>(dst, gen));
+        break;
+    case internal_component::experiment_plan:
+        irt_check(add_experiment_plan(dst, gen));
         break;
     }
 
