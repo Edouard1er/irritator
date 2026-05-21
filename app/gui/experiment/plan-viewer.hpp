@@ -34,6 +34,8 @@ private:
     void run_loaded_plan(application& app);
     void export_results_to_path(application& app,
                                 const std::filesystem::path& path);
+    void show_julia_results_analysis(application& app);
+    void analyze_results_with_julia(application& app);
 
     std::optional<irt::experiment_plan> loaded_plan_;
     std::optional<irt::experiment_run_results> run_results_;
@@ -44,6 +46,7 @@ private:
     std::string load_message_;
     std::string run_message_;
     std::string export_results_message_;
+    std::string analysis_message_;
 
     bool plan_is_valid_ = false;
     bool run_completed_ = false;
@@ -53,6 +56,11 @@ private:
 
     char plan_path_[512] = "experiment_plan.json";
     char results_output_path_[512] = "experiment_results.json";
+    char julia_analysis_executable_[512] = "julia";
+    char julia_analysis_script_[512] =
+      "tools/julia/analyze_experiment_results.jl";
+    char experiment_results_input_path_[512] = "experiment_results.json";
+    char decision_results_output_path_[512] = "decision_results.json";
 
     char filter_experiment_id_[128] = "";
     char filter_parameter_name_[128] = "";
@@ -67,6 +75,8 @@ private:
     bool sort_by_final_biomass_desc_    = false;
 
     double last_run_duration_ms_ = 0.0;
+    int last_analysis_exit_code_ = 0;
+    std::string last_analysis_command_;
 };
 
 } // namespace irt

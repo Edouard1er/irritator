@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <numeric>
@@ -82,6 +83,146 @@ bool regular_file_exists(const std::filesystem::path& path) noexcept
     } catch (...) {
         return false;
     }
+}
+
+bool is_bare_command(const std::string& value) noexcept
+{
+    return value.find('/') == std::string::npos and
+           value.find('\\') == std::string::npos and
+           value.find(':') == std::string::npos;
+}
+
+std::string strip_surrounding_quotes(std::string value)
+{
+    while (value.size() >= 2u and value.front() == '"' and
+           value.back() == '"')
+        value = value.substr(1u, value.size() - 2u);
+
+    return value;
+}
+
+std::string make_native_argument(std::string value)
+{
+    value = strip_surrounding_quotes(std::move(value));
+
+    if (value.empty() or is_bare_command(value))
+        return value;
+
+    auto path = std::filesystem::path{ value };
+    path.make_preferred();
+    return path.string();
+}
+
+std::string quote_command_argument(const std::string& value)
+{
+    const auto argument = make_native_argument(value);
+
+    std::string ret;
+    ret.reserve(argument.size() + 2u);
+    ret.push_back('"');
+
+    for (const auto c : argument) {
+        if (c == '"')
+            ret.push_back('\\');
+        ret.push_back(c);
+    }
+
+    ret.push_back('"');
+    return ret;
+}
+
+std::string make_raw_julia_command(const std::string&              julia_executable,
+                                   const std::vector<std::string>& arguments)
+{
+    auto ret = quote_command_argument(julia_executable);
+
+    for (const auto& argument : arguments) {
+        ret.push_back(' ');
+        ret += quote_command_argument(argument);
+    }
+
+    return ret;
+}
+
+std::string make_system_command(const std::string& raw_command)
+{
+#if defined(_WIN32)
+    return std::string{ "cmd /C \"" } + raw_command + '"';
+#else
+    return raw_command;
+#endif
+}
+
+bool is_repository_root(const std::filesystem::path& path) noexcept
+{
+    try {
+        std::error_code ec;
+        const auto      script =
+          path / "tools" / "julia" / "analyze_experiment_results.jl";
+
+        return std::filesystem::is_regular_file(script, ec) and not ec;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::filesystem::path find_repository_root_from(
+  std::filesystem::path current) noexcept
+{
+    try {
+        for (;;) {
+            if (is_repository_root(current))
+                return current;
+
+            if (not current.has_parent_path() or
+                current == current.parent_path())
+                break;
+
+            current = current.parent_path();
+        }
+    } catch (...) {
+    }
+
+    return {};
+}
+
+std::filesystem::path find_repository_root() noexcept
+{
+#if defined(IRT_SOURCE_ROOT)
+    if (const auto source_root = std::filesystem::path{ IRT_SOURCE_ROOT };
+        is_repository_root(source_root))
+        return source_root;
+#endif
+
+    std::error_code ec;
+    const auto      cwd = std::filesystem::current_path(ec);
+
+    if (not ec)
+        if (const auto root = find_repository_root_from(cwd); not root.empty())
+            return root;
+
+    return {};
+}
+
+std::string current_working_directory_string()
+{
+    std::error_code ec;
+    const auto      cwd = std::filesystem::current_path(ec);
+
+    if (ec)
+        return std::string{ "<unavailable>" };
+
+    return cwd.generic_string();
+}
+
+void show_file_status(const char* label, const bool exists)
+{
+    const auto color = exists ? ImVec4{ 0.2f, 0.8f, 0.3f, 1.0f }
+                              : ImVec4{ 0.9f, 0.25f, 0.2f, 1.0f };
+
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine();
+    ImGui::TextColored(color, exists ? "found" : "missing");
 }
 
 const char* experiment_runner_error_message(const error_code error) noexcept
@@ -895,6 +1036,8 @@ void experiment_plan_viewer::show(application& app)
             ImGui::TextWrapped("%s", run_message_.c_str());
     }
 
+    show_julia_results_analysis(app);
+
     if (loaded_plan_) {
         auto& plan = *loaded_plan_;
 
@@ -967,6 +1110,191 @@ void experiment_plan_viewer::show(application& app)
     ImGui::End();
 
     show_load_dialog(app);
+}
+
+void experiment_plan_viewer::show_julia_results_analysis(application& app)
+{
+    if (not ImGui::CollapsingHeader(
+          "Julia Results Analysis##julia_results_analysis_section",
+          ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    const auto cwd = current_working_directory_string();
+    ImGui::TextWrapped("Current working directory: %s", cwd.c_str());
+
+    ImGui::SetNextItemWidth(-220.0f);
+    ImGui::InputText("Julia executable##analysis_julia_executable",
+                     julia_analysis_executable_,
+                     sizeof(julia_analysis_executable_));
+
+    ImGui::SetNextItemWidth(-220.0f);
+    ImGui::InputText("Julia analysis script##analysis_script",
+                     julia_analysis_script_,
+                     sizeof(julia_analysis_script_));
+
+    ImGui::SetNextItemWidth(-220.0f);
+    ImGui::InputText("Experiment results JSON##analysis_results_input",
+                     experiment_results_input_path_,
+                     sizeof(experiment_results_input_path_));
+
+    ImGui::SetNextItemWidth(-220.0f);
+    ImGui::InputText("Decision results JSON##analysis_decision_output",
+                     decision_results_output_path_,
+                     sizeof(decision_results_output_path_));
+
+    const auto script_path =
+      std::filesystem::path{ make_native_argument(julia_analysis_script_) };
+    const auto results_path = std::filesystem::path{
+        make_native_argument(experiment_results_input_path_)
+    };
+    const auto decision_path = std::filesystem::path{
+        make_native_argument(decision_results_output_path_)
+    };
+
+    show_file_status("Julia analysis script:",
+                     regular_file_exists(script_path));
+    show_file_status("Experiment results JSON:",
+                     regular_file_exists(results_path));
+    show_file_status("Decision results JSON:",
+                     regular_file_exists(decision_path));
+
+    if (ImGui::Button(
+          "Use repository absolute paths##analysis_use_repository_paths")) {
+        if (const auto root = find_repository_root(); not root.empty()) {
+            copy_to_buffer(julia_analysis_script_,
+                           make_native_argument(
+                             (root / "tools" / "julia" /
+                              "analyze_experiment_results.jl")
+                               .string())
+                             .c_str());
+            copy_to_buffer(experiment_results_input_path_,
+                           make_native_argument(
+                             (root / "experiment_results.json").string())
+                             .c_str());
+            copy_to_buffer(decision_results_output_path_,
+                           make_native_argument(
+                             (root / "decision_results.json").string())
+                             .c_str());
+            analysis_message_ = "Repository absolute paths applied.";
+        } else {
+            analysis_message_ = "Repository root not found.";
+        }
+    }
+
+    if (ImGui::Button("Analyze Results with Julia##analysis_run_button"))
+        analyze_results_with_julia(app);
+
+    ImGui::Text("Last analysis exit code: %d", last_analysis_exit_code_);
+
+    if (not last_analysis_command_.empty())
+        ImGui::TextWrapped("Last analysis command: %s",
+                           last_analysis_command_.c_str());
+
+    if (not analysis_message_.empty())
+        ImGui::TextWrapped("%s", analysis_message_.c_str());
+}
+
+void experiment_plan_viewer::analyze_results_with_julia(application& app)
+{
+    analysis_message_.clear();
+    last_analysis_command_.clear();
+    last_analysis_exit_code_ = 0;
+
+    const auto cwd = current_working_directory_string();
+    const auto script_path =
+      std::filesystem::path{ make_native_argument(julia_analysis_script_) };
+    const auto results_path = std::filesystem::path{
+        make_native_argument(experiment_results_input_path_)
+    };
+    const auto decision_path = std::filesystem::path{
+        make_native_argument(decision_results_output_path_)
+    };
+
+    if (not regular_file_exists(results_path)) {
+        analysis_message_ =
+          "Experiment results JSON not found. Export results first.";
+        const auto path = results_path.string();
+        app.jn.push(log_level::error, [=](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            format(msg,
+                   "Julia analysis cancelled: experiment results JSON not "
+                   "found. cwd: {}, path: {}",
+                   cwd,
+                   path);
+        });
+        return;
+    }
+
+    if (not regular_file_exists(script_path)) {
+        analysis_message_ = "Julia analysis script not found.";
+        const auto path   = script_path.string();
+        app.jn.push(log_level::error, [=](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            format(msg,
+                   "Julia analysis cancelled: script not found. cwd: {}, "
+                   "path: {}",
+                   cwd,
+                   path);
+        });
+        return;
+    }
+
+    std::error_code remove_ec;
+    std::filesystem::remove(decision_path, remove_ec);
+
+    const auto raw_command = make_raw_julia_command(
+      julia_analysis_executable_,
+      { julia_analysis_script_,
+        experiment_results_input_path_,
+        decision_results_output_path_ });
+    const auto system_command = make_system_command(raw_command);
+    last_analysis_command_    = system_command;
+
+    app.jn.push(log_level::info, [=](auto& title, auto& msg) noexcept {
+        title = "Experiment Plan Viewer";
+        format(msg,
+               "Julia analysis started. cwd: {}, raw command: {}, command "
+               "passed to system: {}",
+               cwd,
+               raw_command,
+               system_command);
+    });
+
+    // Appel synchrone volontaire pour cette premiere analyse decisionnelle.
+    // Aucune simulation Irritator n'est lancee ici.
+    const auto exit_code = std::system(system_command.c_str());
+    last_analysis_exit_code_ = exit_code;
+
+    const auto decision_exists = regular_file_exists(decision_path);
+    const auto decision        = decision_path.string();
+
+    app.jn.push(exit_code == 0 and decision_exists ? log_level::info
+                                                   : log_level::error,
+                [=](auto& title, auto& msg) noexcept {
+                    title = "Experiment Plan Viewer";
+                    format(msg,
+                           "Julia analysis finished. cwd: {}, raw command: "
+                           "{}, command passed to system: {}, exit code: {}, "
+                           "decision results: {}",
+                           cwd,
+                           raw_command,
+                           system_command,
+                           exit_code,
+                           decision);
+                });
+
+    if (exit_code != 0) {
+        analysis_message_ = "Julia analysis failed.";
+        return;
+    }
+
+    if (not decision_exists) {
+        analysis_message_ =
+          "Julia analysis failed. Decision results JSON was not created.";
+        return;
+    }
+
+    analysis_message_ = "Decision results generated successfully.";
 }
 
 void experiment_plan_viewer::clear_run_results() noexcept
@@ -1107,6 +1435,8 @@ void experiment_plan_viewer::export_results_to_path(
     }
 
     export_results_message_ = "Experiment results JSON exported.";
+    copy_to_buffer(experiment_results_input_path_, path.string().c_str());
+
     app.jn.push(log_level::info, [=](auto& title, auto& msg) noexcept {
         title = "Experiment Plan Viewer";
         format(msg, "Experiment results JSON exported to {}", path.string());
