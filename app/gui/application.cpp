@@ -719,6 +719,8 @@ auto application::show_menu() noexcept -> show_result_t
                 experiment_request_ed.is_open = true;
             if (ImGui::MenuItem("Experiment Plan Viewer"))
                 experiment_plan_view.is_open = true;
+            if (ImGui::MenuItem("Decision Results Viewer"))
+                decision_results_view.is_open = true;
             ImGui::EndMenu();
         }
 
@@ -769,6 +771,8 @@ void application::show_dock() noexcept
         ImGui::DockBuilderDockWindow(experiment_request_editor::name,
                                      main_dock_id);
         ImGui::DockBuilderDockWindow(experiment_plan_viewer::name,
+                                     main_dock_id);
+        ImGui::DockBuilderDockWindow(decision_results_viewer::name,
                                      main_dock_id);
 
         ImGui::DockBuilderDockWindow(library_wnd.name, right_dock_id);
@@ -861,6 +865,9 @@ void application::show_dock() noexcept
 
     if (experiment_plan_view.is_open)
         experiment_plan_view.show(*this);
+
+    if (decision_results_view.is_open)
+        decision_results_view.show(*this);
 }
 
 auto application::show() noexcept -> show_result_t

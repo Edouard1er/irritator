@@ -10,6 +10,8 @@ set(gui_sources application.cpp application.hpp component-editor.cpp
     plot-observation-widget.cpp project-external-source-editor.cpp
     project-settings-editor.cpp settings-window.cpp simulation-component.cpp
     project-editor.cpp task-window.cpp window-logger.cpp
+    experiment/decision-viewer.cpp
+    experiment/decision-viewer.hpp
     experiment/plan-viewer.cpp
     experiment/plan-viewer.hpp
     experiment/request-editor.cpp

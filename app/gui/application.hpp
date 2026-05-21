@@ -17,6 +17,7 @@
 #include <filesystem>
 
 #include "dialog.hpp"
+#include "experiment/decision-viewer.hpp"
 #include "experiment/plan-viewer.hpp"
 #include "experiment/request-editor.hpp"
 
@@ -1797,6 +1798,7 @@ public:
     task_window     task_wnd;
     experiment_request_editor experiment_request_ed;
     experiment_plan_viewer    experiment_plan_view;
+    decision_results_viewer    decision_results_view;
 
     simulation_to_cpp sim_to_cpp;
 

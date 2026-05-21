@@ -1,0 +1,653 @@
+{
+  "analysis": {
+    "best_cumulative_catch": {
+      "experiment_id": "e_051",
+      "value": 5583.364096972421
+    },
+    "best_final_B": {
+      "experiment_id": "e_033",
+      "value": 952.0292340567573
+    },
+    "experiment_count": 90,
+    "global_statistics": {
+      "max_final_B": 952.0292340567573,
+      "mean_cumulative_catch": 3822.4694607239185,
+      "mean_final_B": 755.3806869083087,
+      "min_final_B": 557.4244729951257
+    }
+  },
+  "plan_id": "plan_req_001",
+  "ranking": [
+    {
+      "cumulative_catch": 4108.08737651897,
+      "experiment_id": "e_008",
+      "final_B": 754.7794060513937,
+      "rank": 1,
+      "score": 0.588941259909057
+    },
+    {
+      "cumulative_catch": 4070.2195085367216,
+      "experiment_id": "e_022",
+      "final_B": 758.0355726757386,
+      "rank": 2,
+      "score": 0.588931302425798
+    },
+    {
+      "cumulative_catch": 4043.7284839764393,
+      "experiment_id": "e_015",
+      "final_B": 760.2910587272,
+      "rank": 3,
+      "score": 0.5888959369026785
+    },
+    {
+      "cumulative_catch": 4176.109166070131,
+      "experiment_id": "e_066",
+      "final_B": 748.8317372430553,
+      "rank": 4,
+      "score": 0.5888341616545464
+    },
+    {
+      "cumulative_catch": 4235.354713904565,
+      "experiment_id": "e_003",
+      "final_B": 743.5426245586268,
+      "rank": 5,
+      "score": 0.5886029987238914
+    },
+    {
+      "cumulative_catch": 3951.9979631098518,
+      "experiment_id": "e_043",
+      "final_B": 767.965016985278,
+      "rank": 6,
+      "score": 0.5886010033526929
+    },
+    {
+      "cumulative_catch": 3900.9800560210733,
+      "experiment_id": "e_027",
+      "final_B": 772.1459965819676,
+      "rank": 7,
+      "score": 0.5883266596318932
+    },
+    {
+      "cumulative_catch": 4292.812473543241,
+      "experiment_id": "e_017",
+      "final_B": 738.3102888978593,
+      "rank": 8,
+      "score": 0.5882485205272552
+    },
+    {
+      "cumulative_catch": 3873.121322250111,
+      "experiment_id": "e_028",
+      "final_B": 774.4040203866239,
+      "rank": 9,
+      "score": 0.5881451325461933
+    },
+    {
+      "cumulative_catch": 4311.701326444096,
+      "experiment_id": "e_012",
+      "final_B": 736.5670403038555,
+      "rank": 10,
+      "score": 0.5881026507956083
+    },
+    {
+      "cumulative_catch": 3816.4707437296192,
+      "experiment_id": "e_074",
+      "final_B": 778.9431332773373,
+      "rank": 11,
+      "score": 0.5877093925754497
+    },
+    {
+      "cumulative_catch": 4360.609166415454,
+      "experiment_id": "e_068",
+      "final_B": 731.9977201793128,
+      "rank": 12,
+      "score": 0.5876544766225164
+    },
+    {
+      "cumulative_catch": 3745.0884057532144,
+      "experiment_id": "e_009",
+      "final_B": 784.566323860637,
+      "rank": 13,
+      "score": 0.5870383184187871
+    },
+    {
+      "cumulative_catch": 4418.86838379412,
+      "experiment_id": "e_038",
+      "final_B": 726.4450757329723,
+      "rank": 14,
+      "score": 0.5869816709881612
+    },
+    {
+      "cumulative_catch": 3707.422033198605,
+      "experiment_id": "e_045",
+      "final_B": 787.492051954826,
+      "rank": 15,
+      "score": 0.5866316720966354
+    },
+    {
+      "cumulative_catch": 4463.563719857742,
+      "experiment_id": "e_089",
+      "final_B": 722.0996595494822,
+      "rank": 16,
+      "score": 0.5863571262747267
+    },
+    {
+      "cumulative_catch": 3642.205071893872,
+      "experiment_id": "e_040",
+      "final_B": 792.4929296411941,
+      "rank": 17,
+      "score": 0.5858454351667888
+    },
+    {
+      "cumulative_catch": 4524.376435357507,
+      "experiment_id": "e_050",
+      "final_B": 716.0601427235547,
+      "rank": 18,
+      "score": 0.5853462946628989
+    },
+    {
+      "cumulative_catch": 3560.366037490512,
+      "experiment_id": "e_069",
+      "final_B": 798.657197197491,
+      "rank": 19,
+      "score": 0.5847179053434688
+    },
+    {
+      "cumulative_catch": 4562.843283500052,
+      "experiment_id": "e_005",
+      "final_B": 712.1596661949694,
+      "rank": 20,
+      "score": 0.5846052719248818
+    },
+    {
+      "cumulative_catch": 4577.854350894588,
+      "experiment_id": "e_058",
+      "final_B": 710.6198874405376,
+      "rank": 21,
+      "score": 0.5842936967408848
+    },
+    {
+      "cumulative_catch": 3523.0143810874906,
+      "experiment_id": "e_046",
+      "final_B": 801.4312177282262,
+      "rank": 22,
+      "score": 0.5841534041479665
+    },
+    {
+      "cumulative_catch": 3441.7075877550815,
+      "experiment_id": "e_018",
+      "final_B": 807.3881939740368,
+      "rank": 23,
+      "score": 0.5828213472293247
+    },
+    {
+      "cumulative_catch": 4649.675984235009,
+      "experiment_id": "e_002",
+      "final_B": 703.107610696928,
+      "rank": 24,
+      "score": 0.5826191060331299
+    },
+    {
+      "cumulative_catch": 4671.52973013914,
+      "experiment_id": "e_013",
+      "final_B": 700.7717788735764,
+      "rank": 25,
+      "score": 0.5820461964191113
+    },
+    {
+      "cumulative_catch": 3395.467350274354,
+      "experiment_id": "e_021",
+      "final_B": 810.7279884863807,
+      "rank": 26,
+      "score": 0.5820029486030569
+    },
+    {
+      "cumulative_catch": 4705.726440360438,
+      "experiment_id": "e_059",
+      "final_B": 697.0669959881687,
+      "rank": 27,
+      "score": 0.5810867635210304
+    },
+    {
+      "cumulative_catch": 3341.7575468270084,
+      "experiment_id": "e_055",
+      "final_B": 814.5652785939619,
+      "rank": 28,
+      "score": 0.5809991182451262
+    },
+    {
+      "cumulative_catch": 3274.6983131110273,
+      "experiment_id": "e_080",
+      "final_B": 819.2951474518557,
+      "rank": 29,
+      "score": 0.5796682810597823
+    },
+    {
+      "cumulative_catch": 4778.114309778923,
+      "experiment_id": "e_079",
+      "final_B": 689.0117336909489,
+      "rank": 30,
+      "score": 0.5787860035173573
+    },
+    {
+      "cumulative_catch": 3207.961043635133,
+      "experiment_id": "e_034",
+      "final_B": 823.9374333946481,
+      "rank": 31,
+      "score": 0.5782616323575673
+    },
+    {
+      "cumulative_catch": 4796.2676664716455,
+      "experiment_id": "e_073",
+      "final_B": 686.9433363854358,
+      "rank": 32,
+      "score": 0.5781478121911421
+    },
+    {
+      "cumulative_catch": 4823.469460610551,
+      "experiment_id": "e_088",
+      "final_B": 683.805401471898,
+      "rank": 33,
+      "score": 0.5771426631553089
+    },
+    {
+      "cumulative_catch": 3123.8089867118324,
+      "experiment_id": "e_087",
+      "final_B": 829.7028127549673,
+      "rank": 34,
+      "score": 0.5763760536042744
+    },
+    {
+      "cumulative_catch": 4863.386884044089,
+      "experiment_id": "e_064",
+      "final_B": 679.1128807163877,
+      "rank": 35,
+      "score": 0.5755564761017231
+    },
+    {
+      "cumulative_catch": 3071.2404403250925,
+      "experiment_id": "e_063",
+      "final_B": 833.2563435790275,
+      "rank": 36,
+      "score": 0.5751373192102569
+    },
+    {
+      "cumulative_catch": 4896.83309069616,
+      "experiment_id": "e_031",
+      "final_B": 675.0960271243163,
+      "rank": 37,
+      "score": 0.5741196535673532
+    },
+    {
+      "cumulative_catch": 3010.7494274637093,
+      "experiment_id": "e_042",
+      "final_B": 837.3014211196634,
+      "rank": 38,
+      "score": 0.5736561508716922
+    },
+    {
+      "cumulative_catch": 4935.64074497603,
+      "experiment_id": "e_029",
+      "final_B": 670.3314341653294,
+      "rank": 39,
+      "score": 0.5723209388179779
+    },
+    {
+      "cumulative_catch": 2923.390441395969,
+      "experiment_id": "e_023",
+      "final_B": 843.0631305192761,
+      "rank": 40,
+      "score": 0.5714156706970668
+    },
+    {
+      "cumulative_catch": 2849.5315067763686,
+      "experiment_id": "e_083",
+      "final_B": 847.8635675055216,
+      "rank": 41,
+      "score": 0.5694316066487983
+    },
+    {
+      "cumulative_catch": 4998.6670901895395,
+      "experiment_id": "e_019",
+      "final_B": 662.334813417865,
+      "rank": 42,
+      "score": 0.5690720451853482
+    },
+    {
+      "cumulative_catch": 2810.145507610031,
+      "experiment_id": "e_076",
+      "final_B": 850.3978266253444,
+      "rank": 43,
+      "score": 0.5683411211564555
+    },
+    {
+      "cumulative_catch": 5029.066241377779,
+      "experiment_id": "e_001",
+      "final_B": 658.353099977518,
+      "rank": 44,
+      "score": 0.567346958087089
+    },
+    {
+      "cumulative_catch": 2742.930910624275,
+      "experiment_id": "e_049",
+      "final_B": 854.6828041775067,
+      "rank": 45,
+      "score": 0.5664295980474118
+    },
+    {
+      "cumulative_catch": 5045.6562918116115,
+      "experiment_id": "e_048",
+      "final_B": 656.1432102111617,
+      "rank": 46,
+      "score": 0.5663587433349635
+    },
+    {
+      "cumulative_catch": 5071.513874502057,
+      "experiment_id": "e_026",
+      "final_B": 652.6440725123355,
+      "rank": 47,
+      "score": 0.5647491068597446
+    },
+    {
+      "cumulative_catch": 2651.707779141155,
+      "experiment_id": "e_010",
+      "final_B": 860.420527084839,
+      "rank": 48,
+      "score": 0.5637366943610015
+    },
+    {
+      "cumulative_catch": 5113.362062116621,
+      "experiment_id": "e_035",
+      "final_B": 646.8303913342088,
+      "rank": 49,
+      "score": 0.5619531802391229
+    },
+    {
+      "cumulative_catch": 2581.998196009126,
+      "experiment_id": "e_077",
+      "final_B": 864.7469392906884,
+      "rank": 50,
+      "score": 0.5616051777589794
+    },
+    {
+      "cumulative_catch": 2546.1609692665215,
+      "experiment_id": "e_053",
+      "final_B": 866.9521271724994,
+      "rank": 51,
+      "score": 0.5604853155335837
+    },
+    {
+      "cumulative_catch": 5137.878764402237,
+      "experiment_id": "e_082",
+      "final_B": 643.3314760600617,
+      "rank": 52,
+      "score": 0.5601973786324868
+    },
+    {
+      "cumulative_catch": 5168.038234767564,
+      "experiment_id": "e_006",
+      "final_B": 638.9252546685393,
+      "rank": 53,
+      "score": 0.5579082242563451
+    },
+    {
+      "cumulative_catch": 2462.7647620337,
+      "experiment_id": "e_036",
+      "final_B": 872.0353310117279,
+      "rank": 54,
+      "score": 0.5578179102130616
+    },
+    {
+      "cumulative_catch": 5194.92176696513,
+      "experiment_id": "e_081",
+      "final_B": 634.8958466775454,
+      "rank": 55,
+      "score": 0.5557387384053345
+    },
+    {
+      "cumulative_catch": 2344.2991720673253,
+      "experiment_id": "e_070",
+      "final_B": 879.1437774421461,
+      "rank": 56,
+      "score": 0.5538864973087803
+    },
+    {
+      "cumulative_catch": 2311.296008636367,
+      "experiment_id": "e_075",
+      "final_B": 881.101453469676,
+      "rank": 57,
+      "score": 0.5527625430819468
+    },
+    {
+      "cumulative_catch": 5244.571261358036,
+      "experiment_id": "e_086",
+      "final_B": 627.1758817665095,
+      "rank": 58,
+      "score": 0.551379412993956
+    },
+    {
+      "cumulative_catch": 2233.173798855107,
+      "experiment_id": "e_011",
+      "final_B": 885.6974668921971,
+      "rank": 59,
+      "score": 0.5500538336352361
+    },
+    {
+      "cumulative_catch": 5269.789719260981,
+      "experiment_id": "e_041",
+      "final_B": 623.1019493063324,
+      "rank": 60,
+      "score": 0.5489716561501145
+    },
+    {
+      "cumulative_catch": 2166.842106706442,
+      "experiment_id": "e_067",
+      "final_B": 889.5589263604719,
+      "rank": 61,
+      "score": 0.5477021029617533
+    },
+    {
+      "cumulative_catch": 5283.7198820071235,
+      "experiment_id": "e_020",
+      "final_B": 620.8032724322912,
+      "rank": 62,
+      "score": 0.5475804350746509
+    },
+    {
+      "cumulative_catch": 2099.6898186005897,
+      "experiment_id": "e_037",
+      "final_B": 893.4310279831438,
+      "rank": 63,
+      "score": 0.545274233816436
+    },
+    {
+      "cumulative_catch": 5315.749214675075,
+      "experiment_id": "e_007",
+      "final_B": 615.3768760002764,
+      "rank": 64,
+      "score": 0.5442028472423874
+    },
+    {
+      "cumulative_catch": 5347.665357360461,
+      "experiment_id": "e_025",
+      "final_B": 609.75528535908,
+      "rank": 65,
+      "score": 0.5405655683815828
+    },
+    {
+      "cumulative_catch": 1950.7578642821227,
+      "experiment_id": "e_062",
+      "final_B": 901.8904893234945,
+      "rank": 66,
+      "score": 0.5397272336992577
+    },
+    {
+      "cumulative_catch": 5366.904150363241,
+      "experiment_id": "e_004",
+      "final_B": 606.2520800548043,
+      "rank": 67,
+      "score": 0.538227893387701
+    },
+    {
+      "cumulative_catch": 1904.679030794803,
+      "experiment_id": "e_039",
+      "final_B": 904.4732705458583,
+      "rank": 68,
+      "score": 0.5379672586808191
+    },
+    {
+      "cumulative_catch": 5381.47534842559,
+      "experiment_id": "e_072",
+      "final_B": 603.5362974352043,
+      "rank": 69,
+      "score": 0.536378173493089
+    },
+    {
+      "cumulative_catch": 1802.940825999273,
+      "experiment_id": "e_032",
+      "final_B": 910.120272987583,
+      "rank": 70,
+      "score": 0.5340109789561651
+    },
+    {
+      "cumulative_catch": 5413.39701843538,
+      "experiment_id": "e_056",
+      "final_B": 597.3800890992234,
+      "rank": 71,
+      "score": 0.5320640892321225
+    },
+    {
+      "cumulative_catch": 1744.414110942551,
+      "experiment_id": "e_090",
+      "final_B": 913.3350718131321,
+      "rank": 72,
+      "score": 0.5316923069825672
+    },
+    {
+      "cumulative_catch": 5429.068365951998,
+      "experiment_id": "e_057",
+      "final_B": 594.2438568490413,
+      "rank": 73,
+      "score": 0.5298017765915071
+    },
+    {
+      "cumulative_catch": 1656.040637795228,
+      "experiment_id": "e_085",
+      "final_B": 918.1440732806573,
+      "rank": 74,
+      "score": 0.5281338602457937
+    },
+    {
+      "cumulative_catch": 5458.400019746021,
+      "experiment_id": "e_052",
+      "final_B": 588.145705154722,
+      "rank": 75,
+      "score": 0.5252783815018571
+    },
+    {
+      "cumulative_catch": 1585.4333896708981,
+      "experiment_id": "e_060",
+      "final_B": 921.9482212158732,
+      "rank": 76,
+      "score": 0.5252425471773152
+    },
+    {
+      "cumulative_catch": 5479.833498816001,
+      "experiment_id": "e_061",
+      "final_B": 583.4784348397964,
+      "rank": 77,
+      "score": 0.5217054277011932
+    },
+    {
+      "cumulative_catch": 1476.7736189477137,
+      "experiment_id": "e_047",
+      "final_B": 927.7386064839028,
+      "rank": 78,
+      "score": 0.52071199367719
+    },
+    {
+      "cumulative_catch": 1454.914305087957,
+      "experiment_id": "e_024",
+      "final_B": 928.8943292181582,
+      "rank": 79,
+      "score": 0.5197889899924372
+    },
+    {
+      "cumulative_catch": 5504.317767622053,
+      "experiment_id": "e_071",
+      "final_B": 577.8953415778523,
+      "rank": 80,
+      "score": 0.5173052413820882
+    },
+    {
+      "cumulative_catch": 5522.288606325063,
+      "experiment_id": "e_084",
+      "final_B": 573.6027109966246,
+      "rank": 81,
+      "score": 0.5138288108156001
+    },
+    {
+      "cumulative_catch": 1303.374703386338,
+      "experiment_id": "e_078",
+      "final_B": 936.8249278205524,
+      "rank": 82,
+      "score": 0.5132870733695145
+    },
+    {
+      "cumulative_catch": 1280.1135690374945,
+      "experiment_id": "e_054",
+      "final_B": 938.0299452745566,
+      "rank": 83,
+      "score": 0.5122734279047285
+    },
+    {
+      "cumulative_catch": 5539.966742061757,
+      "experiment_id": "e_044",
+      "final_B": 569.1957624669534,
+      "rank": 84,
+      "score": 0.5101755609003477
+    },
+    {
+      "cumulative_catch": 5547.575012704338,
+      "experiment_id": "e_016",
+      "final_B": 567.2366380392073,
+      "rank": 85,
+      "score": 0.5085241253279119
+    },
+    {
+      "cumulative_catch": 1164.140224920385,
+      "experiment_id": "e_065",
+      "final_B": 943.990485209072,
+      "rank": 86,
+      "score": 0.5071597090895247
+    },
+    {
+      "cumulative_catch": 5561.829178031318,
+      "experiment_id": "e_030",
+      "final_B": 563.4539524836197,
+      "rank": 87,
+      "score": 0.5052879173362775
+    },
+    {
+      "cumulative_catch": 1105.566122432737,
+      "experiment_id": "e_014",
+      "final_B": 946.9716309075851,
+      "rank": 88,
+      "score": 0.5045398019111536
+    },
+    {
+      "cumulative_catch": 1005.3231071196255,
+      "experiment_id": "e_033",
+      "final_B": 952.0292340567573,
+      "rank": 89,
+      "score": 0.5
+    },
+    {
+      "cumulative_catch": 5583.364096972421,
+      "experiment_id": "e_051",
+      "final_B": 557.4244729951257,
+      "rank": 90,
+      "score": 0.5
+    }
+  ],
+  "request_id": "req_001"
+}
