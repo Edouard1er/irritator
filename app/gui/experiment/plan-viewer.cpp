@@ -9,18 +9,22 @@
 #include "imgui.h"
 
 #include <irritator/format.hpp>
+#include <irritator/experiment-runner.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <numeric>
 #include <limits>
 #include <map>
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace irt {
@@ -78,6 +82,26 @@ bool regular_file_exists(const std::filesystem::path& path) noexcept
     } catch (...) {
         return false;
     }
+}
+
+const char* experiment_runner_error_message(const error_code error) noexcept
+{
+    switch (static_cast<experiment_runner_errc>(error.value())) {
+    case experiment_runner_errc::invalid_simulation:
+        return "Experiment plan run failed: invalid simulation settings.";
+    case experiment_runner_errc::missing_parameter:
+        return "Experiment plan run failed: missing parameter r, K, q or n.";
+    case experiment_runner_errc::missing_initial_state:
+        return "Experiment plan run failed: missing initial state B.";
+    case experiment_runner_errc::invalid_value:
+        return "Experiment plan run failed: invalid numeric value.";
+    case experiment_runner_errc::numerical_error:
+        return "Experiment plan run failed: numerical error.";
+    case experiment_runner_errc::file_error:
+        return "Experiment plan run failed: file error.";
+    }
+
+    return "Experiment plan run failed.";
 }
 
 struct parameter_stat {
@@ -497,6 +521,267 @@ void show_parameter_statistics(const experiment_plan& plan,
     }
 }
 
+struct run_summary_statistics {
+    int    best_cumulative_catch_index = -1;
+    int    best_final_biomass_index    = -1;
+    double best_cumulative_catch       = 0.0;
+    double best_final_biomass          = 0.0;
+    double mean_cumulative_catch       = 0.0;
+    double mean_final_biomass          = 0.0;
+};
+
+run_summary_statistics compute_run_summary(
+  const experiment_run_results& results) noexcept
+{
+    run_summary_statistics stats;
+
+    if (results.results.empty())
+        return stats;
+
+    auto sum_catch = 0.0;
+    auto sum_final = 0.0;
+
+    stats.best_cumulative_catch_index = 0;
+    stats.best_final_biomass_index    = 0;
+    stats.best_cumulative_catch =
+      results.results.front().summary.cumulative_catch;
+    stats.best_final_biomass = results.results.front().summary.final_B;
+
+    for (std::size_t i = 0; i < results.results.size(); ++i) {
+        const auto& summary = results.results[i].summary;
+
+        sum_catch += summary.cumulative_catch;
+        sum_final += summary.final_B;
+
+        if (summary.cumulative_catch > stats.best_cumulative_catch) {
+            stats.best_cumulative_catch = summary.cumulative_catch;
+            stats.best_cumulative_catch_index = static_cast<int>(i);
+        }
+
+        if (summary.final_B > stats.best_final_biomass) {
+            stats.best_final_biomass = summary.final_B;
+            stats.best_final_biomass_index = static_cast<int>(i);
+        }
+    }
+
+    const auto count = static_cast<double>(results.results.size());
+    stats.mean_cumulative_catch = sum_catch / count;
+    stats.mean_final_biomass    = sum_final / count;
+
+    return stats;
+}
+
+std::vector<int> make_result_indices(
+  const experiment_run_results& results,
+  const bool                    sort_by_cumulative_catch_desc,
+  const bool                    sort_by_final_biomass_desc)
+{
+    std::vector<int> indices(results.results.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    if (sort_by_cumulative_catch_desc) {
+        std::sort(indices.begin(), indices.end(), [&](const int lhs, const int rhs) {
+            return results.results[static_cast<std::size_t>(lhs)]
+                     .summary.cumulative_catch >
+                   results.results[static_cast<std::size_t>(rhs)]
+                     .summary.cumulative_catch;
+        });
+    } else if (sort_by_final_biomass_desc) {
+        std::sort(indices.begin(), indices.end(), [&](const int lhs, const int rhs) {
+            return results.results[static_cast<std::size_t>(lhs)]
+                     .summary.final_B >
+                   results.results[static_cast<std::size_t>(rhs)]
+                     .summary.final_B;
+        });
+    }
+
+    return indices;
+}
+
+void show_run_summary(const experiment_run_results& results,
+                      const double                  duration_ms)
+{
+    if (not ImGui::CollapsingHeader("Run Summary##run_summary_section",
+                                    ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    const auto stats = compute_run_summary(results);
+
+    ImGui::Text("experiments executed: %zu", results.results.size());
+    ImGui::Text("approximate execution time: %.3f ms", duration_ms);
+    ImGui::Text("best cumulative_catch: %.17g", stats.best_cumulative_catch);
+    ImGui::Text("best final_B: %.17g", stats.best_final_biomass);
+    ImGui::Text("mean cumulative_catch: %.17g", stats.mean_cumulative_catch);
+    ImGui::Text("mean final_B: %.17g", stats.mean_final_biomass);
+}
+
+void show_results_overview(const experiment_run_results& results,
+                           int&                          selected_result_index,
+                           bool& sort_by_cumulative_catch_desc,
+                           bool& sort_by_final_biomass_desc)
+{
+    if (not ImGui::CollapsingHeader("Results Overview##results_overview_section",
+                                    ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    if (ImGui::Checkbox("sort by cumulative_catch desc##sort_catch_desc",
+                        &sort_by_cumulative_catch_desc)) {
+        if (sort_by_cumulative_catch_desc)
+            sort_by_final_biomass_desc = false;
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::Checkbox("sort by final_B desc##sort_final_b_desc",
+                        &sort_by_final_biomass_desc)) {
+        if (sort_by_final_biomass_desc)
+            sort_by_cumulative_catch_desc = false;
+    }
+
+    const auto indices = make_result_indices(results,
+                                             sort_by_cumulative_catch_desc,
+                                             sort_by_final_biomass_desc);
+
+    if (ImGui::BeginTable("experiment-run-results-overview",
+                          7,
+                          scroll_table_flags,
+                          ImVec2{ 0.0f, 280.0f })) {
+        ImGui::TableSetupColumn("index", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("experiment_id");
+        ImGui::TableSetupColumn("final_B");
+        ImGui::TableSetupColumn("min_B");
+        ImGui::TableSetupColumn("max_B");
+        ImGui::TableSetupColumn("mean_B");
+        ImGui::TableSetupColumn("cumulative_catch");
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(indices.size()));
+
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd;
+                 ++row) {
+                const auto result_index = indices[static_cast<std::size_t>(row)];
+                if (result_index < 0 or
+                    result_index >= static_cast<int>(results.results.size()))
+                    continue;
+
+                const auto& result =
+                  results.results[static_cast<std::size_t>(result_index)];
+                const auto& summary = result.summary;
+                const auto  selected = selected_result_index == result_index;
+
+                ImGui::PushID(result_index);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+
+                if (ImGui::Selectable(std::to_string(result_index).c_str(),
+                                      selected,
+                                      ImGuiSelectableFlags_SpanAllColumns))
+                    selected_result_index = result_index;
+
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(result.experiment_id.c_str());
+                ImGui::TableNextColumn();
+                ImGui::Text("%.17g", summary.final_B);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.17g", summary.min_B);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.17g", summary.max_B);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.17g", summary.mean_B);
+                ImGui::TableNextColumn();
+                ImGui::Text("%.17g", summary.cumulative_catch);
+                ImGui::PopID();
+            }
+        }
+
+        ImGui::EndTable();
+    }
+}
+
+void show_result_details(const experiment_run_results& results,
+                         const int selected_result_index)
+{
+    if (not ImGui::CollapsingHeader("Result Details##result_details_section",
+                                    ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    if (selected_result_index < 0 or
+        selected_result_index >= static_cast<int>(results.results.size())) {
+        ImGui::TextUnformatted("No result selected.");
+        return;
+    }
+
+    const auto& result =
+      results.results[static_cast<std::size_t>(selected_result_index)];
+    const auto& summary = result.summary;
+
+    ImGui::Text("experiment_id: %s", result.experiment_id.c_str());
+
+    if (ImGui::TreeNode("Summary##result_summary_tree")) {
+        ImGui::Text("final_B: %.17g", summary.final_B);
+        ImGui::Text("min_B: %.17g", summary.min_B);
+        ImGui::Text("max_B: %.17g", summary.max_B);
+        ImGui::Text("mean_B: %.17g", summary.mean_B);
+        ImGui::Text("cumulative_catch: %.17g", summary.cumulative_catch);
+        ImGui::TreePop();
+    }
+
+    if (ImGui::TreeNode("Trajectory Information##trajectory_information_tree")) {
+        const auto point_count = result.biomass_trajectory.time.size();
+
+        ImGui::Text("points: %zu", point_count);
+
+        if (point_count > 0 and
+            point_count == result.biomass_trajectory.values.size()) {
+            ImGui::Text("time initial: %.17g",
+                        result.biomass_trajectory.time.front());
+            ImGui::Text("time final: %.17g",
+                        result.biomass_trajectory.time.back());
+            ImGui::Text("biomass initial: %.17g",
+                        result.biomass_trajectory.values.front());
+            ImGui::Text("biomass final: %.17g",
+                        result.biomass_trajectory.values.back());
+        }
+
+        ImGui::TreePop();
+    }
+}
+
+void show_best_experiments(const experiment_run_results& results)
+{
+    if (not ImGui::CollapsingHeader("Best Experiments##best_experiments_section",
+                                    ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    if (results.results.empty()) {
+        ImGui::TextUnformatted("<empty>");
+        return;
+    }
+
+    const auto stats = compute_run_summary(results);
+
+    if (stats.best_cumulative_catch_index >= 0) {
+        const auto& result =
+          results.results[static_cast<std::size_t>(
+            stats.best_cumulative_catch_index)];
+        ImGui::Text("best cumulative_catch: %s (%.17g)",
+                    result.experiment_id.c_str(),
+                    result.summary.cumulative_catch);
+    }
+
+    if (stats.best_final_biomass_index >= 0) {
+        const auto& result =
+          results.results[static_cast<std::size_t>(
+            stats.best_final_biomass_index)];
+        ImGui::Text("best final_B: %s (%.17g)",
+                    result.experiment_id.c_str(),
+                    result.summary.final_B);
+    }
+}
+
 void show_validation_section(const std::optional<experiment_plan>& loaded_plan,
                              bool&                                plan_is_valid,
                              std::string& validation_message)
@@ -531,15 +816,16 @@ void show_validation_section(const std::optional<experiment_plan>& loaded_plan,
     ImGui::TextWrapped("%s", validation_message.c_str());
 }
 
-void show_future_simulation()
+void show_future_nested_simulation()
 {
-    if (not ImGui::CollapsingHeader("Future Simulation",
+    if (not ImGui::CollapsingHeader(
+          "Future Nested Simulation##future_nested_simulation_section",
                                     ImGuiTreeNodeFlags_DefaultOpen))
         return;
 
     ImGui::TextWrapped(
-      "This experiment plan is loaded and ready for future Irritator-side "
-      "nested simulation execution.");
+      "This experimental execution pipeline is a prototype preparation for "
+      "future nested Irritator simulations (A**).");
 }
 
 } // namespace
@@ -555,16 +841,18 @@ void experiment_plan_viewer::show(application& app)
         return;
     }
 
-    if (ImGui::CollapsingHeader("Load", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Load##plan_load_section",
+                                ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SetNextItemWidth(-160.0f);
-        ImGui::InputText("plan JSON", plan_path_, sizeof(plan_path_));
+        ImGui::InputText(
+          "plan JSON##plan_json_input", plan_path_, sizeof(plan_path_));
 
-        if (ImGui::Button("Load experiment_plan.json"))
+        if (ImGui::Button("Load experiment_plan.json##load_plan_button"))
             load_from_path(app, std::filesystem::path{ plan_path_ });
 
         ImGui::SameLine();
 
-        if (ImGui::Button("Browse...")) {
+        if (ImGui::Button("Browse...##browse_plan_button")) {
             app.f_dialog.clear();
             load_dialog_requested_ = true;
         }
@@ -581,6 +869,31 @@ void experiment_plan_viewer::show(application& app)
     show_validation_section(loaded_plan_,
                             plan_is_valid_,
                             validation_message_);
+
+    if (ImGui::CollapsingHeader("Run Experiment Plan##run_section",
+                                ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (loaded_plan_) {
+            const auto& plan = *loaded_plan_;
+
+            ImGui::Text("experiments to run: %zu", plan.experiments.size());
+            ImGui::Text("model: %s", plan.model_name.c_str());
+            ImGui::Text("horizon: %.17g", plan.simulation.horizon);
+            ImGui::Text("dt: %.17g", plan.simulation.dt);
+        } else {
+            ImGui::TextUnformatted("No experiment plan loaded.");
+        }
+
+        if (ImGui::Button("Run Experiment Plan##run_button"))
+            run_loaded_plan(app);
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Clear Results##clear_results_button"))
+            clear_run_results();
+
+        if (not run_message_.empty())
+            ImGui::TextWrapped("%s", run_message_.c_str());
+    }
 
     if (loaded_plan_) {
         auto& plan = *loaded_plan_;
@@ -615,7 +928,38 @@ void experiment_plan_viewer::show(application& app)
         show_experiment_details(plan, selected_experiment_index_);
         show_statistics(plan, statistics);
         show_parameter_statistics(plan, statistics);
-        show_future_simulation();
+
+        if (run_results_) {
+            if (selected_result_index_ >=
+                static_cast<int>(run_results_->results.size()))
+                selected_result_index_ = -1;
+
+            show_run_summary(*run_results_, last_run_duration_ms_);
+            show_results_overview(*run_results_,
+                                  selected_result_index_,
+                                  sort_by_cumulative_catch_desc_,
+                                  sort_by_final_biomass_desc_);
+            show_result_details(*run_results_, selected_result_index_);
+            show_best_experiments(*run_results_);
+
+            if (ImGui::CollapsingHeader("Export Results##export_results_section",
+                                        ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::SetNextItemWidth(-170.0f);
+                ImGui::InputText("results JSON##results_json_input",
+                                 results_output_path_,
+                                 sizeof(results_output_path_));
+
+                if (ImGui::Button("Export Results JSON##export_results_button"))
+                    export_results_to_path(
+                      app, std::filesystem::path{ results_output_path_ });
+
+                if (not export_results_message_.empty())
+                    ImGui::TextWrapped("%s",
+                                       export_results_message_.c_str());
+            }
+        }
+
+        show_future_nested_simulation();
     } else {
         ImGui::TextUnformatted("No experiment plan loaded.");
     }
@@ -625,10 +969,160 @@ void experiment_plan_viewer::show(application& app)
     show_load_dialog(app);
 }
 
+void experiment_plan_viewer::clear_run_results() noexcept
+{
+    run_results_.reset();
+    run_completed_ = false;
+    selected_result_index_ = -1;
+    last_run_duration_ms_ = 0.0;
+    export_results_message_.clear();
+    run_message_ = "Experiment run results cleared.";
+}
+
+void experiment_plan_viewer::run_loaded_plan(application& app)
+{
+    run_results_.reset();
+    run_completed_ = false;
+    selected_result_index_ = -1;
+    last_run_duration_ms_ = 0.0;
+    export_results_message_.clear();
+
+    if (not loaded_plan_) {
+        run_message_ = "No experiment plan loaded.";
+        app.jn.push(log_level::warning, [](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            msg   = "Run cancelled: no experiment plan loaded";
+        });
+        return;
+    }
+
+    plan_is_valid_      = is_valid(*loaded_plan_);
+    validation_message_ = validation_report(*loaded_plan_);
+
+    if (not plan_is_valid_) {
+        run_message_ = "Loaded experiment plan is invalid.";
+        app.jn.push(log_level::error, [](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            msg   = "Run cancelled: loaded experiment plan is invalid";
+        });
+        return;
+    }
+
+    const auto experiment_count = loaded_plan_->experiments.size();
+
+    app.jn.push(log_level::info, [=](auto& title, auto& msg) noexcept {
+        title = "Experiment Plan Viewer";
+        format(msg,
+               "Starting experimental Schaefer run for {} experiments",
+               experiment_count);
+    });
+
+    const auto start = std::chrono::steady_clock::now();
+
+    // Prototype volontairement synchrone et hors moteur DEVS.
+    auto result = run_experiment_plan(*loaded_plan_);
+
+    const auto finish = std::chrono::steady_clock::now();
+    last_run_duration_ms_ =
+      std::chrono::duration<double, std::milli>(finish - start).count();
+
+    if (result.has_error()) {
+        const auto error = result.error();
+        run_message_ = experiment_runner_error_message(error);
+        app.jn.push(log_level::error, [=](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            format(msg,
+                   "Experiment plan run failed (category {}, code {})",
+                   static_cast<int>(error.cat()),
+                   error.value());
+        });
+        return;
+    }
+
+    run_results_   = std::move(result).value();
+    run_completed_ = true;
+
+    if (not run_results_->results.empty())
+        selected_result_index_ = 0;
+
+    const auto result_count = run_results_->results.size();
+    run_message_ = "Experiment plan run completed.";
+
+    app.jn.push(log_level::info, [=](auto& title, auto& msg) noexcept {
+        title = "Experiment Plan Viewer";
+        format(msg,
+               "Experimental Schaefer run completed: {} results in {:.3f} ms",
+               result_count,
+               last_run_duration_ms_);
+    });
+}
+
+void experiment_plan_viewer::export_results_to_path(
+  application&                 app,
+  const std::filesystem::path& path)
+{
+    if (not run_results_) {
+        export_results_message_ = "No experiment run results to export.";
+        app.jn.push(log_level::warning, [](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            msg   = "Results export cancelled: no run results";
+        });
+        return;
+    }
+
+    if (path.empty()) {
+        export_results_message_ = "Results JSON path is empty.";
+        app.jn.push(log_level::error, [](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            msg   = "Results JSON path is empty";
+        });
+        return;
+    }
+
+    const auto status = write_experiment_results_json(path, *run_results_);
+    if (status.has_error()) {
+        const auto error = status.error();
+        export_results_message_ = "Failed to export experiment results JSON.";
+        app.jn.push(log_level::error, [=](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            format(msg,
+                   "Failed to export experiment results JSON {} (category {}, "
+                   "code {})",
+                   path.string(),
+                   static_cast<int>(error.cat()),
+                   error.value());
+        });
+        return;
+    }
+
+    if (not regular_file_exists(path)) {
+        export_results_message_ = "Experiment results JSON was not created.";
+        app.jn.push(log_level::error, [=](auto& title, auto& msg) noexcept {
+            title = "Experiment Plan Viewer";
+            format(msg,
+                   "Experiment results JSON was not created: {}",
+                   path.string());
+        });
+        return;
+    }
+
+    export_results_message_ = "Experiment results JSON exported.";
+    app.jn.push(log_level::info, [=](auto& title, auto& msg) noexcept {
+        title = "Experiment Plan Viewer";
+        format(msg, "Experiment results JSON exported to {}", path.string());
+    });
+}
+
 void experiment_plan_viewer::load_from_path(application& app,
                                             const std::filesystem::path& path)
 {
     selected_experiment_index_ = -1;
+    run_results_.reset();
+    run_completed_ = false;
+    selected_result_index_ = -1;
+    last_run_duration_ms_ = 0.0;
+    run_message_.clear();
+    export_results_message_.clear();
     loaded_plan_.reset();
     loaded_path_.clear();
     validation_message_.clear();

@@ -9,6 +9,7 @@ set(public_irritator_header
     include/irritator/error.hpp
     include/irritator/experiment-plan.hpp
     include/irritator/experiment-request.hpp
+    include/irritator/experiment-runner.hpp
     include/irritator/ext.hpp
     include/irritator/file.hpp
     include/irritator/format.hpp
@@ -29,6 +30,7 @@ set(private_irritator_sources
     src/error.cpp
     src/experiment-plan.cpp
     src/experiment-request.cpp
+    src/experiment-runner.cpp
     src/external_source.cpp
     src/filesystem.cpp
     src/file.cpp
@@ -177,3 +179,4 @@ irritator_add_test(test-dot-parser test/dot-parser-test.cpp)
 irritator_add_test(test-experiment-plan test/experiment-plan.cpp)
 irritator_add_test(test-experiment-request test/experiment-request.cpp)
 irritator_add_test(test-integration-experiment-pipeline test/integration-experiment-pipeline.cpp)
+irritator_add_test(test-experiment-runner test/experiment-runner.cpp)
