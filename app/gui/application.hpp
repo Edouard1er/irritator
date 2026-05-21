@@ -17,6 +17,7 @@
 #include <filesystem>
 
 #include "dialog.hpp"
+#include "experiment/plan-viewer.hpp"
 #include "experiment/request-editor.hpp"
 
 #define IMGUI_DEFINE_MATH_OPERATORS
@@ -1795,6 +1796,7 @@ public:
     window_logger   log_wnd;
     task_window     task_wnd;
     experiment_request_editor experiment_request_ed;
+    experiment_plan_viewer    experiment_plan_view;
 
     simulation_to_cpp sim_to_cpp;
 
