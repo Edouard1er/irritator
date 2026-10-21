@@ -1,0 +1,14 @@
+{
+  "name":"irritator-web","version":"0.1.0","private":true,"type":"module",
+  "engines":{"node":">=24 <25"},
+  "scripts":{
+    "build":"tsc -p apps/api/tsconfig.json",
+    "start":"node dist/apps/api/src/server.js",
+    "test":"npm run build && node --test dist/apps/api/tests/backend.test.js dist/apps/api/tests/process.test.js",
+    "test:runner":"node --test engine/runner/tests.mjs",
+    "test:integration":"npm run build && node --test dist/apps/api/tests/integration.test.js",
+    "test:all":"npm run build && node --test engine/runner/tests.mjs dist/apps/api/tests/*.test.js"
+  },
+  "dependencies":{"ajv":"8.17.1","fastify":"^5.6.0"},
+  "devDependencies":{"@types/node":"^24.0.0","typescript":"^5.9.3"}
+}

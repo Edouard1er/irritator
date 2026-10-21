@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "changed",
+    "components": [
+      {
+        "id": "c1",
+        "type": "constant",
+        "parameters": {
+          "value": -2,
+          "offset": 0
+        }
+      },
+      {
+        "id": "c2",
+        "type": "constant",
+        "parameters": {
+          "value": 7,
+          "offset": 1
+        }
+      },
+      {
+        "id": "c3",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 2
+        }
+      },
+      {
+        "id": "sum",
+        "type": "qss1_sum_3",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "c1",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "c2",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "c3",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 2
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "sum",
+        "samplingInterval": 1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema":"http://json-schema.org/draft-04/schema#",
+  "type":"object","additionalProperties":false,"required":["schemaVersion","model","simulation"],
+  "properties":{
+    "schemaVersion":{"enum":[1]},
+    "model":{"type":"object","additionalProperties":false,"required":["id","components","connections","observations"],"properties":{
+      "id":{"$ref":"#/definitions/id"},
+      "components":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"object","additionalProperties":false,"required":["id","type","parameters"],"properties":{"id":{"$ref":"#/definitions/id"},"type":{"type":"string","minLength":1,"maxLength":64},"parameters":{"type":"object","maxProperties":8,"additionalProperties":{"type":"number","minimum":-1000000000000,"maximum":1000000000000}}}}},
+      "connections":{"type":"array","maxItems":512,"items":{"type":"object","additionalProperties":false,"required":["from","to"],"properties":{"from":{"$ref":"#/definitions/endpoint"},"to":{"$ref":"#/definitions/endpoint"}}}},
+      "observations":{"type":"array","maxItems":32,"items":{"type":"object","additionalProperties":false,"required":["component","samplingInterval"],"properties":{"component":{"$ref":"#/definitions/id"},"samplingInterval":{"type":"number","minimum":0.000001,"maximum":1000000000}}}}
+    }},
+    "simulation":{"type":"object","additionalProperties":false,"required":["start","end"],"properties":{"start":{"type":"number","minimum":-1000000000,"maximum":1000000000},"end":{"type":"number","minimum":-1000000000,"maximum":1000000000}}},
+    "limits":{"type":"object","additionalProperties":false,"properties":{"maxComponents":{"type":"integer","minimum":1,"maximum":128},"maxConnections":{"type":"integer","minimum":0,"maximum":512},"maxRunCalls":{"type":"integer","minimum":1,"maximum":100000},"maxPoints":{"type":"integer","minimum":1,"maximum":20000}}}
+  },
+  "definitions":{
+    "id":{"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9_-]+$"},
+    "endpoint":{"type":"object","additionalProperties":false,"required":["component","port"],"properties":{"component":{"$ref":"#/definitions/id"},"port":{"type":"integer","minimum":0,"maximum":16}}}
+  }
+}

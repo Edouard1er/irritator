@@ -1,0 +1,3 @@
+#pragma once
+inline constexpr char catalog_json[] = R"contracts(@CATALOG_JSON@)contracts";
+inline constexpr char request_schema_json[] = R"contracts(@REQUEST_SCHEMA_JSON@)contracts";

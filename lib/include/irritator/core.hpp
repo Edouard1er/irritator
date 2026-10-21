@@ -2424,6 +2424,15 @@ struct embedded_simulation {
      * factors in the simulation-component. */
     vector<input_parameter> input_parameters;
 
+    // Results belong to the typed embedded resource, whose destruction
+    // releases their storage even when the parent model's byte buffer is
+    // discarded. Later experiments cannot change these response snapshots.
+    struct response {
+        time            due;
+        vector<message> values;
+    };
+    vector<response> pending_responses;
+
     std::array<u64, 6> seed = {
         0x1357209348203948u, ///! user defined value
         0u,                  ///! ID: from root simulator
@@ -8023,9 +8032,11 @@ struct hsm_wrapper {
 /// input port to initialize and run the simulation (with different run
 /// modes).
 ///
-/// The simulation must have only one public parameter and only one
-/// observation message. The observation message will be copied to the
-/// @c y[0] output port.
+/// Inputs are init, run, then one scalar per factor. Outputs are the
+/// selected criteria followed by the selected factors' parameter triplets.
+/// One nonempty run bag is one request (minimum scalar in that bag).
+/// Its scalar retains the existing dual role: child time argument and
+/// parent response delay; +infinity requests an immediate response.
 struct simulation_wrapper {
     /** x[0] is used to initialize the simulation, x[1] is used to run
      * the simulation, x[2..] are used to send assign new value to the
@@ -8065,8 +8076,9 @@ struct simulation_wrapper {
     enum i_port : u8 {
         input_init, ///< Like simulation, a message on this port
                     ///< initialize the simulation (copy parameter into
-                    ///< models). Useless wit the @c run_type::complete
-                    ///< parameter.
+                    ///< models). Restarts a campaign and cancels pending
+                    ///< responses. Parent initialize already prepares the
+                    ///< children for a first run in every mode.
         input_run,  ///< Run the simulation according to the @c run_type
                     ///< parameter.
     };
@@ -8076,10 +8088,13 @@ struct simulation_wrapper {
     run_type  run                   = run_type::complete;
     run_state state                 = run_state::uninitialized;
 
+    // lambda precedes transition, also when external inputs are confluent.
+    bool response_emitted = false;
+
     simulation_wrapper() noexcept = default;
 
-    /** Copy ctor does not copy embedded simulation but keep the
-     * simulation identifier @c sim_id. */
+    /** Copy ctor does not copy embedded simulations and resets sim_id;
+     * the caller must supply the resource identifier via parameters. */
     simulation_wrapper(const simulation_wrapper& other) noexcept;
 
     status initialize(simulation& sim) noexcept;

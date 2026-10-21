@@ -1,0 +1,19 @@
+{
+  "schemaVersion":1,
+  "model":{
+    "id":"test-sum",
+    "components":[
+      {"id":"c1","type":"constant","parameters":{"value":10,"offset":0}},
+      {"id":"c2","type":"constant","parameters":{"value":100,"offset":1}},
+      {"id":"c3","type":"constant","parameters":{"value":1000,"offset":2}},
+      {"id":"sum","type":"qss1_sum_3","parameters":{}}
+    ],
+    "connections":[
+      {"from":{"component":"c1","port":0},"to":{"component":"sum","port":0}},
+      {"from":{"component":"c2","port":0},"to":{"component":"sum","port":1}},
+      {"from":{"component":"c3","port":0},"to":{"component":"sum","port":2}}
+    ],
+    "observations":[{"component":"sum","samplingInterval":1}]
+  },
+  "simulation":{"start":0,"end":3}
+}

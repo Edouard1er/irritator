@@ -18,7 +18,16 @@ static status copy_history(
   simulation&                                  sim,
   embedded_simulation::simulation_observation& sim_obs) noexcept
 {
-    sim.tick_resamplers();
+    // finalize() has observed the left state at the excluded end boundary.
+    // Only an expired simulation may seal its resamplers: a paused one can
+    // still receive more bags at its current logical date.
+    if (sim.current_time_expired()) {
+        for (auto& obs : sim.observers)
+            sim.observers.get<resampler>(sim.observers.get_id(obs))
+              .tick(obs, time_domain<time>::infinity);
+    } else {
+        sim.tick_resamplers();
+    }
 
     for (auto& obs : sim.observers) {
         const auto mdl_id = obs.model();
@@ -38,6 +47,28 @@ static status copy_history(
             if (not ok)
                 return make_error(
                   simulation_errc::simulation_wrapper_not_enough_memory);
+
+            // Preserve an explicit terminal date for deduplicated plateaus.
+            // Before the first committed sample (e.g. bag at t=0), provide
+            // the current observable state without sealing the resampler.
+            // The next copy replaces this snapshot with committed history.
+            if ((sim.current_time_expired() or vec->values.empty()) and
+                (vec->values.empty() or
+                 vec->values.back().t < sim.current_time())) {
+                if (not vec->values.reserve(vec->values.size() + 1))
+                    return make_error(
+                      simulation_errc::simulation_wrapper_not_enough_memory);
+
+                dispatch(sim.models.get(mdl_id), [&](const auto& dyn) {
+                    using dynamics = std::remove_cvref_t<decltype(dyn)>;
+                    if constexpr (has_observation_function<dynamics>) {
+                        const auto t = sim.current_time();
+                        const auto s = dyn.observation(
+                          t, t - sim.models.get(mdl_id).tl);
+                        vec->values.emplace_back(s.t, s.value);
+                    }
+                });
+            }
         }
     }
 
@@ -65,7 +96,7 @@ static status run_complete(embedded_simulation& embed_sims) noexcept
 
         if (sim.current_time_expired()) {
             irt_check(sim.finalize());
-            copy_history(sim, sim_o);
+            irt_check(copy_history(sim, sim_o));
         }
     }
 
@@ -93,7 +124,7 @@ static status run_bag(embedded_simulation& embed_sims) noexcept
             irt_check(sim.finalize());
         }
 
-        copy_history(sim, sim_o);
+        irt_check(copy_history(sim, sim_o));
     }
 
     return success();
@@ -123,7 +154,7 @@ static status run_time(embedded_simulation& embed_sims) noexcept
             irt_check(sim.finalize());
         }
 
-        copy_history(sim, sim_o);
+        irt_check(copy_history(sim, sim_o));
     }
 
     return success();
@@ -153,7 +184,7 @@ static status run_until(embedded_simulation& embed_sims,
             irt_check(sim.finalize());
         }
 
-        copy_history(sim, sim_o);
+        irt_check(copy_history(sim, sim_o));
     }
 
     return success();
@@ -184,7 +215,7 @@ static status run_during(embedded_simulation& embed_sims,
             irt_check(sim.finalize());
         }
 
-        copy_history(sim, sim_o);
+        irt_check(copy_history(sim, sim_o));
     }
 
     return success();
@@ -411,12 +442,20 @@ static status embedded_sims_init(embedded_simulation& embed_sims) noexcept
     for (const auto id : embed_sims.embedded_sims) {
         const auto idx = get_index(id);
         sims[idx].observers.clear();
+        for (auto& mdl : sims[idx].models)
+            mdl.obs_id = undefined<observer_id>();
 
         for (const auto sel_id : embed_sims.selections) {
             const auto mdl_id = embed_sims.selections.get<model_id>(sel_id);
             debug::ensure(sims[idx].models.exists(mdl_id));
 
-            sims[idx].observe(sims[idx].models.get(mdl_id));
+            // Several criteria may reduce the same model trajectory. One
+            // observer per model is enough; observe() requires it to be new.
+            auto& mdl = sims[idx].models.get(mdl_id);
+            if (not sims[idx].observers.exists(mdl.obs_id) and
+                sims[idx].observe(mdl).has_error())
+                return make_error(
+                  simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
         }
 
         if (sims[idx].srcs.prepare().has_error())
@@ -468,6 +507,9 @@ auto compute_simulation_number =
 
 status simulation_wrapper::initialize(simulation& sim) noexcept
 {
+    sigma = time_domain<time>::infinity;
+    state = run_state::uninitialized;
+    response_emitted = false;
     auto* embed_sims = sim.sims.try_to_get(sim_id);
 
     if (not embed_sims)
@@ -481,7 +523,11 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
 
     const auto nb_sims = compute_simulation_number(*embed_sims);
 
+    if (nb_sims == 0)
+        return make_error(simulation_errc::simulation_wrapper_parameter_error);
+
     embed_sims->embedded_sims.clear();
+    embed_sims->pending_responses.clear();
 
     if (not embed_sims->embedded_sims.can_alloc(nb_sims) and
         not embed_sims->embedded_sims.grow<2, 1>(nb_sims))
@@ -489,20 +535,29 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
           simulation_errc::
             simulation_wrapper_too_many_embedded_simulation_error);
 
-    return embedded_sims_alloc(*embed_sims, nb_sims)
+    irt_check(embedded_sims_alloc(*embed_sims, nb_sims)
       .and_then(embedded_sims_copy_parameters, *embed_sims)
-      .and_then(embedded_sims_init, *embed_sims);
+      .and_then(embedded_sims_init, *embed_sims));
+    state = run_state::initialized;
+    return success();
 }
 
-status simulation_wrapper::transition(simulation&           sim,
-                                      [[maybe_unused]] time t,
+static status compute_response(const embedded_simulation& embed_sims,
+                               vector<message>& values) noexcept;
+
+status simulation_wrapper::transition(simulation& sim,
+                                      time t,
                                       [[maybe_unused]] time e,
                                       [[maybe_unused]] time r) noexcept
 {
     auto* embed_sims = sim.sims.try_to_get(sim_id);
+    auto& pending_responses = embed_sims->pending_responses;
 
-    if (state == run_state::finish)
-        sigma = time_domain<time>::infinity;
+    // lambda precedes transition, including a confluent external bag.
+    if (response_emitted) {
+        pending_responses.erase(pending_responses.begin());
+        response_emitted = false;
+    }
 
     debug::ensure(x.size() == embed_sims->input_parameters.size() + 2);
 
@@ -514,7 +569,6 @@ status simulation_wrapper::transition(simulation&           sim,
 
         if (not i_param_msg.empty()) {
             embed_sims->input_parameters[i].value = i_param_msg.back()[0];
-            sigma                                 = r;
             state                                 = run_state::input_changed;
         }
     }
@@ -527,12 +581,27 @@ status simulation_wrapper::transition(simulation&           sim,
             return ret.error();
 
         state = run_state::initialized;
-        sigma = time_domain<time>::infinity;
+        pending_responses.clear();
     }
 
     if (not run_msg.empty()) {
+        for (const auto& msg : run_msg)
+            if (std::isnan(msg[0]) or msg[0] < zero)
+                return make_error(
+                  simulation_errc::simulation_wrapper_parameter_error);
+
         const auto time_param = get_min_message(run_msg);
-        sigma = time_domain<time>::is_infinity(time_param) ? zero : time_param;
+        const auto delay = time_domain<time>::is_infinity(time_param)
+                             ? zero : time_param;
+        auto due = t + delay;
+        // Preserve the engine's rule for a positive delay smaller than the
+        // representable spacing at t. This is floating-point rounding, not
+        // an epsilon introduced to escape zero-time transitions.
+        if (delay > zero and due == t)
+            due = std::nextafter(t, time_domain<time>::infinity);
+        if (not std::isfinite(due))
+            return make_error(
+              simulation_errc::simulation_wrapper_parameter_error);
 
         switch (run) {
         case run_type::complete:
@@ -546,49 +615,71 @@ status simulation_wrapper::transition(simulation&           sim,
                 state = run_state::initialized;
             }
 
-            if (state == run_state::initialized) {
+            if (state == run_state::initialized or state == run_state::finish) {
                 state   = run_state::running;
-                auto st = run_complete(*embed_sims);
+                irt_check(run_complete(*embed_sims));
                 state   = run_state::finish;
-                return st;
             }
             break;
 
         case run_type::bag:
-            return run_bag(*embed_sims);
+            irt_check(run_bag(*embed_sims));
+            break;
 
         case run_type::time:
-            return run_time(*embed_sims);
+            irt_check(run_time(*embed_sims));
+            break;
 
         case run_type::until:
-            return run_until(*embed_sims, time_param);
+            irt_check(run_until(*embed_sims, time_param));
+            break;
 
         case run_type::during:
-            return run_during(*embed_sims, time_param);
+            irt_check(run_during(*embed_sims, time_param));
+            break;
         }
+
+        embedded_simulation::response result{ due, {} };
+        irt_check(compute_response(*embed_sims, result.values));
+        if (not pending_responses.reserve(pending_responses.size() + 1))
+            return make_error(
+              simulation_errc::simulation_wrapper_not_enough_memory);
+        auto pos = pending_responses.begin();
+        while (pos != pending_responses.end() and pos->due <= due)
+            ++pos;
+        pending_responses.emplace(pos, std::move(result));
     }
 
+    sigma = pending_responses.empty() ? time_domain<time>::infinity
+                                      : pending_responses.front().due - t;
     return success();
 }
 
-static auto compute_min_last(const auto& embedded_sims,
-                             const auto  mdl_id) noexcept
+static auto compute_extremum(const auto& embedded_sims,
+                             const auto mdl_id,
+                             const bool minimize,
+                             const bool last) noexcept
   -> std::pair<embedded_simulation::sub_id, size_t>
 {
     auto        best_id = undefined<embedded_simulation::sub_id>();
     auto        index   = size_t(0);
-    auto        value   = std::numeric_limits<real>::max();
+    auto        value   = minimize ? std::numeric_limits<real>::infinity()
+                                  : -std::numeric_limits<real>::infinity();
     const auto& sim_obs = embedded_sims.template get<
       embedded_simulation::simulation_observation>();
 
     for (const auto id : embedded_sims) {
-        if (const auto* ptr = sim_obs[id].get(mdl_id)) {
-            debug::ensure(ptr->values.size() > 0);
-            const auto new_value = std::min(ptr->values.back()[1], value);
-
-            if (new_value < value) {
-                best_id = id;
-                index   = ptr->values.size() - 1;
+        if (const auto* ptr = sim_obs[id].get(mdl_id);
+            ptr and not ptr->values.empty()) {
+            const auto begin = last ? ptr->values.size() - 1 : 0;
+            for (auto i = begin; i < ptr->values.size(); ++i) {
+                const auto candidate = ptr->values[i].value;
+                if (std::isfinite(candidate) and
+                    (minimize ? candidate < value : candidate > value)) {
+                    value = candidate;
+                    best_id = id;
+                    index = i;
+                }
             }
         }
     }
@@ -596,76 +687,30 @@ static auto compute_min_last(const auto& embedded_sims,
     return std::make_pair(best_id, index);
 }
 
-/*
-
-  Function to search the min, max, last min, last max
-
- */
+static auto compute_min_last(const auto& embedded_sims,
+                             const auto mdl_id) noexcept
+  -> std::pair<embedded_simulation::sub_id, size_t>
+{
+    return compute_extremum(embedded_sims, mdl_id, true, true);
+}
 
 static auto compute_max_last(const auto& embedded_sims,
                              const auto  mdl_id) noexcept
   -> std::pair<embedded_simulation::sub_id, size_t>
 {
-    auto        best_id = undefined<embedded_simulation::sub_id>();
-    auto        index   = size_t(0);
-    auto        value   = std::numeric_limits<real>::lowest();
-    const auto& sim_obs = embedded_sims.template get<
-      embedded_simulation::simulation_observation>();
-
-    for (const auto id : embedded_sims) {
-        if (const auto* ptr = sim_obs[id].get(mdl_id)) {
-            const auto new_value = std::max(ptr->values.back()[1], value);
-
-            if (new_value < value)
-                best_id = id;
-        }
-    }
-
-    return std::make_pair(best_id, index);
+    return compute_extremum(embedded_sims, mdl_id, false, true);
 }
 
 static auto compute_min(const auto& embedded_sims, const auto mdl_id) noexcept
   -> std::pair<embedded_simulation::sub_id, size_t>
 {
-    auto        best_id = undefined<embedded_simulation::sub_id>();
-    auto        index   = size_t(0);
-    auto        value   = std::numeric_limits<real>::max();
-    const auto& sim_obs = embedded_sims.template get<
-      embedded_simulation::simulation_observation>();
-
-    for (const auto id : embedded_sims) {
-        if (const auto* ptr = sim_obs[id].get(mdl_id)) {
-            for (auto i = size_t(0), e = ptr->values.size(); i != e; ++i) {
-                value   = std::min(ptr->values[i][1], value);
-                index   = i;
-                best_id = id;
-            }
-        }
-    }
-
-    return std::make_pair(best_id, index);
+    return compute_extremum(embedded_sims, mdl_id, true, false);
 }
 
 static auto compute_max(const auto& embedded_sims, const auto mdl_id) noexcept
   -> std::pair<embedded_simulation::sub_id, size_t>
 {
-    auto        best_id = undefined<embedded_simulation::sub_id>();
-    auto        index   = size_t(0);
-    auto        value   = std::numeric_limits<real>::max();
-    const auto& sim_obs = embedded_sims.template get<
-      embedded_simulation::simulation_observation>();
-
-    for (const auto id : embedded_sims) {
-        if (const auto* ptr = sim_obs[id].get(mdl_id)) {
-            for (auto i = size_t(0), e = ptr->values.size(); i != e; ++i) {
-                value   = std::max(ptr->values[i][1], value);
-                index   = i;
-                best_id = id;
-            }
-        }
-    }
-
-    return std::make_pair(best_id, index);
+    return compute_extremum(embedded_sims, mdl_id, false, false);
 }
 
 /* * * * *
@@ -677,7 +722,13 @@ static auto compute_max(const auto& embedded_sims, const auto mdl_id) noexcept
 real embedded_simulation::embedded_model_observation::compute_result(
   const criteria_type type) const noexcept
 {
-    debug::ensure(std::cmp_greater(values.size(), 0));
+    // A criterion on unavailable data is not a finite objective. Never read
+    // back() on an empty history, nor let NaN be silently ignored by min/max.
+    if (values.empty())
+        return std::numeric_limits<real>::quiet_NaN();
+    for (const auto& sample : values)
+        if (not std::isfinite(sample.t) or not std::isfinite(sample.value))
+            return std::numeric_limits<real>::quiet_NaN();
 
     auto ret = real{};
 
@@ -726,17 +777,19 @@ struct pos_in_objective_function {
     const u32 objective_fn_size;
 };
 
-static auto send(const embedded_simulation&        embed_sims,
-                 const simulation_wrapper&         wrapper,
+static auto collect_response(const embedded_simulation& embed_sims,
                  const embedded_simulation::sub_id best_sub_id,
                  const std::span<const real>       objective_fn,
-                 simulation&                       sim) noexcept -> status
+                 vector<message>& values) noexcept -> status
 {
     if (not embed_sims.embedded_sims.exists(best_sub_id))
         return success();
 
     const pos_in_objective_function pos(embed_sims.selections.size());
-    auto                            output_port_index = 0;
+    if (not values.reserve(embed_sims.selections.size() +
+                           embed_sims.factors.size()))
+        return make_error(
+          simulation_errc::simulation_wrapper_not_enough_memory);
 
     // Send the observation values of the best embedded simulation
 
@@ -744,11 +797,7 @@ static auto send(const embedded_simulation&        embed_sims,
         const auto idx = pos(best_sub_id, obj_fn_id);
         const auto val = objective_fn[idx];
 
-        if (auto ret = send_message(sim, wrapper.y[output_port_index], val);
-            ret.has_error())
-            return ret.error();
-
-        ++output_port_index;
+        values.push_back(message{ val, zero, zero });
     }
 
     // Send the parameters values of the best embedded simulation to the
@@ -763,12 +812,7 @@ static auto send(const embedded_simulation&        embed_sims,
             sub_sims[best_sub_id].parameters[idx].reals[2]
         };
 
-        if (auto ret = send_message(sim, wrapper.y[output_port_index], msg[0],
-                                    msg[1], msg[2]);
-            ret.has_error())
-            return ret.error();
-
-        ++output_port_index;
+        values.push_back(msg);
     }
 
     return success();
@@ -792,12 +836,9 @@ static auto compute_embedded_simulation_results(
     const auto size              = objective_fn_size * simulation_size;
     auto       objective_fn      = vector<real>(size);
 
-    // debug::ensure(objective_fn.size() > 1);
-
-    // if (std::cmp_not_equal(objective_fn.size(), size))
-    //     return make_error(
-    //       simulation_errc::
-    //         simulation_wrapper_too_many_embedded_simulation_error);
+    if (std::cmp_not_equal(objective_fn.size(), size))
+        return make_error(
+          simulation_errc::simulation_wrapper_not_enough_memory);
 
     const pos_in_objective_function pos(objective_fn_size);
 
@@ -818,8 +859,14 @@ static auto compute_embedded_simulation_results(
                 const auto val = ptr->compute_result(type);
                 const auto idx = pos(sub_id, obj_fn_id);
 
+                if (not std::isfinite(val))
+                    return make_error(
+                      simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+
                 objective_fn[idx] = val;
-            }
+            } else
+                return make_error(
+                  simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
         }
     }
 
@@ -930,49 +977,24 @@ static auto compute_weighted_sum_objective(
                                   .types[get_index(obj_fn_id)] ==
                                 optimization_type::maximize;
 
-            if (is_max) {
-                auto sum    = 0.0;
-                auto sq_sum = 0.0;
-
-                for (const auto sub_id : embed_sims.embedded_sims) {
-                    const auto idx = pos(sub_id, obj_fn_id);
-
-                    sum += objective_fn[idx];
-                    sq_sum += objective_fn[idx] * objective_fn[idx];
-                }
-
-                const auto mean    = sum / embed_sims.embedded_sims.size();
-                const auto std_dev = std::sqrt(sq_sum /
-                                               embed_sims.embedded_sims.size());
-                const auto div     = std_dev < 1e-10 ? 1e-10 : std_dev;
-
-                for (const auto sub_id : embed_sims.embedded_sims) {
-                    const auto idx = pos(sub_id, obj_fn_id);
-
-                    objective_fn[idx] = (objective_fn[idx] - mean) / div;
-                }
-            } else {
-                auto sum    = 0.0;
-                auto sq_sum = 0.0;
-
-                for (const auto sub_id : embed_sims.embedded_sims) {
-                    const auto idx = pos(sub_id, obj_fn_id);
-
-                    sum += objective_fn[idx];
-                    sq_sum += objective_fn[idx] * objective_fn[idx];
-                }
-
-                const auto mu    = sum / embed_sims.embedded_sims.size();
-                const auto sigma = std::sqrt(
-                  sq_sum / embed_sims.embedded_sims.size() - mu * mu);
-
-                const auto div = sigma < 1e-10 ? 1e-10 : sigma;
-
-                for (const auto sub_id : embed_sims.embedded_sims) {
-                    const auto idx = pos(sub_id, obj_fn_id);
-
-                    objective_fn[idx] = (mu - objective_fn[idx]) / div;
-                }
+            auto sum = 0.0;
+            for (const auto sub_id : embed_sims.embedded_sims)
+                sum += objective_fn[pos(sub_id, obj_fn_id)];
+            const auto mean = sum / embed_sims.embedded_sims.size();
+            auto squared_deviations = 0.0;
+            for (const auto sub_id : embed_sims.embedded_sims) {
+                const auto delta = objective_fn[pos(sub_id, obj_fn_id)] - mean;
+                squared_deviations += delta * delta;
+            }
+            // Population standard deviation, centered for both directions.
+            // The second pass also avoids E[x*x]-E[x]^2 cancellation.
+            const auto std_dev = std::sqrt(
+              squared_deviations / embed_sims.embedded_sims.size());
+            const auto div = std_dev < 1e-10 ? 1e-10 : std_dev;
+            for (const auto sub_id : embed_sims.embedded_sims) {
+                const auto idx = pos(sub_id, obj_fn_id);
+                objective_fn[idx] = (is_max ? objective_fn[idx] - mean
+                                           : mean - objective_fn[idx]) / div;
             }
         }
     }
@@ -994,6 +1016,10 @@ static auto compute_weighted_sum_objective(
             value += w * objective_fn[idx];
         }
 
+        if (not std::isfinite(value))
+            return make_error(
+              simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+
         if (is_max) {
             if (value > best_value) {
                 best_value  = value;
@@ -1011,8 +1037,7 @@ static auto compute_weighted_sum_objective(
 }
 
 static auto do_weighted_sum_optimization(const embedded_simulation& embed_sims,
-                                         const simulation_wrapper&  wrapper,
-                                         simulation& sim) noexcept -> status
+                                         vector<message>& values) noexcept -> status
 {
     debug::ensure(embed_sims.objective.method ==
                   optimization_method::weighted_sum);
@@ -1029,7 +1054,7 @@ static auto do_weighted_sum_optimization(const embedded_simulation& embed_sims,
         return best_sub_id.error();
 
     return embed_sims.embedded_sims.exists(*best_sub_id)
-             ? send(embed_sims, wrapper, *best_sub_id, *objective_fn_ret, sim)
+             ? collect_response(embed_sims, *best_sub_id, *objective_fn_ret, values)
              : success();
 }
 
@@ -1117,8 +1142,7 @@ static auto select(
 
 static auto do_epsilon_constrained_optimization(
   const embedded_simulation& embed_sims,
-  const simulation_wrapper&  wrapper,
-  simulation&                sim) noexcept -> status
+  vector<message>& values) noexcept -> status
 {
     debug::ensure(embed_sims.objective.method ==
                   optimization_method::epsilon_constrained);
@@ -1142,7 +1166,7 @@ static auto do_epsilon_constrained_optimization(
     dlogln(0, "select sub-id {}", get_index(best_sub_id));
 
     return embed_sims.embedded_sims.exists(best_sub_id)
-             ? send(embed_sims, wrapper, best_sub_id, *objective_fn_ret, sim)
+             ? collect_response(embed_sims, best_sub_id, *objective_fn_ret, values)
              : success();
 }
 
@@ -1153,8 +1177,7 @@ static auto do_epsilon_constrained_optimization(
  * * * * * */
 
 static auto do_simple_optimization(const embedded_simulation& embed_sims,
-                                   const simulation_wrapper&  wrapper,
-                                   simulation& sim) noexcept -> status
+                                   vector<message>& values) noexcept -> status
 {
     debug::ensure(embed_sims.objective.method == optimization_method::simple);
     debug::ensure(
@@ -1195,28 +1218,39 @@ static auto do_simple_optimization(const embedded_simulation& embed_sims,
     dlogln(0, "select sub-id {}", get_index(best_sub_id));
 
     return embed_sims.embedded_sims.exists(best_sub_id)
-             ? send(embed_sims, wrapper, best_sub_id, objective_fn, sim)
+             ? collect_response(embed_sims, best_sub_id, objective_fn, values)
              : success();
+}
+
+static status compute_response(const embedded_simulation& embed_sims,
+                               vector<message>& values) noexcept
+{
+    switch (embed_sims.objective.method) {
+    case optimization_method::epsilon_constrained:
+        return do_epsilon_constrained_optimization(embed_sims, values);
+
+    case optimization_method::simple:
+        return do_simple_optimization(embed_sims, values);
+
+    case optimization_method::weighted_sum:
+        return do_weighted_sum_optimization(embed_sims, values);
+    }
+
+    return success();
 }
 
 status simulation_wrapper::lambda(simulation& sim) noexcept
 {
     const auto* embed_sims = sim.sims.try_to_get(sim_id);
+    const auto& pending_responses = embed_sims->pending_responses;
+    if (pending_responses.empty())
+        return success();
 
-    debug::ensure(y.size() == embed_sims->input_parameters.size() +
-                                embed_sims->selections.size());
-
-    switch (embed_sims->objective.method) {
-    case optimization_method::epsilon_constrained:
-        return do_epsilon_constrained_optimization(*embed_sims, *this, sim);
-
-    case optimization_method::simple:
-        return do_simple_optimization(*embed_sims, *this, sim);
-
-    case optimization_method::weighted_sum:
-        return do_weighted_sum_optimization(*embed_sims, *this, sim);
-    }
-
+    const auto& values = pending_responses.front().values;
+    debug::ensure(values.empty() or values.size() == y.size());
+    for (sz i = 0; i < values.size(); ++i)
+        irt_check(send_message(sim, y[i], values[i][0], values[i][1], values[i][2]));
+    response_emitted = true;
     return success();
 }
 
@@ -1233,7 +1267,9 @@ status simulation_wrapper::finalize(simulation& sim) noexcept
         auto&      sim   = sims[idx];
         auto&      sim_o = sim_obs[idx];
 
-        if (sim.finalize().has_error())
+        // Expired children were finalized by their run routine. Do not run
+        // source cleanup or nested finalizers twice when the parent closes.
+        if (not sim.current_time_expired() and sim.finalize().has_error())
             return make_error(
               simulation_errc::
                 simulation_wrapper_embedded_simulation_finalization_error);

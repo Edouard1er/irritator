@@ -7,4 +7,7 @@ compile_commands.json
 /demos
 /docs
 /out
-/reports
+/reports/*
+!/reports/web-integration-test-4.md
+!/reports/frontend-test-5.md
+!/reports/frontend-test-5/
