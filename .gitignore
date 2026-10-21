@@ -4,3 +4,7 @@ CMakeSettings.json
 .cache
 build
 compile_commands.json
+/demos
+/docs
+/out
+/reports
