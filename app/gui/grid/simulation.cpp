@@ -13,7 +13,6 @@
 #include <irritator/io.hpp>
 #include <irritator/modeling-helpers.hpp>
 #include <irritator/modeling.hpp>
-#include <irritator/observation.hpp>
 #include <irritator/timeline.hpp>
 
 #include "application.hpp"
@@ -200,13 +199,13 @@ bool show_local_observers(application&    app,
         for_specified_data(
           ed.pj.grid_observers, tn.grid_observer_ids, [&](auto& grid) noexcept {
               const auto id = ed.pj.grid_observers.get_id(grid);
-              ImGui::PushID(&grid);
+              ImGui::PushID(get_index(id));
 
               ImGui::TableNextRow();
               ImGui::TableNextColumn();
 
               ImGui::PushItemWidth(-1.0f);
-              if (ImGui::InputFilteredString("name", grid.name))
+              if (ImGui::InputFilteredString("##name", grid.name))
                   is_modified = true;
               ImGui::PopItemWidth();
 
@@ -226,13 +225,8 @@ bool show_local_observers(application&    app,
 
               ImGui::TableNextColumn();
               ImGui::PushItemWidth(-1);
-              float time_step = grid.time_step;
-              if (ImGui::DragFloat("time-step",
-                                   &time_step,
-                                   0.01f,
-                                   grid.time_step.lower,
-                                   grid.time_step.upper))
-                  grid.time_step.set(time_step);
+              if (ImGui::DragFraction("##timestep", &grid.timestep))
+                  is_modified = true;
               ImGui::PopItemWidth();
 
               ImGui::TableNextColumn();
@@ -276,29 +270,19 @@ bool show_local_observers(application&    app,
         ImGui::EndTable();
     }
 
-    if (ed.pj.grid_observers.can_alloc() && ImGui::Button("+##grid")) {
-        auto&      grid    = ed.pj.alloc_grid_observer();
-        const auto grid_id = ed.pj.grid_observers.get_id(grid);
+    if (ed.pj.grid_observers.can_alloc() or ed.pj.grid_observers.grow<3, 2>()) {
+        if (ImGui::Button("+##grid")) {
+            auto&      grid    = ed.pj.alloc_grid_observer();
+            const auto grid_id = ed.pj.grid_observers.get_id(grid);
 
-        grid.parent_id = ed.pj.tree_nodes.get_id(tn);
-        grid.compo_id  = undefined<component_id>();
-        grid.tn_id     = undefined<tree_node_id>();
-        grid.mdl_id    = undefined<model_id>();
-        tn.grid_observer_ids.emplace_back(grid_id);
+            grid.parent_id = ed.pj.tree_nodes.get_id(tn);
+            grid.compo_id  = undefined<component_id>();
+            grid.tn_id     = undefined<tree_node_id>();
+            grid.mdl_id    = undefined<model_id>();
+            tn.grid_observer_ids.emplace_back(grid_id);
 
-        if (not ed.pj.file_obs.ids.can_alloc(1))
-            ed.pj.file_obs.grow();
-
-        if (ed.pj.file_obs.ids.can_alloc(1)) {
-            const auto file_obs_id = ed.pj.file_obs.ids.alloc();
-            const auto idx         = get_index(file_obs_id);
-
-            ed.pj.file_obs.subids[idx].grid = grid_id;
-            ed.pj.file_obs.types[idx]       = file_observers::type::grid;
-            ed.pj.file_obs.enables[idx]     = false;
+            is_modified = true;
         }
-
-        is_modified = true;
     }
 
     if (to_del.has_value()) {

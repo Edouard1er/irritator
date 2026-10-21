@@ -18,9 +18,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include <ctype.h>
 #include <fcntl.h>
-#include <string.h>
 #include <sys/ptrace.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -102,83 +100,10 @@ auto GetSystemFontFile() noexcept -> std::optional<std::filesystem::path>
 }
 #endif
 
-#if defined(IRRITATOR_ENABLE_DEBUG)
-//! Detect if a process is being run under a debugger.
-#if defined(__APPLE__)
-static bool is_running_under_debugger() noexcept
-{
-    int               junk;
-    int               mib[4];
-    struct kinfo_proc info;
-    size_t            size;
-
-    info.kp_proc.p_flag = 0;
-    mib[0]              = CTL_KERN;
-    mib[1]              = KERN_PROC;
-    mib[2]              = KERN_PROC_PID;
-    mib[3]              = getpid();
-
-    size = sizeof(info);
-    junk = sysctl(mib, sizeof(mib) / sizeof(*mib), &info, &size, NULL, 0);
-
-    return junk == 0 ? false : (info.kp_proc.p_flag & P_TRACED) != 0;
-}
-#elif defined(__linux__)
-static bool is_running_under_debugger() noexcept
-{
-    constexpr char debug_string[] = "TracerPid:";
-
-    char buf[4096];
-
-    const auto status_fd = ::open("/proc/self/status", O_RDONLY);
-    if (status_fd == -1)
-        return false;
-
-    const auto num_read = ::read(status_fd, buf, sizeof(buf) - 1);
-    ::close(status_fd);
-
-    if (num_read <= 0)
-        return false;
-
-    buf[num_read]             = '\0';
-    const auto tracer_pid_ptr = ::strstr(buf, debug_string);
-    if (!tracer_pid_ptr)
-        return false;
-
-    for (const char* it = tracer_pid_ptr + sizeof(debug_string) - 1;
-         it <= buf + num_read;
-         ++it) {
-        if (::isspace(*it))
-            continue;
-        else
-            return ::isdigit(*it) != 0 && *it != '0';
-    }
-
-    return false;
-}
-#else
-static bool is_running_under_debugger() noexcept
-{
-    bool under_debugger = false;
-
-    if (ptrace(PTRACE_TRACEME, 0, 1, 0) < 0) {
-        std::printf("Debugger detected. Enabling breakpoint\n");
-        under_debugger = true;
-    } else {
-        ptrace(PTRACE_DETACH, 0, 1, 0);
-    }
-
-    return under_debugger;
-}
-#endif
-#endif
-
 int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 {
-#if defined(IRRITATOR_ENABLE_DEBUG)
-    if (is_running_under_debugger())
+    if (std::getenv("IRT_DEBUG"))
         irt::on_error_callback = irt::debug::breakpoint;
-#endif
 
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit())
@@ -213,6 +138,11 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     // only glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // 3.0+ only
 #endif
 
+#ifndef __APPLE__
+    glfwWindowHintString(GLFW_X11_CLASS_NAME, "Irritator");
+    glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "irritator");
+#endif
+
     // Create window with graphics context
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(
       glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
@@ -237,8 +167,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // Enable Multi-Viewport
     const auto init_filename       = irt::get_imgui_filename();
-    const auto init_filename_u8str = init_filename.u8string();
-    io.IniFilename = reinterpret_cast<const char*>(init_filename_u8str.c_str());
+    io.IniFilename = init_filename.c_str();
 
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
@@ -323,7 +252,7 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 #endif
 
     ImNodes::CreateContext();
-    irt::journal_handler jn(256);
+    irt::log_history jn;
     if (irt::application app(jn); app.init()) {
         const auto icons_fonts = irt::get_font_icons();
 
@@ -381,10 +310,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char* argv[])
 
             if (app.show() == irt::application::show_result_t::request_to_close)
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
-
-            for (const auto& pj : app.pjs) {
-                pj.simulation_state.load();
-            }
 
             // Rendering
             ImGui::Render();

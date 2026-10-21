@@ -40,7 +40,7 @@ expected<child_id> generic_component::copy_to(
     const auto src_idx = get_index(src_id);
 
     if (not dst.children.can_alloc())
-        return new_error(modeling_errc::generic_children_container_full);
+        return make_error(modeling_errc::generic_children_container_full);
 
     auto& new_c = c.type == child_type::component
                     ? dst.children.alloc(c.id.compo_id)
@@ -68,11 +68,11 @@ status generic_component::copy(const generic_component& src) noexcept
 {
     if (not children.can_alloc(src.children.size()) and
         not children.reserve(src.children.size()))
-        return new_error(modeling_errc::component_container_full);
+        return make_error(modeling_errc::component_container_full);
 
     if (not connections.can_alloc(src.connections.size()) and
         not connections.reserve(src.connections.size()))
-        return new_error(modeling_errc::component_container_full);
+        return make_error(modeling_errc::component_container_full);
 
     table<child_id, child_id> mapping;
 
@@ -180,26 +180,25 @@ bool generic_component::exists(const child&           src,
     return false;
 }
 
-status generic_component::connect([[maybe_unused]] const modeling& mod,
-                                  const child&                     src,
-                                  const connection::port           p_src,
-                                  const child&                     dst,
+status generic_component::connect(const child&           src,
+                                  const connection::port p_src,
+                                  const child&           dst,
                                   const connection::port p_dst) noexcept
 {
     if (exists(src, p_src, dst, p_dst))
-        return new_error(modeling_errc::generic_connection_already_exist);
+        return make_error(modeling_errc::generic_connection_already_exist);
 
     if (src.type == child_type::model) {
         if (dst.type == child_type::model) {
             if (not is_ports_compatible(
                   src.id.mdl_type, p_src.model, dst.id.mdl_type, p_dst.model))
-                return new_error(
+                return make_error(
                   modeling_errc::generic_connection_compatibility_error);
         }
     }
 
     if (not connections.can_alloc(1))
-        return new_error(modeling_errc::generic_connection_container_full);
+        return make_error(modeling_errc::generic_connection_container_full);
 
     connections.alloc(children.get_id(src), p_src, children.get_id(dst), p_dst);
 
@@ -211,12 +210,12 @@ status generic_component::connect_input(const port_id          x,
                                         const connection::port port) noexcept
 {
     if (not input_connections.can_alloc(1))
-        return new_error(
+        return make_error(
           modeling_errc::generic_input_connection_container_full);
 
     for (const auto& con : input_connections)
         if (con.x == x and con.dst == children.get_id(dst) and con.port == port)
-            return new_error(
+            return make_error(
               modeling_errc::generic_input_connection_container_already_exist);
 
     input_connections.alloc(x, children.get_id(dst), port);
@@ -229,12 +228,12 @@ status generic_component::connect_output(const port_id          y,
                                          const connection::port port) noexcept
 {
     if (not output_connections.can_alloc(1))
-        return new_error(
+        return make_error(
           modeling_errc::generic_output_connection_container_full);
 
     for (const auto& con : output_connections)
         if (con.y == y and con.src == children.get_id(src) and con.port == port)
-            return new_error(
+            return make_error(
               modeling_errc::generic_output_connection_container_already_exist);
     output_connections.alloc(y, children.get_id(src), port);
 
@@ -248,6 +247,19 @@ bool generic_component::exists_child(const std::string_view str) const noexcept
             return true;
 
     return false;
+}
+
+child_id generic_component::find_child(
+  const std::string_view name) const noexcept
+{
+    for (const auto& c : children) {
+        const auto c_id = children.get_id(c);
+
+        if (children_names[c_id].sv() == name)
+            return c_id;
+    }
+
+    return undefined<child_id>();
 }
 
 name_str generic_component::make_unique_name_id(

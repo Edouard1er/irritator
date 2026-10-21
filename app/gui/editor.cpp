@@ -297,17 +297,15 @@ static bool show_parameter(generator_tag,
               "Time", srcs, p.integers[generator_tag::source_ta]))
             is_changed = true;
 
-        if (ImGui::InputReal("offset", &p.reals[0])) {
-            p.reals[0] = p.reals[0] < 0.0 ? 0.0 : p.reals[0];
-            is_changed = true;
-        }
-
         ImGui::SameLine();
         HelpMarker(
           "Unchecked, the generator stops to send data if the source are "
           "empty or undefined. Checked, the simulation will stop.");
 
         ImGui::PopID();
+    } else {
+        if (ImGui::InputReal("Default ta", &p.reals[generator_tag::sigma]))
+            is_changed = true;
     }
 
     if (flags[generator::option::value_use_source]) {
@@ -318,6 +316,9 @@ static bool show_parameter(generator_tag,
             is_changed = true;
 
         ImGui::PopID();
+    } else {
+        if (ImGui::InputReal("Default value", &p.reals[generator_tag::value]))
+            is_changed = true;
     }
 
     return is_changed;
@@ -437,6 +438,24 @@ static bool show_parameter(qss_inverse_tag,
 }
 
 template<typename ExternalSourceType>
+static bool show_parameter(qss_max_hold_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(qss_min_hold_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
 static bool show_parameter(qss_cross_tag,
                            application& /*app*/,
                            ExternalSourceType& /*srcs*/,
@@ -504,6 +523,110 @@ static bool show_parameter(accumulator_2_tag,
                            parameter& /*p*/) noexcept
 {
     return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(sample_hold_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto copy = p.reals[sample_hold_tag::ts];
+    if (ImGui::InputReal("time-step", &copy)) {
+        if (copy > 0) {
+            p.reals[sample_hold_tag::ts] = copy;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(zero_order_hold_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(quantizer_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto copy = p.reals[quantizer_tag::step];
+    if (ImGui::InputReal("step", &copy)) {
+        if (copy > 0) {
+            p.reals[quantizer_tag::step] = copy;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(integrate_and_fire_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto copy = p.reals[integrate_and_fire_tag::threshold];
+    if (ImGui::InputReal("threshold", &copy)) {
+        if (std::isfinite(copy)) {
+            p.reals[integrate_and_fire_tag::threshold] = copy;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(threshold_crossing_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto copy = p.reals[threshold_crossing_tag::level];
+    if (ImGui::InputReal("level", &copy)) {
+        if (std::isfinite(copy)) {
+            p.reals[threshold_crossing_tag::level] = copy;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(pwm_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto u         = 0;
+    auto period    = p.reals[pwm_tag::period];
+    auto amplitude = p.reals[pwm_tag::amplitude];
+
+    if (ImGui::InputReal("period", &period)) {
+        if (std::isfinite(period)) {
+            p.reals[pwm_tag::period] = period;
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("amplitude", &amplitude)) {
+        if (std::isfinite(amplitude)) {
+            p.reals[pwm_tag::amplitude] = amplitude;
+            ++u;
+        }
+    }
+
+    return u > 0;
 }
 
 template<typename ExternalSourceType>
@@ -659,7 +782,254 @@ static bool show_parameter(logical_or_3_tag,
 }
 
 template<typename ExternalSourceType>
+static bool show_parameter(saturation_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto lower = p.reals[saturation_tag::lower];
+    auto upper = p.reals[saturation_tag::upper];
+    auto u     = 0;
+
+    if (ImGui::InputReal("lower", &lower)) {
+        if (std::isfinite(lower)) {
+            p.reals[saturation_tag::lower] = lower;
+
+            if (upper <= lower)
+                p.reals[saturation_tag::upper] += 1.0;
+
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("upper", &upper)) {
+        if (std::isfinite(upper)) {
+            p.reals[saturation_tag::upper] = upper;
+
+            if (lower <= upper)
+                p.reals[saturation_tag::lower] -= 1.0;
+
+            ++u;
+        }
+    }
+
+    return u > 0;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(dead_zone_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto lower = p.reals[dead_zone_tag::lower];
+    auto upper = p.reals[dead_zone_tag::upper];
+    auto u     = 0;
+
+    if (ImGui::InputReal("lower", &lower)) {
+        if (std::isfinite(lower)) {
+            p.reals[dead_zone_tag::lower] = lower;
+
+            if (upper <= lower)
+                p.reals[dead_zone_tag::upper] += 1.0;
+
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("upper", &upper)) {
+        if (std::isfinite(upper)) {
+            p.reals[dead_zone_tag::upper] = upper;
+
+            if (lower <= upper)
+                p.reals[dead_zone_tag::lower] -= 1.0;
+
+            ++u;
+        }
+    }
+
+    return u > 0;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(hysteresis_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto lower    = p.reals[hysteresis_tag::lower];
+    auto upper    = p.reals[hysteresis_tag::upper];
+    auto out_low  = p.reals[hysteresis_tag::out_low];
+    auto out_high = p.reals[hysteresis_tag::out_high];
+    auto u        = 0;
+
+    if (ImGui::InputReal("lower", &lower)) {
+        if (std::isfinite(lower)) {
+            p.reals[hysteresis_tag::lower] = lower;
+
+            if (upper <= lower)
+                p.reals[hysteresis_tag::upper] += 1.0;
+
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("upper", &upper)) {
+        if (std::isfinite(upper)) {
+            p.reals[hysteresis_tag::upper] = upper;
+
+            if (lower <= upper)
+                p.reals[hysteresis_tag::lower] -= 1.0;
+
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("output low", &out_low)) {
+        if (std::isfinite(out_low)) {
+            p.reals[hysteresis_tag::out_low] = out_low;
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("output high", &out_high)) {
+        if (std::isfinite(out_high)) {
+            p.reals[hysteresis_tag::out_high] = out_high;
+            ++u;
+        }
+    }
+
+    return u > 0;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(wrap_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    auto origin = p.reals[wrap_tag::origin];
+    auto modulo = p.reals[wrap_tag::modulo];
+    auto u      = 0;
+
+    if (ImGui::InputReal("origin", &origin)) {
+        if (std::isfinite(origin)) {
+            p.reals[wrap_tag::origin] = origin;
+            ++u;
+        }
+    }
+
+    if (ImGui::InputReal("modulo", &modulo)) {
+        if (std::isfinite(modulo)) {
+            p.reals[wrap_tag::modulo] = modulo;
+            ++u;
+        }
+    }
+
+    return u > 0;
+}
+
+template<typename ExternalSourceType>
 static bool show_parameter(logical_invert_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(sqrt_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(atan_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(tan_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(tanh_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(sigmoid_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(division_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(atan2_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(abs_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(sign_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(minimum_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& /*p*/) noexcept
+{
+    return false;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(maximum_tag,
                            application& /*app*/,
                            ExternalSourceType& /*srcs*/,
                            parameter& /*p*/) noexcept
@@ -715,11 +1085,11 @@ constexpr static inline const char* simulation_wrapper_tag_run_type_names[] = {
 
 template<typename ExternalSourceType>
 static bool show_parameter(simulation_wrapper_tag,
-                           application& /*app*/,
+                           application& app,
                            ExternalSourceType& /*srcs*/,
                            parameter& p) noexcept
 {
-    int changed = false;
+    auto changed = 0;
 
     auto i = static_cast<int>(p.integers[simulation_wrapper_tag::run]);
 
@@ -731,8 +1101,21 @@ static bool show_parameter(simulation_wrapper_tag,
         ++changed;
     }
 
-    if (ImGui::Button("simulation-id"))
-        debug::breakpoint();
+    const auto param_compo_id =
+      enum_cast<component_id>(p.integers[simulation_wrapper_tag::id]);
+    const auto compo_id =
+      app.mod.ids.read([&](const auto& ids, auto) noexcept -> component_id {
+          return is_defined(param_compo_id) and ids.exists(param_compo_id)
+                   ? param_compo_id
+                   : undefined<component_id>();
+      });
+
+    const auto ret = app.component_sel.combobox(
+      "simulation component", component_type::simulation, compo_id);
+    if (ret.is_done) {
+        p.integers[simulation_wrapper_tag::id] = ordinal(ret.id);
+        ++changed;
+    }
 
     return changed;
 }

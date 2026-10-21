@@ -22,91 +22,92 @@ static tree_node_id show_project_hierarchy(application&    app,
                                            tree_node&      root,
                                            tree_node_id    selection) noexcept
 {
-    return app.mod.ids.read([&](const auto& ids,
-                                auto) noexcept -> tree_node_id {
-        struct elem {
-            explicit constexpr elem(const tree_node_id id) noexcept
-              : tn(id)
-            {}
+    return app.mod.ids.read(
+      [&](const auto& ids, auto) noexcept -> tree_node_id {
+          struct elem {
+              explicit constexpr elem(const tree_node_id id) noexcept
+                : tn(id)
+              {}
 
-            tree_node_id tn;
+              tree_node_id tn;
 
-            bool children_read = false;
-            bool sibling_read  = false;
-            bool pop_required  = false;
-        };
+              bool children_read = false;
+              bool sibling_read  = false;
+              bool pop_required  = false;
+          };
 
-        small_vector<elem, max_component_stack_size> stack;
+          small_vector<elem, max_component_stack_size> stack;
 
-        auto next_selection = selection;
+          auto next_selection = selection;
 
-        stack.emplace_back(pj_ed.pj.tree_nodes.get_id(root));
+          stack.emplace_back(pj_ed.pj.tree_nodes.get_id(root));
 
-        while (not stack.empty()) {
-            if (stack.back().children_read and stack.back().sibling_read) {
-                if (stack.back().pop_required)
-                    ImGui::TreePop();
-                stack.pop_back();
-                continue;
-            }
+          while (not stack.empty()) {
+              if (stack.back().children_read and stack.back().sibling_read) {
+                  if (stack.back().pop_required)
+                      ImGui::TreePop();
+                  stack.pop_back();
+                  continue;
+              }
 
-            const auto  tn_id         = stack.back().tn;
-            const auto& tn            = pj_ed.pj.tree_nodes.get(tn_id);
-            const auto& compo         = ids.components[tn.id];
-            auto        is_selected   = tn_id == selection;
-            const auto  copy_selected = is_selected;
+              const auto  tn_id       = stack.back().tn;
+              const auto& tn          = *pj_ed.pj.tree_nodes.try_to_get(tn_id);
+              const auto& compo       = ids.components[tn.id];
+              auto        is_selected = tn_id == selection;
+              const auto  copy_selected = is_selected;
 
-            const auto name =
-              format_n<127>("{} ({})", compo.name.sv(), tn.unique_id.sv());
+              const auto name = format_n<127>("{} ({})", compo.name.sv(),
+                                              tn.unique_id.sv());
 
-            if (not stack.back().children_read) {
-                stack.back().children_read = true;
-                if (not tn.tree.get_child()) {
-                    if (ImGui::SelectableWithHint(
-                          name.c_str(),
-                          component_type_names[ordinal(compo.type)],
-                          &is_selected)) {
-                        next_selection =
-                          is_selected ? (selection != tn_id ? tn_id : selection)
-                                      : undefined<tree_node_id>();
-                    }
-                } else {
-                    const auto open = ImGui::TreeNodeExSelectableWithHint(
-                      name.c_str(),
-                      component_type_names[ordinal(compo.type)],
-                      &is_selected,
-                      ImGuiTreeNodeFlags_OpenOnArrow |
-                        ImGuiTreeNodeFlags_SpanAvailWidth);
+              if (not stack.back().children_read) {
+                  stack.back().children_read = true;
+                  if (not tn.tree.get_child()) {
+                      if (ImGui::SelectableWithHint(
+                            name.c_str(),
+                            component_type_names[ordinal(compo.type)],
+                            &is_selected)) {
+                          next_selection = is_selected
+                                             ? (selection != tn_id ? tn_id
+                                                                   : selection)
+                                             : undefined<tree_node_id>();
+                      }
+                  } else {
+                      const auto open = ImGui::TreeNodeExSelectableWithHint(
+                        name.c_str(), component_type_names[ordinal(compo.type)],
+                        &is_selected,
+                        ImGuiTreeNodeFlags_OpenOnArrow |
+                          ImGuiTreeNodeFlags_SpanAvailWidth);
 
-                    if (copy_selected != is_selected)
-                        next_selection =
-                          is_selected ? tn_id : undefined<tree_node_id>();
+                      if (copy_selected != is_selected)
+                          next_selection = is_selected
+                                             ? tn_id
+                                             : undefined<tree_node_id>();
 
-                    if (open) {
-                        stack.back().pop_required = true;
-                        stack.emplace_back(
-                          pj_ed.pj.tree_nodes.get_id(*tn.tree.get_child()));
-                    }
-                }
-                continue;
-            }
+                      if (open) {
+                          stack.back().pop_required = true;
+                          stack.emplace_back(
+                            pj_ed.pj.tree_nodes.get_id(*tn.tree.get_child()));
+                      }
+                  }
+                  continue;
+              }
 
-            if (not stack.back().sibling_read) {
-                stack.back().sibling_read = true;
+              if (not stack.back().sibling_read) {
+                  stack.back().sibling_read = true;
 
-                if (stack.back().children_read and
-                    not stack.back().pop_required)
-                    stack.pop_back(); // Optimization: do not let sibling into
-                                      // the stack. The stack size is now
-                                      // limited to the max component depth.
+                  if (stack.back().children_read and
+                      not stack.back().pop_required)
+                      stack.pop_back(); // Optimization: do not let sibling into
+                                        // the stack. The stack size is now
+                                        // limited to the max component depth.
 
-                if (auto* sibling = tn.tree.get_sibling())
-                    stack.emplace_back(pj_ed.pj.tree_nodes.get_id(*sibling));
-            }
-        }
+                  if (auto* sibling = tn.tree.get_sibling())
+                      stack.emplace_back(pj_ed.pj.tree_nodes.get_id(*sibling));
+              }
+          }
 
-        return next_selection;
-    });
+          return next_selection;
+      });
 }
 
 static inline constexpr std::string_view simulation_status_names[] = {
@@ -137,8 +138,8 @@ static bool show_registred_obseravation_path(application&    app,
     const auto  old_observation_dir = ed.pj.observation_dir;
 
     app.mod.files.read([&](const auto& fs, const auto /*vers*/) {
-        const auto* reg_dir =
-          fs.registred_paths.try_to_get(ed.pj.observation_dir);
+        const auto* reg_dir = fs.registred_paths.try_to_get(
+          ed.pj.observation_dir);
         const auto preview = reg_dir ? reg_dir->name.c_str() : "-";
 
         if (ImGui::BeginCombo("Path##Obs", preview)) {
@@ -159,8 +160,8 @@ static bool show_registred_obseravation_path(application&    app,
         }
 
         ImGui::SameLine();
-        if (const auto* rr =
-              fs.registred_paths.try_to_get(ed.pj.observation_dir)) {
+        if (const auto* rr = fs.registred_paths.try_to_get(
+              ed.pj.observation_dir)) {
             HelpMarker(rr->path.c_str());
         } else {
             if (ImGui::Button("+"))
@@ -178,15 +179,16 @@ static bool show_registred_obseravation_path(application&    app,
                         ed.pj.observation_dir = fs.registred_paths.get_id(path);
                         path.path             = reinterpret_cast<const char*>(
                           app.f_dialog.result.u8string().c_str());
-                        path.name =
-                          app.f_dialog.result.has_stem()
-                            ? reinterpret_cast<const char*>(
-                                app.f_dialog.result.stem().u8string().c_str())
-                            : reinterpret_cast<const char*>(
-                                app.f_dialog.result.parent_path()
-                                  .stem()
-                                  .u8string()
-                                  .c_str());
+                        path.name = app.f_dialog.result.has_stem()
+                                      ? reinterpret_cast<const char*>(
+                                          app.f_dialog.result.stem()
+                                            .u8string()
+                                            .c_str())
+                                      : reinterpret_cast<const char*>(
+                                          app.f_dialog.result.parent_path()
+                                            .stem()
+                                            .u8string()
+                                            .c_str());
                     }
                 });
             }
@@ -223,95 +225,78 @@ static void show_simulation_action_buttons(application&    app,
     const auto button         = ImVec2{ button_x, 0.f };
     const auto small_button   = ImVec2{ small_button_x, 0.f };
 
-    const bool can_be_initialized = !any_equal(ed.simulation_state,
-                                               simulation_status::not_started,
-                                               simulation_status::finished,
-                                               simulation_status::initialized,
-                                               simulation_status::not_started);
+    const bool can_be_initialized = any_equal(
+      ed.pj.simulation_state, simulation_status::not_started,
+      simulation_status::initialized, simulation_status::paused,
+      simulation_status::finished);
 
-    const bool can_be_started =
-      !any_equal(ed.simulation_state, simulation_status::initialized);
+    const bool can_be_started = ed.pj.simulation_state ==
+                                simulation_status::initialized;
 
-    const bool can_be_paused = !any_equal(ed.simulation_state,
-                                          simulation_status::running,
-                                          simulation_status::run_requiring,
-                                          simulation_status::paused);
+    const bool can_be_paused = ed.pj.simulation_state ==
+                               simulation_status::running;
 
-    const bool can_be_restarted =
-      !any_equal(ed.simulation_state, simulation_status::pause_forced);
+    const bool can_be_restarted = ed.pj.simulation_state ==
+                                  simulation_status::paused;
 
-    const bool can_be_stopped = !any_equal(ed.simulation_state,
-                                           simulation_status::running,
-                                           simulation_status::run_requiring,
-                                           simulation_status::paused,
-                                           simulation_status::pause_forced);
-
-    ImGui::BeginDisabled(can_be_initialized);
-    if (EnhancedButton(
-          app, "\ue0c8", button, "Initialize simulation models and data."))
-        ed.start_simulation_init(app);
+    ImGui::BeginDisabled(not can_be_initialized);
+    if (EnhancedButton(app, "\ue0c8", button,
+                       "Initialize simulation models and data."))
+        ed.init_simulation(app);
     ImGui::EndDisabled();
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(can_be_started);
+    ImGui::BeginDisabled(not can_be_started);
     if (EnhancedButton(app, "\ue0a9", button, "Start and run the simulation"))
-        ed.start_simulation_start(app);
+        ed.run_simulation(app);
     ImGui::EndDisabled();
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(can_be_paused);
+    ImGui::BeginDisabled(not can_be_paused);
     if (EnhancedButton(app, "\ue09e", button, "Pause the simulation"))
-        ed.force_pause = true;
+        ed.pause_simulation();
     ImGui::EndDisabled();
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(can_be_restarted);
-    if (EnhancedButton(
-          app, "\ue030", button, "Restart the simulation after pause")) {
-        ed.simulation_state = simulation_status::run_requiring;
-        ed.force_pause      = false;
-        ed.start_simulation_start(app);
+    ImGui::BeginDisabled(not can_be_restarted);
+    if (EnhancedButton(app, "\ue030", button,
+                       "Restart the simulation after pause")) {
+        ed.pj.simulation_state = simulation_status::run_requiring;
+        ed.force_pause         = false;
     }
     ImGui::EndDisabled();
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(can_be_stopped);
-    if (EnhancedButton(
-          app,
-          "\ue0cb",
-          button,
-          "Stop the simulation (can not be restart at the same state"))
-        ed.force_stop = true;
-    ImGui::EndDisabled();
+    // ImGui::BeginDisabled(can_be_stopped);
+    // if (EnhancedButton(
+    //       app,
+    //       "\ue0cb",
+    //       button,
+    //       "Stop the simulation (can not be restart at the same state"))
+    //     ed.force_stop = true;
+    // ImGui::EndDisabled();
 
-    const bool history_mode = (ed.store_all_changes || ed.allow_user_changes) &&
-                              (can_be_started || can_be_restarted);
-
-    if (history_mode) {
-        if (EnhancedButton(
-              app, "\ue0c6", small_button, "Advance simulation step by step"))
-            ed.start_simulation_step_by_step(app);
+    if (ed.pj.flags[project::simulation_flag::debug] and can_be_restarted) {
+        if (EnhancedButton(app, "\ue0c6", small_button,
+                           "Advance simulation step by step"))
+            ed.pj.simulation_step();
 
         ImGui::SameLine();
 
-        const auto have_snaphot = ed.store_all_changes and not ed.snaps.empty();
-
-        ImGui::BeginDisabled(not have_snaphot);
-        if (EnhancedButton(
-              app, "\ue0b3", small_button, "Rewind into simulation states"))
-            ed.start_simulation_back(app);
-        ImGui::EndDisabled();
+        ImGui::BeginDisabled(ed.pj.empty_snapshots());
+        if (EnhancedButton(app, "\ue0b3", small_button,
+                           "Rewind into simulation states"))
+            ed.pj.simulation_back();
 
         ImGui::SameLine();
 
-        ImGui::BeginDisabled(not have_snaphot);
-        if (EnhancedButton(
-              app, "\ue05c", small_button, "Forward into simulation states"))
-            ed.start_simulation_advance(app);
+        if (EnhancedButton(app, "\ue05c", small_button,
+                           "Forward into simulation states"))
+            ed.pj.simulation_advance();
         ImGui::EndDisabled();
     }
 }
@@ -325,10 +310,10 @@ static bool show_project_simulation_settings(application&    app,
     auto is_inf = std::isinf(end);
 
     name_str name = ed.pj.name;
-    if (ImGui::InputFilteredString(
-          "Name", name, ImGuiInputTextFlags_EnterReturnsTrue)) {
-        if (not project_name_already_exists(
-              app, app.pjs.get_id(ed), name.sv())) {
+    if (ImGui::InputFilteredString("Name", name,
+                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (not project_name_already_exists(app, app.pjs.get_id(ed),
+                                            name.sv())) {
             ed.pj.name      = name;
             ed.is_dock_init = false;
         }
@@ -336,86 +321,48 @@ static bool show_project_simulation_settings(application&    app,
 
     app.mod.files.read([&](const auto& fs, auto) noexcept {
         const auto selected = ed.file_select.combobox(
-          app,
-          fs,
-          file_path::file_type::project_file,
+          app, fs, file_type::project_file,
           file_selector::flags(file_selector::flag::show_save_button));
         if (selected.save and not ed.save_in_progress.test_and_set()) {
-            const auto pj_id = app.pjs.get_id(ed);
-            ed.pj.file       = selected.file_id;
+            const auto pj_id   = app.pjs.get_id(ed);
+            ed.pj.project_file = selected.file_id;
 
             app.add_gui_task([&app, pj_id]() {
                 auto& ed = app.pjs.get(pj_id);
 
-                if (auto ret = ed.pj.save(app.mod); ret) {
-                    app.jn.push(
-                      log_level::info,
-                      [&](auto& title, auto& /*msg*/) noexcept {
-                          app.mod.files.read(
-                            [&](const auto& fs, const auto /*vers*/) {
-                                format(title,
-                                       "Saving project file {} success",
-                                       fs.file_paths.get(ed.pj.file).path.sv());
+                app.mod.files.read([&](const auto& fs, auto) noexcept {
+                    app.mod.ids.read([&](const auto& ids, auto) noexcept {
+                        if (auto ret = ed.pj.save(fs, ids); ret) {
+                            log(log_level::info, [&](auto& msg) noexcept {
+                                app.mod.files.read([&](const auto& fs,
+                                                       const auto /*vers*/) {
+                                    format(
+                                      msg,
+                                      "project: saving project file {} success",
+                                      fs.file_paths.get(ed.pj.project_file)
+                                        .path.sv());
+                                });
                             });
-                      });
-                } else {
-                    app.jn.push(
-                      log_level::error, [&](auto& title, auto& msg) noexcept {
-                          const small_string<127> name = app.mod.files.read(
-                            [&](const auto& fs, const auto /*vers*/) {
-                                const auto* f =
-                                  fs.file_paths.try_to_get(ed.pj.file);
-                                return f ? f->path.sv()
-                                         : std::string_view{ "-" };
+                        } else {
+                            log(log_level::error, [&](auto& msg) noexcept {
+                                const path name = app.mod.files.read(
+                                  [&](const auto& fs, const auto /*vers*/) {
+                                      const auto* f = fs.file_paths.try_to_get(
+                                        ed.pj.project_file);
+                                      return f ? f->path.sv()
+                                               : std::string_view{ "-" };
+                                  });
+
+                                format(
+                                  msg,
+                                  "project: saving project file {} error {}",
+                                  name.sv(), ret.error());
                             });
+                        }
 
-                          format(
-                            title, "Saving project file {} error", name.sv());
-
-                          if (ret.error().cat() == category::project) {
-                              if (static_cast<project_errc>(
-                                    ret.error().value()) ==
-                                  project_errc::file_access_error) {
-                                  msg = "Access error.";
-                              }
-                          } else if (ret.error().cat() == category::json) {
-                              switch (
-                                static_cast<json_errc>(ret.error().value())) {
-                              case json_errc::memory_error:
-                                  format(msg,
-                                         "json archiving memory error: not "
-                                         "enough memory\n");
-                                  break;
-
-                              case json_errc::arg_error:
-                                  format(msg,
-                                         "json archiving internal error\n");
-                                  break;
-
-                              case json_errc::file_error:
-                                  format(msg,
-                                         "json archiving memory error: not "
-                                         "enough memory\n");
-                                  break;
-
-                              case json_errc::invalid_project_format:
-                                  format(msg,
-                                         "json archiving json format error "
-                                         "`{}' at offset "
-                                         "{}\n",
-                                         0,
-                                         0);
-                                  break;
-
-                              default:
-                                  format(msg,
-                                         "json de-archiving unknown error\n");
-                              }
-                          }
-                      });
-                }
-
-                ed.save_in_progress.clear();
+                        ed.save_in_progress.clear();
+                    });
+                });
             });
         }
     });
@@ -432,13 +379,14 @@ static bool show_project_simulation_settings(application&    app,
         ed.pj.sim.limits.set_bound(begin, end);
     ImGui::EndDisabled();
 
-    ImGui::BeginDisabled(not ed.real_time);
+    ImGui::BeginDisabled(not ed.pj.flags[project::simulation_flag::real_time]);
     {
-        i64 value = ed.simulation_time_duration.count();
+        i64 value = ed.one_simulation_time_duration.count();
 
         if (ImGui::InputScalar("ms/u.t.", ImGuiDataType_S64, &value)) {
             if (value > 1) {
-                ed.simulation_time_duration = std::chrono::milliseconds(value);
+                ed.one_simulation_time_duration = std::chrono::milliseconds(
+                  value);
                 ++up;
             }
         }
@@ -463,23 +411,35 @@ static bool show_project_simulation_settings(application&    app,
                    "value may increase CPU load.");
     }
 
-    ImGui::BeginDisabled(ed.is_simulation_running());
-    up += ImGui::Checkbox("Enable live edition", &ed.allow_user_changes);
-    if (ImGui::Checkbox("Store simulation", &ed.store_all_changes)) {
-        ++up;
-    }
+    const auto started = any_equal(ed.pj.simulation_state,
+                                   simulation_status::not_started,
+                                   simulation_status::initialized);
 
-    up += ImGui::Checkbox("Real time", &ed.real_time);
+    auto flags     = ed.pj.flags;
+    auto debug     = ed.pj.flags[project::simulation_flag::debug];
+    auto real_time = ed.pj.flags[project::simulation_flag::real_time];
+    auto write_irb = ed.pj.flags[project::simulation_flag::write_irtb];
+
+    ImGui::BeginDisabled(not started);
+    if (ImGui::Checkbox("Debug", &debug))
+        flags.set(project::simulation_flag::debug, debug);
+    if (ImGui::Checkbox("Real time", &real_time))
+        flags.set(project::simulation_flag::real_time, real_time);
+    if (ImGui::Checkbox("Write on disk", &write_irb))
+        flags.set(project::simulation_flag::write_irtb, write_irb);
     ImGui::EndDisabled();
+
+    if (flags != ed.pj.flags) {
+        ed.pj.flags            = flags; /* Disable start button */
+        ed.pj.simulation_state = simulation_status::not_started;
+    }
 
     ImGui::LabelFormat("time", "{:.6f}", ed.simulation_display_current);
     ImGui::SameLine();
     HelpMarker("Display the simulation current time.");
 
     ImGui::LabelFormat(
-      "phase",
-      "{}",
-      simulation_status_names[ordinal(ed.simulation_state.load())]);
+      "phase", "{}", simulation_status_names[ordinal(ed.pj.simulation_state)]);
 
     ImGui::SameLine();
     HelpMarker("Display the simulation phase. Only for debug.");
@@ -491,21 +451,17 @@ static bool show_project_simulation_settings(application&    app,
     up += show_registred_obseravation_path(app, ed);
 
     static const char* raw_data_type_str[] = {
-        "None",
-        "Graph (dot file)",
-        "Binary (dot file + all transitions)",
+        "None", "Graph (dot file)", "Binary (dot file + all transitions)",
         "Text (dot file + all transitions)"
     };
 
     int current = ordinal(ed.save_simulation_raw_data);
 
-    if (ImGui::Combo("Type",
-                     &current,
-                     raw_data_type_str,
+    if (ImGui::Combo("Type", &current, raw_data_type_str,
                      IM_ARRAYSIZE(raw_data_type_str))) {
         if (current != ordinal(ed.save_simulation_raw_data)) {
-            ed.save_simulation_raw_data =
-              enum_cast<project_editor::raw_data_type>(current);
+            ed.save_simulation_raw_data = enum_cast<
+              project_editor::raw_data_type>(current);
             ++up;
         }
     }
@@ -529,7 +485,7 @@ static bool show_project_simulation_settings(application&    app,
 
 void project_editor::show_settings_and_hierarchy(application& app) noexcept
 {
-    if (auto* parent = pj.tn_head(); parent) {
+    if (auto* parent = pj.tree_nodes.try_to_get(pj.tn_head())) {
         auto next_selection = m_selected_tree_node;
 
         if (ImGui::BeginTabBar("Project")) {

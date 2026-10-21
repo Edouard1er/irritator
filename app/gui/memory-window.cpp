@@ -77,9 +77,6 @@ void memory_window::show() noexcept
 
     if (ImGui::CollapsingHeader("Project", ImGuiTreeNodeFlags_DefaultOpen)) {
         for (const auto& p : app.pjs) {
-            if (p.disable_access)
-                continue;
-
             const auto id  = app.pjs.get_id(p);
             const auto idx = get_index(id);
 
@@ -91,9 +88,6 @@ void memory_window::show() noexcept
                   "observers", "{}", p.pj.sim.observers.size());
                 ImGui::LabelFormat(
                   "immediate models", "{}", p.pj.sim.immediate_models.size());
-                ImGui::LabelFormat("immediate observers",
-                                   "{}",
-                                   p.pj.sim.immediate_observers.size());
                 ImGui::LabelFormat(
                   "message buffer alloc", "{}", p.pj.sim.message_buffer.size());
                 ImGui::LabelFormat("node", "{}", p.pj.sim.nodes.size());

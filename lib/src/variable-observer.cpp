@@ -2,86 +2,59 @@
 // Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
-#include <irritator/core.hpp>
 #include <irritator/format.hpp>
 #include <irritator/modeling.hpp>
 
 namespace irt {
 
-static bool check(const sz tn_ids,
-                  const sz mdl_ids,
-                  const sz obs_ids,
-                  const sz colors,
-                  const sz options) noexcept
+status variable_observer::init(project& pj) noexcept
 {
-    return tn_ids == mdl_ids and tn_ids == obs_ids and tn_ids == colors and
-           tn_ids == options;
-}
+    for (const auto id : subs) {
+        const auto tn_id  = subs.get<tree_node_id>(id);
+        const auto mdl_id = subs.get<model_id>(id);
+        auto*      tn     = pj.tree_nodes.try_to_get(tn_id);
+        auto*      mdl    = pj.sim.models.try_to_get(mdl_id);
 
-status variable_observer::init(project& pj, simulation& sim) noexcept
-{
-    for (sz i = 0, e = m_tn_ids.size(); i != e; ++i) {
-        auto  obs_id = undefined<observer_id>();
-        auto* tn     = pj.tree_nodes.try_to_get(m_tn_ids[i]);
-        auto* mdl    = sim.models.try_to_get(m_mdl_ids[i]);
+        subs.get<observer_id>(id) = undefined<observer_id>();
 
         if (tn and mdl) {
-            auto* obs = sim.observers.try_to_get(mdl->obs_id);
+            auto* obs = pj.sim.observers.try_to_get(mdl->obs_id);
 
             if (obs) {
-                obs_id = mdl->obs_id;
-                obs->init(observer::buffer_size_t(raw_buffer_size.value()),
-                          observer::linearized_buffer_size_t(
-                            linearized_buffer_size.value()),
-                          time_step.value());
+                obs->reset();
             } else {
-                if (not sim.observers.can_alloc() and
-                    not sim.observers.grow<3, 2>())
-                    return new_error(simulation_errc::observers_container_full);
+                if (not pj.sim.observers.can_alloc(1) and
+                    not pj.sim.observers.grow<3, 2>(1))
+                    return make_error(
+                      simulation_errc::observers_container_full);
 
-                auto& new_obs = sim.observers.alloc();
-                new_obs.init(observer::buffer_size_t(raw_buffer_size.value()),
-                             observer::linearized_buffer_size_t(
-                               linearized_buffer_size.value()),
-                             time_step.value());
-
-                obs_id = sim.observers.get_id(new_obs);
-                sim.observe(*mdl, new_obs);
+                pj.sim.observe(*mdl, timestep.to_double());
             }
-        }
 
-        m_obs_ids[i] = obs_id;
+            subs.get<observer_id>(id) = mdl->obs_id;
+        }
     }
 
     return success();
 }
 
-void variable_observer::clear() noexcept
-{
-    std::fill_n(m_obs_ids.data(), m_obs_ids.size(), undefined<observer_id>());
-}
+void variable_observer::clear() noexcept { subs.clear(); }
 
 auto variable_observer::find(const tree_node_id tn, const model_id mdl) noexcept
   -> sub_id
 {
-    for (const auto id : m_ids) {
-        const auto idx = get_index(id);
-
-        if (m_tn_ids[idx] == tn and m_mdl_ids[idx] == mdl)
+    for (const auto id : subs)
+        if (subs.get<tree_node_id>(id) == tn and subs.get<model_id>(id) == mdl)
             return id;
-    }
 
     return undefined<variable_observer::sub_id>();
 }
 
 bool variable_observer::exists(const tree_node_id tn) noexcept
 {
-    for (const auto id : m_ids) {
-        const auto idx = get_index(id);
-
-        if (m_tn_ids[idx] == tn)
+    for (const auto id : subs)
+        if (subs.get<tree_node_id>(id) == tn)
             return true;
-    }
 
     return false;
 }
@@ -89,60 +62,38 @@ bool variable_observer::exists(const tree_node_id tn) noexcept
 void variable_observer::erase(const tree_node_id tn,
                               const model_id     mdl) noexcept
 {
-    for (const auto id : m_ids) {
-        const auto idx = get_index(id);
-
-        if (m_tn_ids[idx] == tn and m_mdl_ids[idx] == mdl)
-            erase(id);
-    }
+    for (const auto id : subs)
+        if (subs.get<tree_node_id>(id) == tn and subs.get<model_id>(id) == mdl)
+            subs.free(id);
 }
 
 void variable_observer::erase(const sub_id i) noexcept
 {
-    if (const auto idx_opt = m_ids.get(i); idx_opt.has_value())
-        m_ids.free(i);
+    if (subs.exists(i))
+        subs.free(i);
 }
 
 variable_observer::sub_id variable_observer::push_back(
-  const tree_node_id     tn,
-  const model_id         mdl,
-  const color&           c,
-  const type_options     t,
-  const std::string_view name) noexcept
+  const tree_node_id      tn,
+  const model_id          mdl,
+  const color&            c,
+  const plot_type_options t,
+  const std::string_view  name) noexcept
 {
-    check(m_tn_ids.size(),
-          m_mdl_ids.size(),
-          m_obs_ids.size(),
-          m_colors.size(),
-          m_options.size());
+    if (not(subs.can_alloc(1) or subs.grow<3, 2>(1)))
+        return undefined<variable_observer::sub_id>();
 
-    if (not m_ids.capacity()) {
-        m_ids.reserve(max_observers.value());
-        m_tn_ids.resize(max_observers.value());
-        m_mdl_ids.resize(max_observers.value());
-        m_obs_ids.resize(max_observers.value());
-        m_colors.resize(max_observers.value());
-        m_options.resize(max_observers.value());
-        m_names.resize(max_observers.value());
-    }
+    if (const auto id = find(tn, mdl); is_defined(id))
+        return id;
 
-    for (auto id : m_ids) {
-        const auto idx = get_index(id);
+    const auto id = subs.alloc_id();
 
-        if (m_tn_ids[idx] == tn and m_mdl_ids[idx] == mdl)
-            return id;
-    }
-
-    debug::ensure(m_ids.can_alloc(1));
-
-    const auto id  = m_ids.alloc();
-    const auto idx = get_index(id);
-    m_tn_ids[idx]  = tn;
-    m_mdl_ids[idx] = mdl;
-    m_obs_ids[idx] = undefined<observer_id>();
-    m_colors[idx]  = c;
-    m_options[idx] = t;
-    m_names[idx]   = name;
+    subs.get<tree_node_id>(id)      = tn;
+    subs.get<model_id>(id)          = mdl;
+    subs.get<observer_id>(id)       = undefined<observer_id>();
+    subs.get<color>(id)             = c;
+    subs.get<plot_type_options>(id) = t;
+    subs.get<name_str>(id)          = name;
 
     return id;
 }

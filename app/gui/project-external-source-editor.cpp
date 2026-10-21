@@ -20,7 +20,7 @@ static status try_allocate_external_source(application&    app,
 {
     if (not d.can_alloc(1)) {
         if (not d.template grow<3, 2>())
-            return new_error(external_source_errc::memory_error);
+            return make_error(simulation_errc::memory_error);
     }
 
     [[maybe_unused]] auto& src = d.alloc();
@@ -84,23 +84,10 @@ static void display_allocate_external_source(application&    app,
     if (part.has_value()) {
         auto ret = display_allocate_external_source(app, ed, *part);
         if (not ret.has_value()) {
-            switch (ret.error().cat()) {
-            case category::external_source:
-                app.jn.push(log_level::error, [&](auto& title, auto&) {
-                    format(title,
-                           "Fail to initialize {} source",
-                           external_source_str(*part));
-                    // TODO More.
-                });
-                break;
-
-            default:
-                app.jn.push(log_level::error, [&](auto& title, auto&) {
-                    format(title,
-                           "Fail to initialize {} source",
-                           external_source_str(*part));
-                });
-            }
+            log(log_level::error, [&](auto& msg) {
+                format(msg, "external-source: fail to initialize {} source {}",
+                       external_source_str(*part), ret.error());
+            });
         }
     }
 }
@@ -122,7 +109,7 @@ auto show_data_file_input(const file_access& fs,
                 if (const auto* file = fs.file_paths.try_to_get(f_id)) {
                     const auto sv = file->path.sv();
 
-                    if (has_extension(sv, file_path::file_type::data_file)) {
+                    if (has_extension(sv, file_type::data_file)) {
                         if (ImGui::Selectable(file->path.c_str(),
                                               file_id == f_id)) {
                             ret = f_id;
@@ -139,296 +126,293 @@ auto show_data_file_input(const file_access& fs,
     return ret;
 }
 
-bool show_random_distribution_input(
-  external_source_definition::random_source& src) noexcept
+bool show_random_distribution_input(distribution_type& type,
+                                    std::span<real, 2> reals,
+                                    std::span<i32, 2>  ints) noexcept
 {
-    int up           = 0;
-    int current_item = ordinal(src.type);
-    int old_current  = ordinal(src.type);
+    auto up           = 0;
+    auto current_item = static_cast<int>(ordinal(type));
+    auto old_current  = static_cast<int>(ordinal(type));
 
     if (ImGui::Combo("Distribution",
                      &current_item,
                      irt::distribution_type_string,
                      IM_ARRAYSIZE(irt::distribution_type_string))) {
         if (current_item != old_current) {
-            src.type = enum_cast<distribution_type>(current_item);
-            src.ints.fill(0);
-            src.reals.fill(0.0);
+            type = enum_cast<distribution_type>(current_item);
+            std::ranges::fill(ints, 0);
+            std::ranges::fill(reals, 0.0);
             up++;
         }
     }
 
-    switch (src.type) {
+    switch (type) {
     case distribution_type::uniform_int: {
         if (old_current != current_item) {
-            src.ints[0] = 0;
-            src.ints[1] = 100;
+            ints[0] = 0;
+            ints[1] = 100;
         }
 
-        auto a = src.ints[0];
-        auto b = src.ints[1];
+        auto a = ints[0];
+        auto b = ints[1];
 
         if (ImGui::InputInt("a", &a)) {
             up++;
 
             if (a < b)
-                src.ints[0] = a;
+                ints[0] = a;
             else
-                src.ints[1] = a + 1;
+                ints[1] = a + 1;
         }
 
         if (ImGui::InputInt("b", &b)) {
             up++;
 
             if (a < b)
-                src.ints[1] = b;
+                ints[1] = b;
             else
-                src.ints[0] = b - 1;
+                ints[0] = b - 1;
         }
     } break;
 
     case distribution_type::uniform_real: {
         if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
+            reals[0] = 0.0;
+            reals[1] = 1.0;
         }
 
-        auto a = src.reals[0];
-        auto b = src.reals[1];
+        auto a = reals[0];
+        auto b = reals[1];
         if (ImGui::InputDouble("a", &a)) {
             ++up;
             if (a < b)
-                src.reals[0] = a;
+                reals[0] = a;
             else
-                src.reals[1] = a + 1;
+                reals[1] = a + 1;
         }
 
         if (ImGui::InputDouble("b", &b)) {
             ++up;
             if (a < b)
-                src.reals[0] = a;
+                reals[0] = a;
             else
-                src.reals[1] = a + 1;
+                reals[1] = a + 1;
         }
     } break;
 
     case distribution_type::bernouilli:
         if (old_current != current_item)
-            src.reals[0] = 0.5;
+            reals[0] = 0.5;
 
-        if (auto p = src.reals[0];
+        if (auto p = reals[0];
             ImGui::InputDouble("p", &p) and 0.0 <= p and p <= 1.0) {
-            src.reals[0] = p;
+            reals[0] = p;
             ++up;
         }
         break;
 
     case distribution_type::binomial:
         if (old_current != current_item) {
-            src.reals[0] = 0.5;
-            src.ints[0]  = 1;
+            reals[0] = 0.5;
+            ints[0]  = 1;
         }
 
-        if (auto p = src.reals[0];
+        if (auto p = reals[0];
             ImGui::InputDouble("p", &p) and 0.0 <= p and p <= 1.0) {
-            src.reals[0] = p;
+            reals[0] = p;
             ++up;
         }
 
-        if (auto t = src.ints[0]; ImGui::InputInt("t", &t) and t >= 0) {
-            src.ints[0] = t;
+        if (auto t = ints[0]; ImGui::InputInt("t", &t) and t >= 0) {
+            ints[0] = t;
             ++up;
         }
         break;
 
     case distribution_type::negative_binomial:
         if (old_current != current_item) {
-            src.reals[0] = 0.5;
-            src.ints[0]  = 1;
+            reals[0] = 0.5;
+            ints[0]  = 1;
         }
 
-        if (auto p = src.reals[0];
+        if (auto p = reals[0];
             ImGui::InputDouble("p", &p) and 0.0 < p and p <= 1.0) {
-            src.reals[0] = p;
+            reals[0] = p;
             ++up;
         }
 
-        if (auto t = src.ints[0]; ImGui::InputInt("t", &t) and 0 < t) {
-            src.ints[0] = t;
+        if (auto t = ints[0]; ImGui::InputInt("t", &t) and 0 < t) {
+            ints[0] = t;
             ++up;
         }
         break;
 
     case distribution_type::geometric:
         if (old_current != current_item)
-            src.reals[0] = 0.5;
+            reals[0] = 0.5;
 
-        if (auto p = src.reals[0];
+        if (auto p = reals[0];
             ImGui::InputDouble("p", &p) and 0.0 <= p and p < 1.0) {
-            src.reals[0] = p;
+            reals[0] = p;
             ++up;
         }
         break;
 
     case distribution_type::poisson:
         if (old_current != current_item)
-            src.reals[0] = 0.5;
+            reals[0] = 0.5;
 
-        if (auto m = src.reals[0]; ImGui::InputDouble("mean", &m) and 0.0 < m) {
-            src.reals[0] = m;
+        if (auto m = reals[0]; ImGui::InputDouble("mean", &m) and 0.0 < m) {
+            reals[0] = m;
             ++up;
         }
         break;
 
     case distribution_type::exponential:
         if (old_current != current_item)
-            src.reals[0] = 1.0;
+            reals[0] = 1.0;
 
-        if (auto l = src.reals[0];
-            ImGui::InputDouble("lambda", &l) and 0.0 < l) {
-            src.reals[0] = l;
+        if (auto l = reals[0]; ImGui::InputDouble("lambda", &l) and 0.0 < l) {
+            reals[0] = l;
             ++up;
         }
         break;
 
     case distribution_type::gamma:
         if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
+            reals[0] = 1.0;
+            reals[1] = 1.0;
         }
 
-        if (auto a = src.reals[0];
-            ImGui::InputDouble("alpha", &a) and 0.0 < a) {
-            src.reals[0] = a;
+        if (auto a = reals[0]; ImGui::InputDouble("alpha", &a) and 0.0 < a) {
+            reals[0] = a;
             ++up;
         }
 
-        if (auto b = src.reals[1]; ImGui::InputDouble("beta", &b) and 0.0 < b) {
-            src.reals[1] = b;
+        if (auto b = reals[1]; ImGui::InputDouble("beta", &b) and 0.0 < b) {
+            reals[1] = b;
             ++up;
         }
         break;
 
     case distribution_type::weibull:
         if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
+            reals[0] = 1.0;
+            reals[1] = 1.0;
         }
 
-        if (auto a = src.reals[0]; ImGui::InputDouble("a", &a) and 0.0 < a) {
-            src.reals[0] = a;
+        if (auto a = reals[0]; ImGui::InputDouble("a", &a) and 0.0 < a) {
+            reals[0] = a;
             ++up;
         }
 
-        if (auto b = src.reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
-            src.reals[1] = b;
+        if (auto b = reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
+            reals[1] = b;
             ++up;
         }
         break;
 
     case distribution_type::exterme_value:
         if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 0.0;
+            reals[0] = 1.0;
+            reals[1] = 0.0;
         }
 
-        if (auto a = src.reals[0]; ImGui::InputDouble("a", &a)) {
-            src.reals[0] = a;
+        if (auto a = reals[0]; ImGui::InputDouble("a", &a)) {
+            reals[0] = a;
             ++up;
         }
 
-        if (auto b = src.reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
-            src.reals[1] = b;
+        if (auto b = reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
+            reals[1] = b;
             ++up;
         }
         break;
 
     case distribution_type::normal:
         if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
+            reals[0] = 0.0;
+            reals[1] = 1.0;
         }
 
-        if (auto m = src.reals[0]; ImGui::InputDouble("mean", &m)) {
-            src.reals[0] = m;
+        if (auto m = reals[0]; ImGui::InputDouble("mean", &m)) {
+            reals[0] = m;
             ++up;
         }
 
-        if (auto s = src.reals[1];
-            ImGui::InputDouble("stddev", &s) and 0.0 < s) {
-            src.reals[1] = s;
+        if (auto s = reals[1]; ImGui::InputDouble("stddev", &s) and 0.0 < s) {
+            reals[1] = s;
             ++up;
         }
         break;
 
     case distribution_type::lognormal:
         if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
+            reals[0] = 0.0;
+            reals[1] = 1.0;
         }
 
-        if (auto m = src.reals[0]; ImGui::InputDouble("mean", &m)) {
-            src.reals[0] = m;
+        if (auto m = reals[0]; ImGui::InputDouble("mean", &m)) {
+            reals[0] = m;
             ++up;
         }
 
-        if (auto s = src.reals[1];
-            ImGui::InputDouble("stddev", &s) and 0.0 < s) {
-            src.reals[1] = s;
+        if (auto s = reals[1]; ImGui::InputDouble("stddev", &s) and 0.0 < s) {
+            reals[1] = s;
             ++up;
         }
         break;
 
     case distribution_type::chi_squared:
         if (old_current != current_item)
-            src.reals[0] = 1.0;
+            reals[0] = 1.0;
 
-        if (auto n = src.reals[0]; ImGui::InputDouble("n", &n) and 0 < n) {
-            src.reals[0] = n;
+        if (auto n = reals[0]; ImGui::InputDouble("n", &n) and 0 < n) {
+            reals[0] = n;
             ++up;
         }
         break;
 
     case distribution_type::cauchy:
         if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
+            reals[0] = 0.0;
+            reals[1] = 1.0;
         }
 
-        if (auto a = src.reals[0]; ImGui::InputDouble("a", &a)) {
-            src.reals[0] = a;
+        if (auto a = reals[0]; ImGui::InputDouble("a", &a)) {
+            reals[0] = a;
             ++up;
         }
 
-        if (auto b = src.reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
-            src.reals[1] = b;
+        if (auto b = reals[1]; ImGui::InputDouble("b", &b) and 0.0 < b) {
+            reals[1] = b;
             ++up;
         }
         break;
 
     case distribution_type::fisher_f:
         if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
+            reals[0] = 1.0;
+            reals[1] = 1.0;
         }
 
-        if (auto m = src.reals[0]; ImGui::InputDouble("m", &m) and 0 < m) {
-            src.reals[0] = m;
+        if (auto m = reals[0]; ImGui::InputDouble("m", &m) and 0 < m) {
+            reals[0] = m;
             ++up;
         }
 
-        if (auto n = src.reals[1]; ImGui::InputDouble("s", &n) and 0 < n) {
-            src.reals[1] = n;
+        if (auto n = reals[1]; ImGui::InputDouble("s", &n) and 0 < n) {
+            reals[1] = n;
             ++up;
         }
         break;
 
     case distribution_type::student_t:
         if (old_current != current_item)
-            src.reals[0] = 1.0;
+            reals[0] = 1.0;
 
-        if (auto n = src.reals[0]; ImGui::InputDouble("n", &n) and 0 < n) {
-            src.reals[0] = n;
+        if (auto n = reals[0]; ImGui::InputDouble("n", &n) and 0 < n) {
+            reals[0] = n;
             ++up;
         }
         break;
@@ -437,226 +421,31 @@ bool show_random_distribution_input(
     return up > 0;
 }
 
+bool show_random_distribution_input(
+  external_source_definition::random_source& src) noexcept
+{
+    return show_random_distribution_input(src.type, src.reals, src.ints);
+}
+
 bool show_random_distribution_input(random_source& src) noexcept
 {
-    int up           = 0;
-    int current_item = ordinal(src.distribution);
-    int old_current  = ordinal(src.distribution);
+    return show_random_distribution_input(
+      src.distribution, src.reals, src.ints);
+}
 
-    if (ImGui::Combo("Distribution",
-                     &current_item,
-                     irt::distribution_type_string,
-                     IM_ARRAYSIZE(irt::distribution_type_string))) {
-        if (current_item != old_current) {
-            src.distribution = enum_cast<distribution_type>(current_item);
-            up++;
-        }
+bool show_random_distribution_input(random_factor& src) noexcept
+{
+    auto u = 0;
+
+    u += show_random_distribution_input(src.dist, src.reals, src.ints);
+
+    auto value = src.count;
+    if (ImGui::InputScalar("count", ImGuiDataType_U32, &value)) {
+        src.count = value <= 0 ? 1 : value;
+        ++u;
     }
 
-    switch (src.distribution) {
-    case distribution_type::uniform_int: {
-        if (old_current != current_item) {
-            src.ints[0] = 0;
-            src.ints[1] = 100;
-        }
-
-        int a = src.ints[0];
-        int b = src.ints[1];
-
-        if (ImGui::InputInt("a", &a)) {
-            up++;
-
-            if (a < b)
-                src.ints[0] = a;
-            else
-                src.ints[1] = a + 1;
-        }
-
-        if (ImGui::InputInt("b", &b)) {
-            up++;
-
-            if (a < b)
-                src.ints[1] = b;
-            else
-                src.ints[0] = b - 1;
-        }
-    } break;
-
-    case distribution_type::uniform_real: {
-        if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
-        }
-
-        auto a = src.reals[0];
-        auto b = src.reals[1];
-
-        if (ImGui::InputDouble("a", &a)) {
-            ++up;
-            if (a < b)
-                src.reals[0] = a;
-            else
-                src.reals[1] = a + 1;
-        }
-
-        if (ImGui::InputDouble("b", &b)) {
-            ++up;
-            if (a < b)
-                src.reals[0] = a;
-            else
-                src.reals[1] = a + 1;
-        }
-    } break;
-
-    case distribution_type::bernouilli:
-        if (old_current != current_item) {
-            src.reals[0] = 0.5;
-        }
-        if (ImGui::InputDouble("p", &src.reals[0]))
-            ++up;
-        break;
-
-    case distribution_type::binomial:
-        if (old_current != current_item) {
-            src.reals[0] = 0.5;
-            src.ints[0]  = 1;
-        }
-        if (ImGui::InputDouble("p", &src.reals[0]))
-            ++up;
-        if (ImGui::InputInt("t", &src.ints[0]))
-            ++up;
-        break;
-
-    case distribution_type::negative_binomial:
-        if (old_current != current_item) {
-            src.reals[0] = 0.5;
-            src.ints[0]  = 1;
-        }
-        if (ImGui::InputDouble("p", &src.reals[0]))
-            ++up;
-        if (ImGui::InputInt("t", &src.ints[0]))
-            ++up;
-        break;
-
-    case distribution_type::geometric:
-        if (old_current != current_item) {
-            src.reals[0] = 0.5;
-        }
-        if (ImGui::InputDouble("p", &src.reals[0]))
-            ++up;
-        break;
-
-    case distribution_type::poisson:
-        if (old_current != current_item) {
-            src.reals[0] = 0.5;
-        }
-        if (ImGui::InputDouble("mean", &src.reals[0]))
-            ++up;
-        break;
-
-    case distribution_type::exponential:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-        }
-        if (ImGui::InputDouble("lambda", &src.reals[0]))
-            ++up;
-        break;
-
-    case distribution_type::gamma:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
-        }
-        if (ImGui::InputDouble("alpha", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("beta", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::weibull:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
-        }
-        if (ImGui::InputDouble("a", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("b", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::exterme_value:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 0.0;
-        }
-        if (ImGui::InputDouble("a", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("b", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::normal:
-        if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
-        }
-        if (ImGui::InputDouble("mean", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("stddev", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::lognormal:
-        if (old_current != current_item) {
-            src.reals[0] = 0.0;
-            src.reals[1] = 1.0;
-        }
-        if (ImGui::InputDouble("m", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("s", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::chi_squared:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-        }
-        if (ImGui::InputDouble("n", &src.reals[0]))
-            ++up;
-        break;
-
-    case distribution_type::cauchy:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 0.0;
-        }
-        if (ImGui::InputDouble("a", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("b", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::fisher_f:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-            src.reals[1] = 1.0;
-        }
-        if (ImGui::InputDouble("m", &src.reals[0]))
-            ++up;
-        if (ImGui::InputDouble("s", &src.reals[1]))
-            ++up;
-        break;
-
-    case distribution_type::student_t:
-        if (old_current != current_item) {
-            src.reals[0] = 1.0;
-        }
-        if (ImGui::InputDouble("n", &src.reals[0]))
-            ++up;
-        break;
-    }
-
-    return up > 0;
+    return u > 0;
 }
 
 project_external_source_editor::project_external_source_editor() noexcept
@@ -939,8 +728,8 @@ void project_external_source_editor::show(application&    app,
                           ImGuiDataType_U32,
                           reinterpret_cast<void*>(&ptr->max_clients))) {
                         if (auto ret = ptr->init(); !ret) {
-                            app.jn.push(log_level::error, [](auto& t, auto&) {
-                                t = "Fail to initialize binary file source";
+                            log(log_level::error, [](auto& m) {
+                                m = "Fail to initialize binary file source";
                             });
                         }
                     }
@@ -986,7 +775,12 @@ void project_external_source_editor::show(application&    app,
                     ImGui::OpenPopup(title);
                     if (app.f_dialog.show_load_file(title, filters)) {
                         if (app.f_dialog.state == file_dialog::status::ok) {
-                            ptr->file_path = app.f_dialog.result;
+                            const auto u8str = app.f_dialog.result.u8string();
+                            const auto sv    = std::string_view(
+                              reinterpret_cast<const char*>(u8str.data()),
+                              u8str.size());
+
+                            ptr->file_path = sv;
 
                             app.start_init_source(app.pjs.get_id(pj),
                                                   sel.id_sel,
@@ -1006,7 +800,11 @@ void project_external_source_editor::show(application&    app,
                     ImGui::OpenPopup(title);
                     if (app.f_dialog.show_load_file(title, filters)) {
                         if (app.f_dialog.state == file_dialog::status::ok) {
-                            ptr->file_path = app.f_dialog.result;
+                            const auto u8str = app.f_dialog.result.u8string();
+                            const auto sv    = std::string_view(
+                              reinterpret_cast<const char*>(u8str.data()),
+                              u8str.size());
+                            ptr->file_path = sv;
 
                             app.start_init_source(app.pjs.get_id(pj),
                                                   sel.id_sel,
@@ -1025,13 +823,13 @@ void project_external_source_editor::show(application&    app,
 
             ImPlot::SetNextAxesToFit();
             if (ImPlot::BeginPlot("External source preview", ImVec2(-1, -1))) {
-                ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 1.f);
-                ImPlot::PushStyleVar(ImPlotStyleVar_MarkerSize, 1.f);
+                ImPlotSpec spec;
+                spec.LineWeight = 1.f;
+                spec.MarkerSize = 6.f;
 
-                ImPlot::PlotScatter(
-                  "value", vec.data(), static_cast<int>(vec.size()), 1.0, 0.0);
+                ImPlot::PlotScatter("value", vec.data(),
+                                    static_cast<int>(vec.size()), 1, 0, spec);
 
-                ImPlot::PopStyleVar(2);
                 ImPlot::EndPlot();
             }
         });
@@ -1047,7 +845,7 @@ void project_external_source_editor::show(application&    app,
 static void build_source_element_name(
   const external_source_definition::source_element& src,
   const name_str&                                   str,
-  small_string<63>&                                 out) noexcept
+  name_str&                                         out) noexcept
 {
     static const char* names[] = { "(cst)", "(bin)", "(txt)", "(rnd)" };
 
@@ -1056,7 +854,7 @@ static void build_source_element_name(
 
 static void get_source_element(const external_source_definition&    srcs,
                                const external_source_definition::id id,
-                               small_string<63>& out) noexcept
+                               name_str& out) noexcept
 {
     if (srcs.data.exists(id))
         build_source_element_name(
@@ -1071,7 +869,7 @@ void show_combobox_external_sources(external_source_definition&     srcs,
                                     external_source_definition::id& elem_id,
                                     const char* name) noexcept
 {
-    small_string<63> buf;
+    name_str buf;
 
     if (ImGui::BeginCombo(name, name)) {
         if (ImGui::Selectable("-", not srcs.data.exists(elem_id)))
@@ -1200,7 +998,7 @@ bool show_external_sources_combo(const char*                 title,
                                  external_source_definition& srcs,
                                  i64&                        src) noexcept
 {
-    auto       buf     = small_string<63>{};
+    auto       buf     = name_str{};
     const auto id      = enum_cast<external_source_definition::id>(src);
     auto       copy_id = id;
 
@@ -1229,13 +1027,12 @@ bool show_external_sources_combo(const char*                 title,
     return false;
 }
 
-void show_menu_external_sources(application&     app,
-                                external_source& srcs,
+void show_menu_external_sources(external_source& srcs,
                                 const char*      title,
                                 source&          src,
                                 source_data&     src_data) noexcept
 {
-    small_string<64> tmp;
+    name_str tmp;
 
     constant_source*    constant_ptr    = nullptr;
     binary_file_source* binary_file_ptr = nullptr;
@@ -1324,34 +1121,31 @@ void show_menu_external_sources(application&     app,
     if (constant_ptr) {
         src.reset();
         if (auto ret = constant_ptr->init(src, src_data); !ret) {
-            app.jn.push(log_level::error, [](auto& t, auto&) {
-                t = "Fail to initalize constant source";
-            });
+            log(log_level::error,
+                [](auto& m) { m = "Fail to initalize constant source"; });
         }
     }
 
     if (binary_file_ptr) {
         src.reset();
         if (auto ret = binary_file_ptr->init(src, src_data); !ret) {
-            app.jn.push(log_level::error, [](auto& t, auto&) {
-                t = "Fail to initalize binary file source";
-            });
+            log(log_level::error,
+                [](auto& m) { m = "Fail to initalize binary file source"; });
         }
     }
 
     if (text_file_ptr) {
         src.reset();
         if (auto ret = text_file_ptr->init(src, src_data); !ret) {
-            app.jn.push(log_level::error, [](auto& t, auto&) {
-                t = "Fail to initalize text file source";
-            });
+            log(log_level::error,
+                [](auto& m) { m = "Fail to initalize text file source"; });
         }
     }
 
     if (random_ptr) {
         src.reset();
         // if (auto ret = random_ptr->init(src, src_data); !ret) {
-        //     app.jn.push(log_level::error, [](auto& t, auto&) {
+        //     log(log_level::error, [](auto& m) {
         //         t = "Fail to initalize random source";
         //     });
         // }
@@ -1395,28 +1189,28 @@ void project_external_source_editor::selection::select(
 bool project_external_source_editor::selection::is(
   constant_source_id id) const noexcept
 {
-    return type_sel.has_value() and * type_sel == source_type::constant and
+    return type_sel.has_value() and *type_sel == source_type::constant and
            id_sel == ordinal(id);
 }
 
 bool project_external_source_editor::selection::is(
   text_file_source_id id) const noexcept
 {
-    return type_sel.has_value() and * type_sel == source_type::text_file and
+    return type_sel.has_value() and *type_sel == source_type::text_file and
            id_sel == ordinal(id);
 }
 
 bool project_external_source_editor::selection::is(
   binary_file_source_id id) const noexcept
 {
-    return type_sel.has_value() and * type_sel == source_type::binary_file and
+    return type_sel.has_value() and *type_sel == source_type::binary_file and
            id_sel == ordinal(id);
 }
 
 bool project_external_source_editor::selection::is(
   random_source_id id) const noexcept
 {
-    return type_sel.has_value() and * type_sel == source_type::random and
+    return type_sel.has_value() and *type_sel == source_type::random and
            id_sel == ordinal(id);
 }
 

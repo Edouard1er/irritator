@@ -7,9 +7,12 @@
 
 #include <irritator/core.hpp>
 
+#include <charconv>
+#include <cstdint>
 #include <forward_list>
-
 #include <iterator>
+#include <numeric>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -64,7 +67,7 @@ struct lambda_signature<R (C::*)(Args...) const volatile> {
 
 // ref-qualifiers variants
 template<typename C, typename R, typename... Args>
-struct lambda_signature<R (C::*)(Args...)&> {
+struct lambda_signature<R (C::*)(Args...) &> {
     using type = R(Args...);
 };
 template<typename C, typename R, typename... Args>
@@ -346,102 +349,128 @@ public:
     explicit operator bool() const { return callback; }
 };
 
-//! Function object for performing comparisons. The main template
-//! invokes operator< on type T. If T is an enumeration, a cast
-//! to the @c std::underlying_type_t<T> is used before the
-//! comparison.
-template<class T>
-struct table_less {
-    constexpr auto operator()(const T& lhs, const T& rhs) const noexcept -> bool
-    {
-        if constexpr (std::is_enum_v<T>) {
-            using type = std::underlying_type_t<T>;
-
-            return std::less<type>{}(static_cast<type>(lhs),
-                                     static_cast<type>(rhs));
-        } else {
-            return std::less{}(lhs, rhs);
-        }
-    }
-};
-
-//! @brief A helper container to store Identifier -> T relation.
-//! @tparam Identifier Any integer or enum type.
-//! @tparam T Any type (trivial or not).
-template<typename Identifier,
-         typename T,
-         class Compare = irt::table_less<Identifier>,
-         typename A    = allocator<new_delete_memory_resource>>
-class table
+/// Small exact fraction class (signed 32-bit integers), designed for
+/// capturing a time step (dt) in a graphical interface without relying on
+/// approximate floating-point representation. Always kept in reduced form
+/// (GCD applied), denominator always strictly positive after construction.
+class fraction
 {
 public:
-    struct value_type {
-        value_type() noexcept = default;
-        value_type(Identifier id, const T& value) noexcept;
+    constexpr fraction() noexcept = default;
 
-        template<typename U>
-        value_type(std::is_constructible<Identifier, U> id_,
-                   const T&                             value_) noexcept
-          : id{ id_ }
-          , value{ value_ }
-        {}
+    constexpr fraction(std::int32_t num, std::int32_t den) noexcept
+      : m_num(num)
+      , m_den(den)
+    {
+        normalize();
+    }
 
-        Identifier id;
-        T          value;
-    };
+    constexpr fraction(std::int32_t whole) noexcept
+      : m_num(whole)
+      , m_den(1)
+    {}
 
-    struct value_type_compare {
-        constexpr auto operator()(const auto& left, const auto& right) noexcept
-          -> bool
-        {
-            if constexpr (std::is_same_v<std::decay_t<decltype(left)>,
-                                         value_type>) {
-                if constexpr (std::is_same_v<std::decay_t<decltype(right)>,
-                                             value_type>)
-                    return identifier_compare{}(left.id, right.id);
-                else
-                    return identifier_compare{}(left.id, right);
-            } else {
-                if constexpr (std::is_same_v<std::decay_t<decltype(right)>,
-                                             value_type>)
-                    return identifier_compare{}(left, right.id);
-                else
-                    return identifier_compare{}(left, right);
-            }
+    constexpr std::int32_t numerator() const noexcept { return m_num; }
+    constexpr std::int32_t denominator() const noexcept { return m_den; }
+
+    constexpr double to_double() const noexcept
+    {
+        return static_cast<double>(m_num) / static_cast<double>(m_den);
+    }
+
+    constexpr explicit operator double() const noexcept { return to_double(); }
+
+    constexpr fraction operator+(const fraction& o) const noexcept
+    {
+        return fraction(m_num * o.m_den + o.m_num * m_den, m_den * o.m_den);
+    }
+
+    constexpr fraction operator-(const fraction& o) const noexcept
+    {
+        return fraction(m_num * o.m_den - o.m_num * m_den, m_den * o.m_den);
+    }
+
+    constexpr fraction operator*(const fraction& o) const noexcept
+    {
+        return fraction(m_num * o.m_num, m_den * o.m_den);
+    }
+
+    constexpr fraction operator/(const fraction& o) const noexcept
+    {
+        return fraction(m_num * o.m_den, m_den * o.m_num);
+    }
+
+    constexpr fraction operator*(std::int32_t k) const noexcept
+    {
+        return fraction(m_num * k, m_den);
+    }
+
+    constexpr bool operator==(const fraction& o) const noexcept
+    {
+        return m_num == o.m_num && m_den == o.m_den;
+    }
+
+    constexpr auto operator<=>(const fraction& o) const noexcept
+    {
+        return (m_num * o.m_den) <=> (o.m_num * m_den);
+    }
+
+private:
+    constexpr void normalize() noexcept
+    {
+        debug::ensure(m_den != 0);
+
+        if (m_den < 0) {
+            m_num = -m_num;
+            m_den = -m_den;
         }
-    };
 
-    using container_type     = vector<value_type, A>;
-    using size_type          = typename container_type::size_type;
-    using index_type         = std::make_signed_t<size_type>;
-    using iterator           = typename container_type::iterator;
-    using const_iterator     = typename container_type::const_iterator;
-    using reference          = typename container_type::reference;
-    using const_reference    = typename container_type::const_reference;
-    using identifier_compare = Compare;
+        const auto g = std::gcd(m_num < 0 ? -m_num : m_num, m_den);
+        if (g > 1) {
+            m_num /= g;
+            m_den /= g;
+        }
+    }
 
-    container_type data;
-
-    constexpr table() noexcept = default;
-    constexpr table(std::integral auto size, const reserve_tag_t) noexcept;
-    constexpr ~table() noexcept = default;
-
-    constexpr void     set(Identifier id, const T& value) noexcept;
-    constexpr T*       get(Identifier id) noexcept;
-    constexpr const T* get(Identifier id) const noexcept;
-
-    template<typename U>
-    constexpr T* get(U id) noexcept;
-
-    template<typename U>
-    constexpr const T* get(U id) const noexcept;
-
-    constexpr void erase(Identifier id) noexcept;
-    constexpr void sort() noexcept;
-
-    constexpr size_type  size() const noexcept;
-    constexpr index_type ssize() const noexcept;
+    std::int32_t m_num = 0;
+    std::int32_t m_den = 1;
 };
+
+/// Parse a string "num/den" and build a fraction if possible
+inline expected<fraction> parse_fraction(std::string_view text) noexcept
+{
+    const auto slash = text.find('/');
+
+    if (slash == std::string_view::npos) {
+        std::int32_t num = 0;
+        auto [ptr, ec] =
+          std::from_chars(text.data(), text.data() + text.size(), num);
+        if (ec != std::errc{} || ptr != text.data() + text.size())
+            return make_error(static_cast<i16>(std::errc::invalid_argument),
+                              category::generic);
+
+        return fraction(num);
+    }
+
+    const auto num_part = text.substr(0, slash);
+    const auto den_part = text.substr(slash + 1);
+
+    std::int32_t num = 0;
+    std::int32_t den = 0;
+
+    auto [p1, ec1] =
+      std::from_chars(num_part.data(), num_part.data() + num_part.size(), num);
+    auto [p2, ec2] =
+      std::from_chars(den_part.data(), den_part.data() + den_part.size(), den);
+
+    if (ec1 != std::errc{} || ec2 != std::errc{} || den == 0 ||
+        p1 != num_part.data() + num_part.size() ||
+        p2 != den_part.data() + den_part.size())
+        return make_error(static_cast<i16>(std::errc::invalid_argument),
+                          category::generic);
+
+    return fraction(num, den);
+}
 
 template<typename T>
 class hierarchy
@@ -580,97 +609,6 @@ inline void string_buffer::do_alloc() noexcept
  * Containers implementation
  *
  ****************************************************************************/
-
-template<typename Identifier, typename T, class Compare, typename A>
-table<Identifier, T, Compare, A>::value_type::value_type(
-  Identifier id_,
-  const T&   value_) noexcept
-  : id(id_)
-  , value(value_)
-{}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr table<Identifier, T, Compare, A>::table(
-  std::integral auto  size,
-  const reserve_tag_t tag) noexcept
-  : data{ size, tag }
-{}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr void table<Identifier, T, Compare, A>::set(const Identifier id,
-                                                     const T& value) noexcept
-{
-    if (auto* value_found = get(id); value_found) {
-        *value_found = value;
-    } else {
-        data.emplace_back(id, value);
-        sort();
-    }
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr T* table<Identifier, T, Compare, A>::get(Identifier id) noexcept
-{
-    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
-    return it == data.end() ? nullptr : &it->value;
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr const T* table<Identifier, T, Compare, A>::get(
-  Identifier id) const noexcept
-{
-    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
-
-    return it == data.end() ? nullptr : &it->value;
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-template<typename U>
-constexpr T* table<Identifier, T, Compare, A>::get(U id) noexcept
-{
-    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
-
-    return it == data.end() ? nullptr : &it->value;
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-template<typename U>
-constexpr const T* table<Identifier, T, Compare, A>::get(U id) const noexcept
-{
-    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
-
-    return it == data.end() ? nullptr : &it->value;
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr void table<Identifier, T, Compare, A>::erase(Identifier id) noexcept
-{
-    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
-
-    if (it != data.end())
-        data.erase(it);
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr void table<Identifier, T, Compare, A>::sort() noexcept
-{
-    if (data.size() > 1)
-        std::sort(data.begin(), data.end(), value_type_compare{});
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr table<Identifier, T, Compare, A>::size_type
-table<Identifier, T, Compare, A>::size() const noexcept
-{
-    return data.size();
-}
-
-template<typename Identifier, typename T, class Compare, typename A>
-constexpr table<Identifier, T, Compare, A>::index_type
-table<Identifier, T, Compare, A>::ssize() const noexcept
-{
-    return static_cast<index_type>(data.size());
-}
 
 // class hierarchy
 //

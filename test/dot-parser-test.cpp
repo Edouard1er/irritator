@@ -10,14 +10,14 @@
 
 using namespace std::literals;
 
-irt::expected<irt::graph> irt_parse_dot_buffer(irt::modeling&   mod,
-                                               std::string_view str)
+irt::expected<irt::graph> irt_parse_dot_buffer(irt::modeling&        mod,
+                                               std::string_view      str)
 {
     return mod.files.read(
       [&](const auto& files, auto) -> irt::expected<irt::graph> {
           return mod.ids.read(
             [&](const auto& ids, auto) -> irt::expected<irt::graph> {
-                return irt::parse_dot_buffer(files, ids, str, mod.journal);
+                return irt::parse_dot_buffer(files, ids, str);
             });
       });
 }
@@ -39,14 +39,13 @@ int main()
     using namespace boost::ut;
     using namespace std::literals::string_view_literals;
 
-    irt::journal_handler jn(8);
-    irt::modeling        mod(jn);
+    irt::modeling        mod;
 
 #if defined(IRRITATOR_ENABLE_DEBUG)
     irt::on_error_callback = irt::debug::breakpoint;
 #endif
 
-    "small-and-simple-0"_test = [&mod] {
+    "small-and-simple-0"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A
             B
@@ -62,7 +61,7 @@ int main()
         expect(eq(ret->edges.ssize(), 3));
     };
 
-    "small-and-simple-with-space-0"_test = [&mod] {
+    "small-and-simple-with-space-0"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A
             B
@@ -79,7 +78,7 @@ int main()
         expect(eq(ret->edges.ssize(), 3));
     };
 
-    "small-and-simple-with-label-attributes"_test = [&mod] {
+    "small-and-simple-with-label-attributes"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A [label="a"]
             B [label="b"]
@@ -113,7 +112,7 @@ int main()
         expect(eq(ret->node_labels[idx_C], "c"sv));
     };
 
-    "small-and-simple-with-penwidth-attributes"_test = [&mod] {
+    "small-and-simple-with-penwidth-attributes"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A
             B
@@ -145,7 +144,7 @@ int main()
         expect(eq(ret->edges_penwidths[0], 123.));
     };
 
-    "small-and-simple-with-attributes"_test = [&mod] {
+    "small-and-simple-with-attributes"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A [pos="1,2";pos="7,8"]
             B [pos="3,4"]
@@ -185,7 +184,7 @@ int main()
         expect(eq(ret->node_positions[idx_C][1], 6.0f));
     };
 
-    "small-and-simple-with-attributes-and-exclamation"_test = [&mod] {
+    "small-and-simple-with-attributes-and-exclamation"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A [pos="1,2!";pos="7,8!"]
             B [pos="3,4!"]
@@ -225,7 +224,7 @@ int main()
         expect(eq(ret->node_positions[idx_C][1], 6.0f));
     };
 
-    "small-with-port-and-simple-with-attributes"_test = [&mod] {
+    "small-with-port-and-simple-with-attributes"_test = [&] {
         const std::string_view buf = R"(digraph D {
             A [pos="1,2";pos="7,8"]
             B [pos="3,4"]
@@ -276,7 +275,7 @@ int main()
         expect(eq(ret->edges_nodes[3][1].second, std::string_view("d")));
     };
 
-    "id-area-pos-node-attribute"_test = [&mod] {
+    "id-area-pos-node-attribute"_test = [&] {
         const std::string_view buf = R"(graph Voronoi
         {
             1 [id=1, Area=123, pos="-1,-2"];
@@ -315,7 +314,7 @@ int main()
         expect(eq(ret->node_areas[idx_2], 321.0f));
     };
 
-    "id-area-pos-3d-node-attribute"_test = [&mod] {
+    "id-area-pos-3d-node-attribute"_test = [&] {
         const std::string_view buf = R"(graph Voronoi
         {
             1 [id=1, Area=123, pos="-1,-2,-3"];
@@ -354,7 +353,7 @@ int main()
         expect(eq(ret->node_areas[idx_2], 321.0f));
     };
 
-    "write-load-write-load"_test = [&mod] {
+    "write-load-write-load"_test = [&] {
         const std::string_view buf = R"(graph Voronoi
         {
             1 [ID = 1, Area = 123, pos = "-1,-2"] ;
@@ -405,7 +404,7 @@ int main()
         check_buffer(*load_buf);
     };
 
-    "write-3d-load-write-load"_test = [&mod] {
+    "write-3d-load-write-load"_test = [&] {
         const std::string_view buf = R"(graph Voronoi
         {
             1 [ID = 1, Area = 123, pos = "-1,-2,-3"] ;

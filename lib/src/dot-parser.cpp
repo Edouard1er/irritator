@@ -102,6 +102,11 @@ inline static auto ichar_equals(char a, char b) noexcept -> bool
     return ascii_tolower(a) == ascii_tolower(b);
 }
 
+inline std::string_view to_sv(const vector<char>& vec) noexcept
+{
+    return std::string_view(vec.data(), vec.size());
+}
+
 /**
    Returns @c true if two strings are equal, using a case-insensitive
    comparison. The case-comparison operation is defined only for low-ASCII
@@ -168,9 +173,7 @@ struct token {
 
     constexpr bool is_string() const noexcept
     {
-        return irt::any_equal(type,
-                              element_type::id,
-                              element_type::integer,
+        return irt::any_equal(type, element_type::id, element_type::integer,
                               element_type::double_quote);
     }
 
@@ -236,7 +239,7 @@ static constexpr bool starts_as_number(int c) noexcept
 class input_stream_buffer
 {
 private:
-    journal_handler::descr warnings;
+    small_string<512> warnings;
 
     template<msg_id Index, typename... Args>
     constexpr void warning(Args&&... args) noexcept
@@ -249,21 +252,16 @@ private:
 
         const auto start     = warnings.size();
         const auto remaining = warnings.capacity() - start;
-        const auto ret       = fmt::vformat_to_n(warnings.data() + start,
-                                           remaining,
+        const auto ret = fmt::vformat_to_n(warnings.data() + start, remaining,
                                            msg_fmt[idx],
                                            fmt::make_format_args(args...));
 
         warnings.resize(start + ret.size);
 
         if (warnings.size() + 20 > warnings.capacity())
-            jn.push(
-              log_level::warning,
-              [](auto& title, auto& msg, const auto& w) {
-                  title = "Dot parser warning";
-                  msg   = w;
-              },
-              warnings);
+            log(log_level::warning, [&](auto& msg) {
+                format(msg, "dot-parser: {}", warnings.sv());
+            });
     }
 
     template<msg_id Index, typename... Args>
@@ -272,67 +270,66 @@ private:
         constexpr auto idx = static_cast<std::underlying_type_t<msg_id>>(Index);
         static_assert(0 <= idx and idx < std::size(msg_fmt));
 
-        jn.push(
-          log_level::error,
-          [](auto& title, auto& msg, auto& format, auto args) {
-              title = "Dot parser error";
+        auto       title = small_string<256>{};
+        const auto ret   = fmt::vformat_to_n(title.data(), title.capacity(),
+                                             msg_fmt[idx],
+                                             fmt::make_format_args(args...));
+        title.resize(ret.size);
 
-              auto ret =
-                fmt::vformat_to_n(msg.data(), msg.capacity() - 1, format, args);
-              msg.resize(ret.size);
-          },
-          msg_fmt[idx],
-          fmt::make_format_args(args...));
+        log(log_level::error,
+            [&](auto& msg) { format(msg, "dot-parser: {}", title.sv()); });
 
         return false;
     }
 
 #if !defined(__APPLE__)
-    auto to_float_str(std::string_view str) noexcept
+    auto to_float_str(const std::string_view sv) noexcept
       -> std::optional<std::pair<float, std::string_view>>
     {
         auto f = 0.f;
-        if (auto ret = std::from_chars(str.data(), str.data() + str.size(), f);
+
+        if (auto ret = std::from_chars(sv.data(), sv.data() + sv.size(), f);
             ret.ec == std::errc{})
-            return std::make_pair(f, str.substr(ret.ptr - str.data()));
+            return std::make_pair(f, sv.substr(ret.ptr - sv.data()));
 
         return std::nullopt;
     }
 
-    auto to_float(std::string_view str) noexcept -> float
+    auto to_float(const std::string_view sv) noexcept -> float
     {
         auto f = 0.f;
 
-        if (auto ret = std::from_chars(str.data(), str.data() + str.size(), f);
+        if (auto ret = std::from_chars(sv.data(), sv.data() + sv.size(), f);
             ret.ec == std::errc{})
             return f;
 
-        warning<msg_id::parse_real>(str);
+        warning<msg_id::parse_real>(sv);
 
         return 0.f;
     }
 #else
-    auto to_float_str(std::string_view str) noexcept
+    auto to_float_str(const std::string_view sv) noexcept
       -> std::optional<std::pair<float, std::string_view>>
     {
-        const std::string copy(str.data(), str.size());
-        char*             copy_end = nullptr;
+        auto* str     = sv.data();
+        auto* str_end = const_cast<char*>(sv.data()) + sv.size();
 
-        const auto flt = std::strtof(copy.c_str(), &copy_end);
-        if (flt == 0.0 and copy_end == copy.c_str()) {
+        const auto flt = std::strtof(str, &str_end);
+        if (flt == 0.0 and str_end == str) {
             return std::nullopt;
         } else {
-            return std::make_pair(flt, str.substr(copy_end - copy.c_str()));
+            return std::make_pair(flt, sv.substr(str_end - str));
         }
     }
 
-    auto to_float(std::string_view str) noexcept -> float
+    auto to_float(const std::string_view sv) noexcept -> float
     {
-        const std::string copy(str.data(), str.size());
+        auto* str     = sv.data();
+        auto* str_end = const_cast<char*>(sv.data()) + sv.size();
 
-        const auto ret = std::strtof(copy.c_str(), nullptr);
+        const auto ret = std::strtof(str, &str_end);
         if (ret == 0.f and errno != 0) {
-            warning<msg_id::parse_real>(str);
+            warning<msg_id::parse_real>(sv);
             return 0.f;
         }
         return ret;
@@ -344,31 +341,30 @@ private:
     ///
     /// @param str The string buffer to parse.
     /// @return The float vector read.
-    auto to_2_or_3_pos(std::string_view str) noexcept -> std::array<float, 3>
+    auto to_2_or_3_pos(const std::string_view str) noexcept
+      -> std::array<float, 3>
     {
         if (const auto first = to_float_str(str); first.has_value()) {
             const auto& [float_1, s_str] = *first;
 
             if (not s_str.empty() and s_str[0] == ',') {
-                const auto second_str =
-                  s_str.substr(1u, std::string_view::npos);
+                const auto second_str = s_str.substr(1u,
+                                                     std::string_view::npos);
 
                 if (const auto second = to_float_str(second_str);
                     second.has_value()) {
                     const auto& [float_2, s_str2] = *second;
 
                     if (not s_str2.empty() and s_str2[0] == ',') {
-                        const auto third_str =
-                          s_str2.substr(1u, std::string_view::npos);
+                        const auto third_str = s_str2.substr(
+                          1u, std::string_view::npos);
 
-                        return std::array<float, 3>{ float_1,
-                                                     float_2,
+                        return std::array<float, 3>{ float_1, float_2,
                                                      to_float(third_str) };
                     }
                 }
 
-                return std::array<float, 3>{ float_1,
-                                             to_float(second_str),
+                return std::array<float, 3>{ float_1, to_float(second_str),
                                              0.f };
             } else {
                 warning<msg_id::missing_comma>(s_str);
@@ -381,18 +377,22 @@ private:
 public:
     static constexpr int ring_length = 32;
 
-    using token_ring_t = irt::small_ring_buffer<token, ring_length>;
+    using token_ring_type = irt::small_ring_buffer<token, ring_length>;
+
+    using strings_type = irt::id_data_array<
+      void,
+      str_id,
+      allocator<new_delete_memory_resource>,
+      vector<char>>;
 
     const file_access&      fs;
     const component_access& ids;
-    journal_handler&        jn;
 
-    irt::id_array<str_id>    strings_ids;
-    irt::vector<std::string> strings;
+    strings_type strings;
 
-    token_ring_t  tokens;
-    std::istream& is;
-    irt::i64      line = 0;
+    token_ring_type tokens;
+    std::istream&   is;
+    irt::i64        line = 0;
 
     graph g;
 
@@ -410,13 +410,10 @@ public:
      */
     input_stream_buffer(const file_access&      fs_,
                         const component_access& ids_,
-                        journal_handler&        jn_,
                         std::istream&           stream,
                         bool start_fill_tokens = true) noexcept
       : fs{ fs_ }
       , ids{ ids_ }
-      , jn{ jn_ }
-      , strings_ids{ 64 }
       , strings{ 64 }
       , is{ stream }
     {
@@ -445,14 +442,14 @@ private:
 
         if (not g.nodes.can_alloc(1)) {
             if (not g.nodes.grow<2, 1>())
-                return new_error(modeling_errc::dot_memory_insufficient);
+                return make_error(modeling_errc::dot_memory_insufficient);
 
             const auto c = g.nodes.capacity();
 
             if (not(g.nodes.reserve(c) and g.node_names.resize(c) and
                     g.node_labels.resize(c) and g.node_positions.resize(c) and
                     g.node_areas.resize(c) and g.node_components.resize(c)))
-                return new_error(modeling_errc::dot_memory_insufficient);
+                return make_error(modeling_errc::dot_memory_insufficient);
         }
 
         const auto id  = g.nodes.alloc();
@@ -473,33 +470,28 @@ private:
         return g.buffer.append(name);
     }
 
-    expected<void> grow_strings() noexcept
+    expected<void> can_alloc_or_grow_strings() noexcept
     {
-        if (not strings_ids.can_alloc(1)) {
-            if (not strings_ids.grow<2, 1>())
-                return new_error(modeling_errc::dot_memory_insufficient);
-
-            if (not strings.resize(strings_ids.capacity()))
-                return new_error(modeling_errc::dot_memory_insufficient);
-        }
+        if (not strings.can_alloc(1) and not strings.grow<4, 1>(1))
+            return make_error(modeling_errc::dot_memory_insufficient);
 
         return {};
     }
 
     expected<token> read_negative_integer() noexcept
     {
-        if (auto ec = grow_strings(); not ec)
+        if (auto ec = can_alloc_or_grow_strings(); not ec)
             return ec.error();
 
-        const auto id  = strings_ids.alloc();
-        auto&      str = strings[irt::get_index(id)];
+        const auto id  = strings.alloc_id();
+        auto&      str = strings.get<vector<char>>(id);
         char       c;
         str.clear();
-        str += '-';
+        str.push_back('-');
 
         while (is.get(c)) {
             if (c == '.' or c == '-' or ('0' <= c and c <= '9')) {
-                str += c;
+                str.push_back(c);
             } else {
                 is.unget();
                 break;
@@ -511,17 +503,17 @@ private:
 
     expected<token> read_integer() noexcept
     {
-        if (auto ec = grow_strings(); not ec)
+        if (auto ec = can_alloc_or_grow_strings(); not ec)
             return ec.error();
 
-        const auto id  = strings_ids.alloc();
-        auto&      str = strings[irt::get_index(id)];
+        const auto id  = strings.alloc_id();
+        auto&      str = strings.get<vector<char>>(id);
         char       c;
         str.clear();
 
         while (is.get(c)) {
             if (c == '.' or c == '-' or ('0' <= c and c <= '9')) {
-                str += c;
+                str.push_back(c);
             } else {
                 is.unget();
                 break;
@@ -533,11 +525,11 @@ private:
 
     expected<token> read_id() noexcept
     {
-        if (auto ec = grow_strings(); not ec)
+        if (auto ec = can_alloc_or_grow_strings(); not ec)
             return ec.error();
 
-        const auto id  = strings_ids.alloc();
-        auto&      str = strings[irt::get_index(id)];
+        const auto id  = strings.alloc_id();
+        auto&      str = strings.get<vector<char>>(id);
         char       c;
         str.clear();
 
@@ -545,7 +537,7 @@ private:
             if (('a' <= c and c <= 'z') or ('A' <= c and c <= 'Z') or
                 (static_cast<int>(c) <= '\377') or ('0' <= c and c <= '9') or
                 (c == '_')) {
-                str += static_cast<char>(c);
+                str.push_back(static_cast<char>(c));
             } else {
                 is.unget();
                 break;
@@ -557,17 +549,17 @@ private:
 
     expected<token> read_double_quote() noexcept
     {
-        if (auto ec = grow_strings(); not ec)
+        if (auto ec = can_alloc_or_grow_strings(); not ec)
             return ec.error();
 
-        const auto id  = strings_ids.alloc();
-        auto&      str = strings[irt::get_index(id)];
+        const auto id  = strings.alloc_id();
+        auto&      str = strings.get<vector<char>>(id);
         char       c;
         str.clear();
 
         while (is.get(c)) {
             if (c != '\"') {
-                str += static_cast<char>(c);
+                str.push_back(static_cast<char>(c));
             } else {
                 break;
             }
@@ -751,7 +743,7 @@ private:
         fmt::print("{}\n ", title);
         for (auto it = tokens.head(), et = tokens.tail(); it != et; ++it) {
             if (it->is_string())
-                fmt::print(" `{}'", strings[irt::get_index(it->str)]);
+                fmt::print(" `{}'", to_sv(strings.get<vector<char>>(it->str)));
             else
                 fmt::print(" {}",
                            element_type_string[static_cast<int>(it->type)]);
@@ -853,8 +845,8 @@ private:
 
             const auto second = right.find(':');
             if (second != std::string_view::npos and second < right.size()) {
-                return dot_component::make(
-                  left, right.substr(0, second), right.substr(second + 1));
+                return dot_component::make(left, right.substr(0, second),
+                                           right.substr(second + 1));
             } else {
                 return dot_component::make(left, right);
             }
@@ -869,15 +861,25 @@ private:
         const auto  file_id = fs.find_file(name_3.reg, name_3.dir, name_3.file);
         const auto* fp      = fs.file_paths.try_to_get(file_id);
         if (not fp) {
-            jn.push(log_level::error, [&](auto& t, auto& m) {
-                t = "Dot parser error";
-                format(m, "Fail to found component from string: `{}'", str);
+            log(log_level::error, [&](auto& m) {
+                format(m,
+                       "dot-paser: fail to found component from string: `{}'",
+                       str);
             });
 
             return undefined<component_id>();
         }
 
-        return fp->component;
+        for (const auto id : ids)
+            if (ids.component_file_paths[id].file == file_id)
+                return id;
+
+        log(log_level::error, [&](auto& m) {
+            format(m, "dot-parser: fail to found component from string: `{}'",
+                   str);
+        });
+
+        return undefined<component_id>();
     }
 
     bool parse_attributes(const graph_node_id id) noexcept
@@ -916,18 +918,21 @@ private:
             const auto left_str  = get_and_free_string(left);
             const auto right_str = get_and_free_string(right);
 
-            if (iequals(left_str, "area"sv)) {
-                g.node_areas[irt::get_index(id)] = to_float(right_str);
-            } else if (iequals(left_str, "component"sv) or
-                       iequals(left_str, "class"sv)) {
-                g.node_components[irt::get_index(id)] =
-                  search_component(right_str);
-            } else if (iequals(left_str, "label"sv)) {
-                g.node_labels[irt::get_index(id)] = g.buffer.append(right_str);
-            } else if (iequals(left_str, "pos"sv)) {
-                g.node_positions[irt::get_index(id)] = to_2_or_3_pos(right_str);
+            if (iequals(left_str.to_sv(), "area"sv)) {
+                g.node_areas[irt::get_index(id)] = to_float(right_str.to_sv());
+            } else if (iequals(left_str.to_sv(), "component"sv) or
+                       iequals(left_str.to_sv(), "class"sv)) {
+                g.node_components[irt::get_index(id)] = search_component(
+                  right_str.to_sv());
+            } else if (iequals(left_str.to_sv(), "label"sv)) {
+                g.node_labels[irt::get_index(id)] = g.buffer.append(
+                  right_str.to_sv());
+            } else if (iequals(left_str.to_sv(), "pos"sv)) {
+                g.node_positions[irt::get_index(id)] = to_2_or_3_pos(
+                  right_str.to_sv());
             } else {
-                warning<msg_id::unknown_attribute>(left_str, right_str, line);
+                warning<msg_id::unknown_attribute>(left_str.to_sv(),
+                                                   right_str.to_sv(), line);
             }
 
             auto close_backet_or_comma = pop_token();
@@ -978,10 +983,11 @@ private:
             const auto left_str  = get_and_free_string(left);
             const auto right_str = get_and_free_string(right);
 
-            if (iequals(left_str, "penwidth"sv)) {
-                g.edges_penwidths[id] = to_float(right_str);
+            if (iequals(left_str.to_sv(), "penwidth"sv)) {
+                g.edges_penwidths[id] = to_float(right_str.to_sv());
             } else {
-                warning<msg_id::unknown_attribute>(left_str, right_str, line);
+                warning<msg_id::unknown_attribute>(left_str.to_sv(),
+                                                   right_str.to_sv(), line);
             }
 
             auto close_backet_or_comma = pop_token();
@@ -1006,7 +1012,7 @@ private:
             return error<msg_id::missing_token>(line);
 
         const auto from_str = get_and_free_string(from);
-        const auto from_id  = find_or_add_node(from_str);
+        const auto from_id  = find_or_add_node(from_str.to_sv());
         if (from_id.has_error()) {
             ec = from_id.error();
             return error<msg_id::missing_token>(line);
@@ -1020,7 +1026,7 @@ private:
             if (next_token_is(element_type::id)) {
                 const auto port     = pop_token();
                 const auto port_str = get_and_free_string(port);
-                port_src            = add_port(port_str);
+                port_src            = add_port(port_str.to_sv());
             }
         }
 
@@ -1034,7 +1040,7 @@ private:
             return error<msg_id::missing_token>(line);
 
         const auto to_str = get_and_free_string(to);
-        const auto to_id  = find_or_add_node(to_str);
+        const auto to_id  = find_or_add_node(to_str.to_sv());
         if (to_id.has_error()) {
             ec = to_id.error();
             return error<msg_id::missing_token>(line);
@@ -1045,13 +1051,13 @@ private:
             if (next_token_is(element_type::id)) {
                 const auto port     = pop_token();
                 const auto port_str = get_and_free_string(port);
-                port_dst            = add_port(port_str);
+                port_dst            = add_port(port_str.to_sv());
             }
         }
 
         const auto new_edge_id = g.alloc_edge(*from_id, *to_id);
         if (new_edge_id.has_error()) {
-            ec = new_error(modeling_errc::dot_memory_insufficient);
+            ec = make_error(modeling_errc::dot_memory_insufficient);
             return error<msg_id::missing_token>(line);
         }
 
@@ -1073,7 +1079,7 @@ private:
             return error<msg_id::missing_token>(line);
 
         const auto str = get_and_free_string(node_id);
-        const auto id  = find_or_add_node(str);
+        const auto id  = find_or_add_node(str.to_sv());
 
         if (id.has_error()) {
             ec = id.error();
@@ -1120,7 +1126,7 @@ private:
             return error<msg_id::missing_graph_type>(false, line);
 
         const auto s = get_and_free_string(type);
-        return parse_graph_type(s);
+        return parse_graph_type(s.to_sv());
     }
 
     bool parse_graph_type(const std::string_view type) noexcept
@@ -1152,7 +1158,7 @@ private:
 
         const auto s = get_and_free_string(strict_or_graph);
 
-        if (convert_to_element_type(s) == element_type::strict) {
+        if (convert_to_element_type(s.to_sv()) == element_type::strict) {
             g.flags.set(graph::option_flags::strict);
 
             if (not check_minimum_tokens(1))
@@ -1163,7 +1169,7 @@ private:
                 return error<msg_id::missing_token>(line);
 
         } else {
-            if (not parse_graph_type(s))
+            if (not parse_graph_type(s.to_sv()))
                 return error<msg_id::missing_token>(line);
         }
 
@@ -1172,20 +1178,62 @@ private:
 
         if (next_token_is_string()) {
             const auto m_id = pop_token();
-            g.main_id       = g.buffer.append(get_and_free_string(m_id));
+            const auto str  = get_and_free_string(m_id);
+            g.main_id       = g.buffer.append(str.to_sv());
         }
 
         return check_minimum_tokens(1) ? parse_stmt_list() : true;
     }
 
-    const std::string& get_and_free_string(const token t) noexcept
+    class string_to_delete
+    {
+        strings_type& m_strings;
+        str_id        m_id;
+
+    public:
+        constexpr string_to_delete(strings_type& strings, str_id id) noexcept
+          : m_strings{ strings }
+          , m_id{ id }
+        {}
+
+        string_to_delete(const string_to_delete&) noexcept            = delete;
+        string_to_delete& operator=(const string_to_delete&) noexcept = delete;
+
+        constexpr string_to_delete(string_to_delete&& other) noexcept
+          : m_strings(other.m_strings)
+          , m_id{ std::exchange(other.m_id, undefined<str_id>()) }
+        {}
+
+        constexpr string_to_delete& operator=(string_to_delete&& other) noexcept
+        {
+            if (this != &other) {
+                m_strings = other.m_strings;
+                m_id      = std::exchange(other.m_id, undefined<str_id>());
+            }
+
+            return *this;
+        }
+
+        std::string_view to_sv() const noexcept
+        {
+            const auto& str = m_strings.get<vector<char>>(m_id);
+
+            return std::string_view(str.data(), str.size());
+        };
+
+        constexpr ~string_to_delete() noexcept
+        {
+            if (is_defined(m_id))
+                m_strings.free(m_id);
+        }
+    };
+
+    string_to_delete get_and_free_string(const token t) noexcept
     {
         irt::debug::ensure(t.is_string());
+        irt::debug::ensure(strings.exists(t.str));
 
-        const auto idx = irt::get_index(t.str);
-        strings_ids.free(t.str);
-
-        return strings[idx];
+        return string_to_delete{ strings, t.str };
     }
 
 public:
@@ -1196,7 +1244,7 @@ public:
         if (parse_graph())
             return std::move(g);
 
-        return new_error(modeling_errc::dot_format_illegible);
+        return make_error(modeling_errc::dot_format_illegible);
     }
 
     // https://graphviz.org/doc/info/lang.html
@@ -1258,29 +1306,29 @@ public:
 
 expected<graph> parse_dot_buffer(const file_access&      fs,
                                  const component_access& ids,
-                                 const std::string_view  buffer,
-                                 journal_handler&        jn) noexcept
+                                 const std::string_view  buffer) noexcept
 {
     if (buffer.empty())
-        return new_error(modeling_errc::dot_buffer_empty);
+        return make_error(modeling_errc::dot_buffer_empty);
 
     istring_view_stream isvs{ buffer.data(), buffer.size() };
-    input_stream_buffer sb{ fs, ids, jn, isvs };
+    input_stream_buffer sb{ fs, ids, isvs };
 
     return sb.parse();
 }
 
-expected<graph> parse_dot_file(const file_access&           fs,
-                               const component_access&      ids,
-                               const std::filesystem::path& p,
-                               journal_handler&             jn) noexcept
+expected<graph> parse_dot_file(const file_access&      fs,
+                               const component_access& ids,
+                               const path&             p) noexcept
 {
-    if (std::ifstream ifs{ p }; ifs) {
-        input_stream_buffer sb{ fs, ids, jn, ifs };
+    const auto std_path = p.to_std_path();
+
+    if (std::ifstream ifs{ std_path }; ifs) {
+        input_stream_buffer sb{ fs, ids, ifs };
         return sb.parse();
     }
 
-    return new_error(modeling_errc::dot_file_unreachable);
+    return make_error(modeling_errc::dot_file_unreachable);
 }
 
 graph::graph(const graph& other) noexcept
@@ -1397,9 +1445,9 @@ expected<void> graph::init_scale_free_graph(double       alpha,
         bool stop  = false;
 
         while (not stop) {
-            unsigned xv = d(rng);
-            unsigned degree =
-              (xv == 0 ? 0 : unsigned(beta * std::pow(xv, -alpha)));
+            unsigned xv     = d(rng);
+            unsigned degree = (xv == 0 ? 0
+                                       : unsigned(beta * std::pow(xv, -alpha)));
 
             while (degree == 0) {
                 ++first;
@@ -1423,7 +1471,7 @@ expected<void> graph::init_scale_free_graph(double       alpha,
                 ++cnt;
 
                 if (cnt > 10'000)
-                    return new_error(
+                    return make_error(
                       modeling_errc::graph_children_container_full);
 
             } while (not is_defined(second) or *first == second or
@@ -1432,12 +1480,12 @@ expected<void> graph::init_scale_free_graph(double       alpha,
 
             if (not edges.can_alloc(1)) {
                 if (not edges.grow<3, 2>())
-                    return new_error(
+                    return make_error(
                       modeling_errc::graph_children_container_full);
 
                 if (not edges_nodes.resize(edges.capacity()) or
                     not edges_penwidths.resize(edges.capacity()))
-                    return new_error(
+                    return make_error(
                       modeling_errc::graph_children_container_full);
             }
 
@@ -1506,12 +1554,12 @@ expected<void> graph::init_small_world_graph(double       probability,
 
             if (not edges.can_alloc(1)) {
                 if (not edges.grow<3, 2>())
-                    return new_error(
+                    return make_error(
                       modeling_errc::graph_connection_container_full);
 
                 if (not edges_nodes.resize(edges.capacity()) or
                     not edges_penwidths.resize(edges.capacity()))
-                    return new_error(
+                    return make_error(
                       modeling_errc::graph_connection_container_full);
             }
 
@@ -1520,7 +1568,7 @@ expected<void> graph::init_small_world_graph(double       probability,
                 ++cnt;
 
                 if (cnt > 10'000)
-                    return new_error(modeling_errc::component_container_full);
+                    return make_error(modeling_errc::component_container_full);
 
                 continue;
             } else {
@@ -1540,14 +1588,14 @@ expected<graph_node_id> graph::alloc_node() noexcept
 {
     if (not nodes.can_alloc(1)) {
         if (not nodes.grow<2, 1>())
-            return new_error(modeling_errc::graph_children_container_full);
+            return make_error(modeling_errc::graph_children_container_full);
 
         const auto c = nodes.capacity();
 
         if (not(node_names.resize(c) and node_labels.resize(c) and
                 node_positions.resize(c) and node_components.resize(c) and
                 node_areas.resize(c)))
-            return new_error(modeling_errc::graph_children_container_full);
+            return make_error(modeling_errc::graph_children_container_full);
     }
 
     const auto id        = nodes.alloc();
@@ -1566,17 +1614,17 @@ expected<graph_edge_id> graph::alloc_edge(graph_node_id src,
 {
     for (auto id : edges)
         if (edges_nodes[id][0].first == src and edges_nodes[id][1].first == dst)
-            return new_error(modeling_errc::graph_connection_already_exist);
+            return make_error(modeling_errc::graph_connection_already_exist);
 
     if (not edges.can_alloc(1)) {
         if (not edges.grow<2, 1>())
-            return new_error(modeling_errc::graph_connection_container_full);
+            return make_error(modeling_errc::graph_connection_container_full);
 
         if (not edges_nodes.resize(edges.capacity()))
-            return new_error(modeling_errc::graph_connection_container_full);
+            return make_error(modeling_errc::graph_connection_container_full);
 
         if (not edges_penwidths.resize(edges.capacity()))
-            return new_error(modeling_errc::graph_connection_container_full);
+            return make_error(modeling_errc::graph_connection_container_full);
     }
 
     const auto id             = edges.alloc();
@@ -1595,12 +1643,12 @@ expected<void> graph::reserve(int n, int e) noexcept
             node_positions.resize(n, std::array<float, 3>{ 0.f, 0.f, 0.f }) and
             node_components.resize(n, undefined<component_id>()) and
             node_areas.resize(n, 1.f)))
-        return new_error(modeling_errc::dot_memory_insufficient);
+        return make_error(modeling_errc::dot_memory_insufficient);
 
     if (not(edges.reserve(e) and
             edges_nodes.resize(e, std::array<edge, 2>()) and
             edges_penwidths.resize(e)))
-        return new_error(modeling_errc::dot_memory_insufficient);
+        return make_error(modeling_errc::dot_memory_insufficient);
 
     return success();
 }
@@ -1690,18 +1738,15 @@ expected<void> write_dot_stream(const file_access&      fs,
     for (const auto id : g.nodes) {
         const auto idx = get_index(id);
 
-        out = fmt::format_to(
-          out, "  {} [area={}", g.node_names[idx], g.node_areas[idx]);
+        out = fmt::format_to(out, "  {} [area={}", g.node_names[idx],
+                             g.node_areas[idx]);
 
         if (g.node_positions[idx][2] != 0.f) {
-            out = fmt::format_to(out,
-                                 ", pos=\"{},{},{}!\"",
-                                 g.node_positions[idx][0],
-                                 g.node_positions[idx][1],
-                                 g.node_positions[idx][2]);
+            out = fmt::format_to(
+              out, ", pos=\"{},{},{}!\"", g.node_positions[idx][0],
+              g.node_positions[idx][1], g.node_positions[idx][2]);
         } else {
-            out = fmt::format_to(out,
-                                 ", pos=\"{},{}!\"",
+            out = fmt::format_to(out, ", pos=\"{},{}!\"",
                                  g.node_positions[idx][0],
                                  g.node_positions[idx][1]);
         }
@@ -1715,11 +1760,8 @@ expected<void> write_dot_stream(const file_access&      fs,
             const auto  compo = build_component_string(fs, fp);
 
             if (compo.has_value()) {
-                out = fmt::format_to(out,
-                                     ", component=\"{}:{}:{}\"];\n",
-                                     compo->r,
-                                     compo->d,
-                                     compo->f);
+                out = fmt::format_to(out, ", component=\"{}:{}:{}\"];\n",
+                                     compo->r, compo->d, compo->f);
             } else {
                 out = fmt::format_to(out, "];\n");
             }
@@ -1738,11 +1780,8 @@ expected<void> write_dot_stream(const file_access&      fs,
             const auto src = get_index(g.edges_nodes[idx][0].first);
             const auto dst = get_index(g.edges_nodes[idx][1].first);
 
-            out = fmt::format_to(out,
-                                 "  {} {} {};\n",
-                                 g.node_names[src],
-                                 edge_type,
-                                 g.node_names[dst]);
+            out = fmt::format_to(out, "  {} {} {};\n", g.node_names[src],
+                                 edge_type, g.node_names[dst]);
         }
     }
 
@@ -1751,16 +1790,18 @@ expected<void> write_dot_stream(const file_access&      fs,
     return expected<void>();
 }
 
-expected<void> write_dot_file(const file_access&           fs,
-                              const component_access&      ids,
-                              const graph&                 graph,
-                              const std::filesystem::path& path) noexcept
+expected<void> write_dot_file(const file_access&      fs,
+                              const component_access& ids,
+                              const graph&            graph,
+                              const path&             path) noexcept
 {
-    if (std::ofstream ofs(path); ofs) {
-        return write_dot_stream(
-          fs, ids, graph, std::ostream_iterator<char>(ofs));
+    const auto std_path = path.to_std_path();
+
+    if (std::ofstream ofs(std_path); ofs) {
+        return write_dot_stream(fs, ids, graph,
+                                std::ostream_iterator<char>(ofs));
     } else {
-        return new_error(modeling_errc::dot_file_unreachable);
+        return make_error(modeling_errc::dot_file_unreachable);
     }
 }
 
@@ -1770,10 +1811,10 @@ expected<vector<char>> write_dot_buffer(const file_access&      fs,
 {
     vector<char> buffer(4096, reserve_tag);
     if (buffer.capacity() < 4096)
-        return new_error(modeling_errc::dot_memory_insufficient);
+        return make_error(modeling_errc::dot_memory_insufficient);
 
-    if (auto ret =
-          write_dot_stream(fs, ids, graph, std::back_insert_iterator(buffer));
+    if (auto ret = write_dot_stream(fs, ids, graph,
+                                    std::back_insert_iterator(buffer));
         ret.has_value())
         return buffer;
     else

@@ -11,13 +11,11 @@ namespace irt {
 
 expected<graph> parse_dot_buffer(const file_access&      fs,
                                  const component_access& ids,
-                                 const std::string_view  buffer,
-                                 journal_handler&        jn) noexcept;
+                                 const std::string_view  buffer) noexcept;
 
-expected<graph> parse_dot_file(const file_access&           fs,
-                               const component_access&      ids,
-                               const std::filesystem::path& p,
-                               journal_handler&             jn) noexcept;
+expected<graph> parse_dot_file(const file_access&      fs,
+                               const component_access& ids,
+                               const path&             p) noexcept;
 
 /**
  * @brief Write the @a graph into a text based file.
@@ -25,10 +23,10 @@ expected<graph> parse_dot_file(const file_access&           fs,
  * @param graph dot-graph to write.
  * @return @a vector<char> or error_code if error.
  */
-expected<void> write_dot_file(const file_access&           fs,
-                              const component_access&      ids,
-                              const graph&                 graph,
-                              const std::filesystem::path& path) noexcept;
+expected<void> write_dot_file(const file_access&      fs,
+                              const component_access& ids,
+                              const graph&            graph,
+                              const path&             path) noexcept;
 
 /**
  * @brief Write the @a graph into a text based vector.

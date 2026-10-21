@@ -10,12 +10,11 @@
 #include <irritator/io.hpp>
 #include <irritator/modeling.hpp>
 
-#include <filesystem>
+#include "utils.hpp"
+
 #include <numeric>
 
 #include <boost/ut.hpp>
-
-#include <fmt/format.h>
 
 using namespace std::literals;
 
@@ -26,7 +25,7 @@ irt::expected<irt::graph> irt_parse_dot_buffer(irt::modeling&   mod,
       [&](const auto& files, auto) -> irt::expected<irt::graph> {
           return mod.ids.read(
             [&](const auto& ids, auto) -> irt::expected<irt::graph> {
-                return irt::parse_dot_buffer(files, ids, str, mod.journal);
+                return irt::parse_dot_buffer(files, ids, str);
             });
       });
 }
@@ -109,17 +108,310 @@ static auto get_input_connection_number(const irt::simulation& sim,
 //     }
 // }
 
-template<std::size_t length>
-static bool get_temp_registred_path(irt::small_string<length>& str) noexcept
+static void simulation_component_tester(
+  const std::span<const irt::real> c1,
+  const std::span<const irt::real> c2,
+  const std::span<const irt::real> result) noexcept
 {
-    std::error_code ec;
+    using namespace boost::ut;
 
-    try {
-        auto p = std::filesystem::temp_directory_path(ec) / "reg-temp";
-        str    = p.string();
-        return true;
-    } catch (...) {
-        return false;
+    const auto temp_path = irt::temp_path_with_unlink{ "sim-compo-tester"sv };
+
+    irt::modeling mod;
+
+    irt::registred_path_id reg_id{ 0 };
+    irt::dir_path_id       dir_id{ 0 };
+    irt::file_path_id      gen_component_file_id{ 0 };
+    irt::file_path_id      project_file_id{ 0 };
+
+    mod.files.write([&](auto& fs) {
+        reg_id                              = fs.alloc_registred("temp", 0);
+        fs.registred_paths.get(reg_id).path = temp_path.sv();
+
+        dir_id                          = fs.alloc_dir(reg_id);
+        fs.dir_paths.get(dir_id).parent = reg_id;
+        fs.dir_paths.get(dir_id).path   = "test-sim-compo";
+
+        fs.create_directories(reg_id);
+        fs.create_directories(dir_id);
+
+        expect(fatal(fs.file_paths.can_alloc(3)));
+
+        gen_component_file_id = fs.alloc_file(
+          dir_id, "gen-compo.irt", irt::file_type::component_file);
+        project_file_id =
+          fs.alloc_file(dir_id, "project.pirt", irt::file_type::project_file);
+    });
+
+    const auto gen_compo = mod.ids.write([&](auto& ids) {
+        auto  compo_id = ids.alloc_generic_component();
+        auto& compo    = ids.components[compo_id];
+        auto& gen      = ids.generic_components.get(compo.id.generic_id);
+
+        auto& cst_a = gen.alloc(irt::dynamics_type::constant);
+        auto& cst_b = gen.alloc(irt::dynamics_type::constant);
+        auto& adder = gen.alloc(irt::dynamics_type::qss1_sum_2);
+
+        cst_a.flags = irt::child_flags::configurable;
+        cst_b.flags = irt::child_flags::configurable;
+        adder.flags = irt::child_flags::observable;
+
+        const auto cst_a_id = gen.children.get_id(cst_a);
+        const auto cst_b_id = gen.children.get_id(cst_b);
+        const auto adder_id = gen.children.get_id(adder);
+
+        gen.children_names[cst_a_id] = "a";
+        gen.children_names[cst_b_id] = "b";
+        gen.children_names[adder_id] = "+";
+
+        gen.children_parameters[cst_a_id].set_constant(-1.0, 0.5);
+        gen.children_parameters[cst_b_id].set_constant(-1.0, 1.0);
+
+        gen.connect(cst_a,
+                    irt::connection::port{ .model = 0 },
+                    adder,
+                    irt::connection::port{ .model = 0 });
+
+        gen.connect(cst_b,
+                    irt::connection::port{ .model = 0 },
+                    adder,
+                    irt::connection::port{ .model = 1 });
+
+        ids.component_file_paths[compo_id].file = gen_component_file_id;
+
+        mod.files.read(
+          [&](const auto& fs, auto) { mod.save(ids, fs, compo_id); });
+
+        return compo_id;
+    });
+
+    mod.ids.write([&](auto& ids) {
+        mod.files.write([&](auto& fs) {
+            irt::project pj;
+            pj.project_file = project_file_id;
+            pj.sim.limits.set_bound(0, 2);
+
+            expect(pj.set(ids, fs, gen_compo).has_value());
+
+            expect(pj.save(fs, ids).has_value());
+        });
+    });
+
+    expect(fatal(mod.fill_components().has_value()));
+
+    irt::file_path_id simulation_component_file_id =
+      mod.files.write([&](auto& fs) {
+          return fs.alloc_file(
+            dir_id, "sim-compo.irt", irt::file_type::component_file);
+      });
+
+    const auto sim_compo = mod.ids.write([&](auto& ids) {
+        auto  compo_id = ids.alloc_sim_component();
+        auto& compo    = ids.components[compo_id];
+        auto& sim      = ids.sim_components.get(compo.id.sim_id);
+
+        mod.files.read([&](const auto& fs, auto) {
+            auto exp_pj = irt::project::load(fs, ids, project_file_id);
+            expect(fatal(exp_pj.has_value()));
+
+            sim.assign(std::move(*exp_pj));
+        });
+
+        expect(fatal(eq(sim.factors.size(), 2u)));
+        expect(fatal(ge(sim.selections.size(), 1u)));
+
+        auto a = irt::factor_id{ 0 };
+        auto b = irt::factor_id{ 0 };
+
+        const auto& names = sim.factors.template get<irt::name_str>();
+        for (const auto factor_id : sim.factors) {
+            if (names[factor_id] == "a") {
+                a = factor_id;
+            }
+
+            if (names[factor_id] == "b") {
+                b = factor_id;
+            }
+        }
+
+        sim.factors.template get<irt::factor_type>(a) = irt::factor_type::fixed;
+        sim.factors.template get<irt::unique_id_path>(a).push_back(
+          std::string_view("a"));
+        sim.factors.template get<irt::fixed_factor>(a).values.assign(c1.begin(),
+                                                                     c1.end());
+
+        sim.factors.template get<irt::factor_type>(b) = irt::factor_type::fixed;
+        sim.factors.template get<irt::unique_id_path>(b).push_back(
+          std::string_view("b"));
+        sim.factors.template get<irt::fixed_factor>(b).values.assign(c2.begin(),
+                                                                     c2.end());
+
+        const auto plus = [&]() {
+            for (const auto sel_id : sim.selections)
+                if (sim.selections.template get<irt::name_str>(sel_id) ==
+                    "default")
+                    return sel_id;
+
+            return *sim.selections.begin();
+        }();
+
+        sim.selections.template get<irt::name_str>(plus) = "+";
+        sim.selections.template get<irt::criteria_type>(plus) =
+          irt::criteria_type::max;
+
+        sim.objective.method                = irt::optimization_method::simple;
+        sim.objective.type                  = irt::optimization_type::maximize;
+        sim.objective.simple_params.primary = plus;
+
+        sim.file_id = project_file_id;
+
+        ids.component_file_paths[compo_id].file = simulation_component_file_id;
+
+        mod.files.read(
+          [&](const auto& fs, auto) { mod.save(ids, fs, compo_id); });
+
+        return compo_id;
+    });
+
+    expect(fatal(mod.fill_components().has_value()));
+
+    irt::file_path_id simulation_wrapper_file_id =
+      mod.files.write([&](auto& fs) {
+          return fs.alloc_file(
+            dir_id, "sim-wrapper.irt", irt::file_type::component_file);
+      });
+
+    const auto sim_wrapper_compo = mod.ids.write([&](auto& ids) {
+        auto  compo_id = ids.alloc_generic_component();
+        auto& compo    = ids.components[compo_id];
+        auto& gen      = ids.generic_components.get(compo.id.generic_id);
+
+        auto& cst_init = gen.alloc(irt::dynamics_type::constant);
+        auto& cst_run  = gen.alloc(irt::dynamics_type::constant);
+        auto& sim_w    = gen.alloc(irt::dynamics_type::simulation_wrapper);
+
+        auto& cpt_1 = gen.alloc(irt::dynamics_type::counter);
+        auto& cpt_2 = gen.alloc(irt::dynamics_type::counter);
+        auto& cpt_3 = gen.alloc(irt::dynamics_type::counter);
+
+        cst_init.flags = irt::child_flags::configurable;
+        cst_run.flags  = irt::child_flags::configurable;
+
+        cpt_1.flags = irt::child_flags::observable;
+        cpt_2.flags = irt::child_flags::observable;
+        cpt_3.flags = irt::child_flags::observable;
+
+        const auto cst_init_id = gen.children.get_id(cst_init);
+        const auto cst_run_id  = gen.children.get_id(cst_run);
+        const auto sim_w_id    = gen.children.get_id(sim_w);
+
+        gen.children_names[cst_init_id] = "init";
+        gen.children_names[cst_run_id]  = "run";
+        gen.children_names[sim_w_id]    = "sim-w";
+
+        gen.children_parameters[cst_init_id].set_constant(0.0, 0.0);
+        gen.children_parameters[cst_run_id].set_constant(0.0, 1.0);
+
+        gen.children_parameters[sim_w_id]
+          .integers[irt::simulation_wrapper_tag::run] =
+          ordinal(irt::simulation_wrapper::run_type::complete);
+        gen.children_parameters[sim_w_id]
+          .integers[irt::simulation_wrapper_tag::id] = ordinal(sim_compo);
+
+        gen.connect(cst_init,
+                    irt::connection::port{ .model = 0 },
+                    sim_w,
+                    irt::connection::port{ .model = 0 });
+
+        gen.connect(cst_run,
+                    irt::connection::port{ .model = 0 },
+                    sim_w,
+                    irt::connection::port{ .model = 1 });
+
+        gen.connect(sim_w,
+                    irt::connection::port{ .model = 0 },
+                    cpt_1,
+                    irt::connection::port{ .model = 0 });
+
+        gen.connect(sim_w,
+                    irt::connection::port{ .model = 1 },
+                    cpt_2,
+                    irt::connection::port{ .model = 0 });
+
+        gen.connect(sim_w,
+                    irt::connection::port{ .model = 2 },
+                    cpt_3,
+                    irt::connection::port{ .model = 0 });
+
+        ids.component_file_paths[compo_id].file = simulation_wrapper_file_id;
+
+        mod.files.read(
+          [&](const auto& fs, auto) { mod.save(ids, fs, compo_id); });
+
+        return compo_id;
+    });
+
+    // Will do an infiny loop?
+    //
+    // expect(fatal(mod.fill_components().has_value()));
+
+    irt::project pj;
+
+    mod.ids.read([&](const auto& ids, auto) {
+        mod.files.read([&](const auto& fs, auto) {
+            expect(fatal(pj.set(ids, fs, sim_wrapper_compo).has_value()));
+        });
+    });
+
+    pj.sim.limits.set_bound(0, 3);
+
+    expect(pj.simulation_init(mod).has_value());
+
+    auto sim_wrapper_id = irt::undefined<irt::model_id>();
+    auto cpts           = irt::small_vector<irt::model_id, 3>{};
+
+    for (const auto& mdl : pj.sim.models) {
+        const auto mdl_id = pj.sim.models.get_id(mdl);
+
+        if (mdl.type == irt::dynamics_type::simulation_wrapper) {
+            sim_wrapper_id = mdl_id;
+
+            const auto& sim_w = irt::get_dyn<irt::simulation_wrapper>(mdl);
+
+            expect(eq(length(sim_w.x), 4));
+            expect(eq(length(sim_w.y), 3));
+        } else if (mdl.type == irt::dynamics_type::counter) {
+            cpts.push_back(mdl_id);
+        }
+    }
+
+    expect(irt::is_defined(sim_wrapper_id));
+
+    do {
+        expect(pj.simulation_step().has_value());
+    } while (not pj.sim.current_time_expired());
+
+    expect(pj.sim.finalize().has_value());
+
+    int i = 0;
+    for (const auto mdl_id : cpts) {
+        const auto& mdl = pj.sim.models.get(mdl_id);
+        const auto& cpt = irt::get_dyn<irt::counter>(mdl);
+
+        fmt::print("{:6} {:6} {:6} {:6}\n",
+                   irt::get_index(mdl_id),
+                   cpt.event_number,
+                   cpt.last_value,
+                   cpt.sum_values);
+
+        // @TODO use approx until observer interpolate-type for the qss1_sum_2
+        // used in the generic component use the linear interpolate.
+
+        expect(approx(cpt.event_number, result[i * 3], 1e-5));
+        expect(approx(cpt.last_value, result[i * 3 + 1], 1e-5));
+        expect(approx(cpt.last_value, result[i * 3 + 2], 1e-5));
+
+        ++i;
     }
 }
 
@@ -131,10 +423,12 @@ int main()
 
     using namespace boost::ut;
 
+    irt::log_history   jn;
+    irt::journal_scope scope;
+
     "internal-component"_test = [] {
         {
-            irt::journal_handler                     jnl;
-            irt::modeling                            mod(jnl);
+            irt::modeling                            mod;
             irt::project                             pj;
             irt::small_vector<irt::component_id, 17> components;
 
@@ -152,7 +446,10 @@ int main()
                 for (auto i = 0; i < 17; ++i) {
                     pj.clear();
 
-                    expect(pj.set(mod, components[i]).has_value());
+                    mod.files.read([&](const auto& fs, auto) {
+                        expect(pj.set(ids, fs, components[i]).has_value());
+                    });
+
                     pj.sim.limits.set_bound(0, 20);
 
                     expect(pj.sim.initialize().has_value());
@@ -166,10 +463,14 @@ int main()
     };
 
     "external-source-write"_test = [] {
+        const auto temp_path = irt::temp_path_with_unlink{
+            "external_source"sv
+        };
+
         {
-            irt::journal_handler jn;
-            irt::modeling        mod{ jn };
-            irt::project         pj;
+
+            irt::modeling mod;
+            irt::project  pj;
 
             const auto compo_id = mod.ids.write([&](auto& ids) {
                 expect(fatal(ids.can_alloc_component(1) or
@@ -250,12 +551,9 @@ int main()
                 generic.children_parameters[dyn_id].set_dynamic_queue_ta(
                   dyn_src_id);
 
-                irt::registred_path_str temp_path;
-                expect(fatal(get_temp_registred_path(temp_path)));
-
                 mod.files.write([&](auto& fs) {
                     auto reg_id = fs.alloc_registred("temp", 0);
-                    fs.registred_paths.get(reg_id).path = temp_path;
+                    fs.registred_paths.get(reg_id).path = temp_path.sv();
 
                     auto dir_id                     = fs.alloc_dir(reg_id);
                     fs.dir_paths.get(dir_id).parent = reg_id;
@@ -269,7 +567,7 @@ int main()
                     auto file_id =
                       fs.alloc_file(dir_id,
                                     "external-source.irt",
-                                    irt::file_path::file_type::component_file);
+                                    irt::file_type::component_file);
 
                     ids.component_file_paths[component_id].file = file_id;
                 });
@@ -277,29 +575,27 @@ int main()
                 return component_id;
             });
 
-            expect(mod.save(compo_id).has_value());
-
             mod.ids.read([&](const auto& ids, auto) {
-                expect(eq(ids.size(), 1u));
-                expect(eq(ids.generic_components.size(), 1u));
-            });
+                mod.files.read([&](const auto& fs, auto) {
+                    expect(mod.save(ids, fs, compo_id).has_value());
 
-            expect(fatal(mod.save(compo_id).has_value()));
+                    expect(eq(ids.size(), 1u));
+                    expect(eq(ids.generic_components.size(), 1u));
+
+                    expect(fatal(mod.save(ids, fs, compo_id).has_value()));
+                });
+            });
         }
 
         {
-            irt::journal_handler jn;
-            irt::modeling        mod{ jn };
-            irt::project         pj;
-
-            irt::registred_path_str temp_path;
-            expect(fatal(get_temp_registred_path(temp_path)));
+            irt::modeling mod;
+            irt::project  pj;
 
             mod.files.write([&](auto& fs) {
                 auto  reg_id = fs.alloc_registred("temp", 0);
                 auto& reg    = fs.registred_paths.get(reg_id);
-                reg.path     = temp_path;
-                fs.browse_registreds(jn);
+                reg.path     = temp_path.sv();
+                fs.browse_registreds();
             });
 
             mod.ids.read([&](const auto& ids, auto) {
@@ -330,12 +626,14 @@ int main()
 
                 expect(fatal(irt::is_defined(f_id)));
 
-                const auto compo_id =
-                  mod.files.read([&](const auto& fs,
-                                     const auto /*vers*/) -> irt::component_id {
-                      return fs.file_paths.get(f_id).component;
-                  });
+                const auto compo_id = [&]() {
+                    for (const auto id : ids)
+                        if (f_id == ids.component_file_paths[id].file)
+                            return id;
+                    return irt::undefined<irt::component_id>();
+                }();
 
+                expect(fatal(is_defined(compo_id)));
                 auto& component = ids.components[compo_id];
 
                 expect(fatal(component.type == irt::component_type::generic));
@@ -393,10 +691,9 @@ int main()
     };
 
     "easy"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    c3_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id c3_id{ 0 };
 
         mod.ids.write([&](auto& ids) {
             auto  c1_id = ids.alloc_generic_component();
@@ -420,8 +717,7 @@ int main()
             auto& s3   = ids.generic_components.get(c3.id.generic_id);
             auto& ch31 = s3.alloc(c2_id);
             auto& ch32 = s3.alloc(c1_id);
-            expect(!!s3.connect(mod,
-                                ch31,
+            expect(!!s3.connect(ch31,
                                 irt::connection::port{ .compo = p2_id },
                                 ch32,
                                 irt::connection::port{ .compo = p1_id }));
@@ -434,7 +730,11 @@ int main()
             expect(eq(s3.connections.ssize(), 1));
         });
 
-        expect(!!pj.set(mod, c3_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, c3_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, 3));
 
         expect(eq(pj.sim.models.ssize(), 2));
@@ -452,10 +752,9 @@ int main()
     };
 
     "no-connection"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    c3_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id c3_id{ 0 };
 
         mod.ids.write([&](auto& ids) {
             auto  c1_id = ids.alloc_generic_component();
@@ -475,7 +774,10 @@ int main()
             s3.alloc(c1_id);
         });
 
-        expect(!!pj.set(mod, c3_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, c3_id)); });
+        });
         expect(eq(pj.tree_nodes_size().first, 3));
 
         expect(eq(pj.sim.models.ssize(), 2));
@@ -487,10 +789,9 @@ int main()
     };
 
     "empty-component"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    c3_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id c3_id{ 0 };
 
         mod.ids.write([&](auto& ids) {
             auto  c1_id = ids.alloc_generic_component();
@@ -529,14 +830,17 @@ int main()
             auto& ch31 = s3.alloc(c22_id);
             auto& ch32 = s3.alloc(c11_id);
 
-            expect(!!s3.connect(mod,
-                                ch31,
+            expect(!!s3.connect(ch31,
                                 irt::connection::port{ .compo = p22_id },
                                 ch32,
                                 irt::connection::port{ .compo = p11_id }));
         });
 
-        expect(!!pj.set(mod, c3_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, c3_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, 5));
 
         expect(eq(pj.sim.models.ssize(), 2));
@@ -554,10 +858,9 @@ int main()
     };
 
     "graph-small-world"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int node_size = 0;
 
@@ -579,16 +882,19 @@ int main()
             node_size = g.g.nodes.ssize();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, node_size + 1));
         expect(eq(pj.sim.models.ssize(), node_size));
     };
 
     "graph-scale-free"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int node_size = 0;
 
@@ -610,16 +916,19 @@ int main()
             node_size = g.g.nodes.ssize();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, node_size + 1));
         expect(eq(pj.sim.models.ssize(), node_size));
     };
 
     "graph-scale-free-sum-in-out"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int      node_size = 0;
         unsigned edge_size = 0;
@@ -652,17 +961,20 @@ int main()
             edge_size     = g.g.edges.ssize();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, node_size + 1));
         expect(eq(pj.sim.models.ssize(), node_size));
         expect(eq(get_connection_number(pj.sim), edge_size));
     };
 
     "graph-scale-free-sum-m-n"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int      node_size = 0;
         unsigned edge_size = 0;
@@ -702,17 +1014,20 @@ int main()
             edge_size = g.g.edges.ssize();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, node_size + 1));
         expect(eq(pj.sim.models.ssize(), node_size));
         expect(eq(get_connection_number(pj.sim), 2u * edge_size));
     };
 
     "graph-scale-free-sum-m_3-n_3"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int      node_size = 0;
         unsigned edge_size = 0;
@@ -776,17 +1091,20 @@ int main()
             edge_size = g.g.edges.ssize();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, node_size + 1));
         expect(eq(pj.sim.models.ssize(), node_size));
         expect(eq(get_connection_number(pj.sim), 2 * edge_size));
     };
 
     "grid-3x3-empty-con"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int cell_number = 0;
 
@@ -804,16 +1122,19 @@ int main()
             cell_number = g.cells_number();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, cell_number + 1));
         expect(eq(pj.sim.models.ssize(), cell_number));
     };
 
     "grid-3x3-empty-con-middle"_test = [] {
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
 
         int row = 0;
         int col = 0;
@@ -837,20 +1158,22 @@ int main()
             col = g.column();
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, (row - 2) * (col - 2) + 1));
         expect(eq(pj.sim.models.ssize(), (row - 2) * (col - 2)));
     };
 
     "grid-3x3"_test = [] {
-        irt::vector<char>       buffer;
-        irt::registred_path_str temp_path;
+        const auto temp_path = irt::temp_path_with_unlink{ "grid-33"sv };
 
-        expect(get_temp_registred_path(temp_path) == true);
+        irt::vector<char> buffer;
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
+        irt::modeling mod;
+        irt::project  pj;
 
         irt::component_id c1_id{ 0 };
         irt::component_id c2_id{ 0 };
@@ -881,8 +1204,7 @@ int main()
             auto& s3   = ids.generic_components.get(c3.id.generic_id);
             auto& ch31 = s3.alloc(c2_id);
             auto& ch32 = s3.alloc(c1_id);
-            expect(!!s3.connect(mod,
-                                ch31,
+            expect(!!s3.connect(ch31,
                                 irt::connection::port{ .compo = p2_id },
                                 ch32,
                                 irt::connection::port{ .compo = p1_id }));
@@ -895,7 +1217,7 @@ int main()
             mod.files.write([&](auto& fs) {
                 const auto reg_id = fs.alloc_registred("temp", 0);
                 auto&      reg    = fs.registred_paths.get(reg_id);
-                reg.path          = temp_path;
+                reg.path          = temp_path.sv();
 
                 const auto dir_id = fs.alloc_dir(reg_id);
                 auto&      dir    = fs.dir_paths.get(dir_id);
@@ -906,13 +1228,13 @@ int main()
                 fs.create_directories(dir_id);
 
                 const auto c1_id = fs.alloc_file(
-                  dir_id, "c1.irt", irt::file_path::file_type::component_file);
+                  dir_id, "c1.irt", irt::file_type::component_file);
                 const auto c2_id = fs.alloc_file(
-                  dir_id, "c2.irt", irt::file_path::file_type::component_file);
+                  dir_id, "c2.irt", irt::file_type::component_file);
                 const auto c3_id = fs.alloc_file(
-                  dir_id, "c3.irt", irt::file_path::file_type::component_file);
+                  dir_id, "c3.irt", irt::file_type::component_file);
                 const auto cg_id = fs.alloc_file(
-                  dir_id, "cg.irt", irt::file_path::file_type::component_file);
+                  dir_id, "cg.irt", irt::file_type::component_file);
 
                 ids.component_file_paths[c1_id].file = c1_id;
                 ids.component_file_paths[c2_id].file = c2_id;
@@ -923,12 +1245,20 @@ int main()
             cell_number = g.cells_number();
         });
 
-        expect(!!mod.save(c1_id));
-        expect(!!mod.save(c2_id));
-        expect(!!mod.save(c3_id));
-        expect(!!mod.save(cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read([&](const auto& files, auto) {
+                expect(!!mod.save(ids, files, c1_id));
+                expect(!!mod.save(ids, files, c2_id));
+                expect(!!mod.save(ids, files, c3_id));
+                expect(!!mod.save(ids, files, cg_id));
+            });
+        });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, cell_number * 3 + 1));
 
         expect(eq(pj.sim.models.ssize(), cell_number * 2));
@@ -938,7 +1268,6 @@ int main()
                 irt::json_archiver j;
                 expect(
                   j(pj,
-                    mod,
                     files,
                     ids,
                     buffer,
@@ -950,14 +1279,13 @@ int main()
         expect(buffer.size() > 0u);
 
         {
-            irt::journal_handler jn;
-            irt::modeling        mod{ jn };
-            irt::project         pj;
+            irt::modeling mod;
+            irt::project  pj;
 
             mod.files.write([&](auto& fs) {
                 const auto reg_id = fs.alloc_registred("temp", 0);
                 auto&      reg    = fs.registred_paths.get(reg_id);
-                reg.path          = temp_path;
+                reg.path          = temp_path.sv();
 
                 fs.create_directories(reg_id);
             });
@@ -969,13 +1297,9 @@ int main()
             mod.files.read([&](const auto& files, auto) noexcept {
                 mod.ids.read([&](const auto& ids, auto) noexcept {
                     irt::json_dearchiver j;
-                    expect(j(pj,
-                             mod,
-                             pj.sim,
-                             files,
-                             ids,
-                             std::span(buffer.data(), buffer.size()))
-                             .has_value());
+                    expect(
+                      j(pj, files, ids, std::span(buffer.data(), buffer.size()))
+                        .has_value());
                 });
             });
 
@@ -988,9 +1312,8 @@ int main()
     };
 
     "hsm"_test = [] {
-        irt::project         pj;
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
+        irt::project  pj;
+        irt::modeling mod;
 
         auto compo_id = mod.ids.write([&](auto& ids) {
             expect(ids.hsm_components.can_alloc(1)) << fatal;
@@ -1014,7 +1337,11 @@ int main()
             return compo_id;
         });
 
-        expect(!!pj.set(mod, compo_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read([&](const auto& fs, auto) {
+                expect(!!pj.set(ids, fs, compo_id));
+            });
+        });
 
         pj.sim.limits.set_bound(0, 10);
         expect(!!pj.sim.srcs.prepare());
@@ -1029,10 +1356,10 @@ int main()
     };
 
     "internal_component_io"_test = [] {
-        {
-            irt::journal_handler jn{};
-            irt::modeling        mod{ jn };
+        const auto temp_path = irt::temp_path_with_unlink{ "internal"sv };
 
+        {
+            irt::modeling                                                mod;
             std::array<irt::component_id, irt::internal_component_count> i_ids;
 
             mod.ids.write([&](auto& ids) {
@@ -1051,7 +1378,7 @@ int main()
                     auto  reg_id = fs.alloc_registred("temp", 0);
                     auto& reg    = fs.registred_paths.get(reg_id);
 
-                    get_temp_registred_path(reg.path);
+                    reg.path = temp_path.sv();
                     fs.create_directories(reg_id);
 
                     auto dir_id = fs.alloc_dir(reg_id, "dir-temp");
@@ -1063,10 +1390,10 @@ int main()
 
                         const auto filename = irt::format_n<64>(
                           "{}.irt", irt::internal_component_names[i]);
-                        auto f_id = fs.alloc_file(
-                          dir_id,
-                          filename.sv(),
-                          irt::file_path::file_type::component_file);
+                        auto f_id =
+                          fs.alloc_file(dir_id,
+                                        filename.sv(),
+                                        irt::file_type::component_file);
 
                         ids.component_file_paths[c_id].file = f_id;
 
@@ -1081,22 +1408,20 @@ int main()
             });
 
             mod.ids.read([&](const auto& ids, auto) noexcept {
-                for (int i = 0, e = irt::internal_component_count; i != e;
-                     ++i) {
-                    mod.ids.read([&](const auto& ids, auto) noexcept {
+                mod.files.read([&](const auto& files, auto) noexcept {
+                    for (int i = 0, e = irt::internal_component_count; i != e;
+                         ++i) {
                         expect(fatal(ids.exists(i_ids[i])));
-
-                        expect(mod.save(i_ids[i]).has_value());
-                    });
-                }
+                        expect(mod.save(ids, files, i_ids[i]).has_value());
+                    }
+                });
 
                 expect(eq(ids.ssize(), irt::internal_component_count));
             });
         }
 
         {
-            irt::journal_handler jn{};
-            irt::modeling        mod{ jn };
+            irt::modeling mod;
 
             mod.files.write([&](auto& fs) {
                 fs.registred_paths.reserve(8);
@@ -1109,9 +1434,9 @@ int main()
 
                 const auto reg_id = fs.alloc_registred("temp", 0);
                 auto&      reg    = fs.registred_paths.get(reg_id);
-                get_temp_registred_path(reg.path);
+                reg.path          = temp_path.sv();
                 fs.create_directories(reg_id);
-                fs.browse_registreds(jn);
+                fs.browse_registreds();
             });
 
             auto old_cb = std::exchange(irt::on_error_callback, nullptr);
@@ -1133,9 +1458,8 @@ int main()
     "grid-3x3-constant-model-init-port-all"_test = [] {
         irt::vector<char> buffer;
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
+        irt::modeling mod;
+        irt::project  pj;
 
         irt::i32 cell_number = 0;
 
@@ -1175,8 +1499,7 @@ int main()
               ordinal(irt::constant::init_type::incoming_component_all);
             p.integers[1] = 0;
 
-            expect(!!s3.connect(mod,
-                                ch3,
+            expect(!!s3.connect(ch3,
                                 irt::connection::port{ .compo = p2_id },
                                 ch4,
                                 irt::connection::port{ .compo = p1_id }));
@@ -1199,7 +1522,11 @@ int main()
             return cg_id;
         });
 
-        expect(!!pj.set(mod, cg_id));
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.tree_nodes_size().first, cell_number * 3 + 1));
         expect(eq(pj.sim.models.ssize(), cell_number * 3));
 
@@ -1224,10 +1551,9 @@ int main()
         irt::vector<char> buffer;
 
         {
-            irt::journal_handler jn;
-            irt::modeling        mod{ jn };
-            irt::project         pj;
-            irt::i32             cell_number = 0;
+            irt::modeling mod;
+            irt::project  pj;
+            irt::i32      cell_number = 0;
 
             const auto cg_id = mod.ids.write([&](auto& ids) {
                 auto  compo_counter_id = ids.alloc_generic_component();
@@ -1278,7 +1604,6 @@ int main()
                 p_ch5.integers[1] = ordinal(p31_id);
 
                 expect(!!s3.connect(
-                  mod,
                   ch3,
                   irt::connection::port{ .compo = compo_timef_out },
                   ch4,
@@ -1305,7 +1630,12 @@ int main()
                 return cg_id;
             });
 
-            expect(!!pj.set(mod, cg_id));
+            mod.ids.read([&](const auto& ids, auto) {
+                mod.files.read([&](const auto& fs, auto) {
+                    expect(!!pj.set(ids, fs, cg_id));
+                });
+            });
+
             expect(eq(pj.tree_nodes_size().first, cell_number * 3 + 1));
             expect(eq(pj.sim.models.ssize(), cell_number * 3));
 
@@ -1330,9 +1660,8 @@ int main()
         auto old_error_callback =
           std::exchange(irt::on_error_callback, nullptr);
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
+        irt::modeling mod;
+        irt::project  pj;
 
         const auto cg_id = mod.ids.write([&](auto& ids) {
             auto  c1_id = ids.alloc_generic_component();
@@ -1366,8 +1695,7 @@ int main()
               ordinal(irt::constant::init_type::incoming_component_n);
             p_ch5.integers[1] = 17; // Impossible port
 
-            expect(!!s3.connect(mod,
-                                ch3,
+            expect(!!s3.connect(ch3,
                                 irt::connection::port{ .compo = p2_id },
                                 ch4,
                                 irt::connection::port{ .compo = p1_id }));
@@ -1380,9 +1708,14 @@ int main()
             return cg_id;
         });
 
-        expect(pj.set(mod, cg_id).has_error()); /* Fail to build the project
-                                     since the constant models can not be
-                                     initialized with dyn.port equals to 17. */
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read([&](const auto& fs, auto) {
+                expect(
+                  pj.set(ids, fs, cg_id).has_error()); /* Fail to build the
+                                project since the constant models can not be
+                                initialized with dyn.port equals to 17. */
+            });
+        });
 
         irt::on_error_callback = old_error_callback;
     };
@@ -1402,10 +1735,9 @@ int main()
          +-----------------------------+
           */
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::i32             cell_number = 0;
+        irt::modeling mod;
+        irt::project  pj;
+        irt::i32      cell_number = 0;
 
         const auto cg_id = mod.ids.write([&](auto& ids) {
             auto  compo_id = ids.alloc_generic_component();
@@ -1450,7 +1782,10 @@ int main()
             return cg_id;
         });
 
-        expect(pj.set(mod, cg_id).has_value());
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
 
         int nb_sum_model      = 0;
         int nb_counter_model  = 0;
@@ -1491,10 +1826,9 @@ int main()
          +-----------------------------+
           */
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::i32             cell_number = 0;
+        irt::modeling mod;
+        irt::project  pj;
+        irt::i32      cell_number = 0;
 
         const auto cg_id = mod.ids.write([&](auto& ids) {
             auto  compo_id = ids.alloc_generic_component();
@@ -1539,7 +1873,10 @@ int main()
             return cg_id;
         });
 
-        expect(pj.set(mod, cg_id).has_value());
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
 
         int nb_sum_model      = 0;
         int nb_counter_model  = 0;
@@ -1581,14 +1918,13 @@ int main()
           */
 
         {
-            irt::journal_handler jn;
-            irt::modeling        mod{ jn };
-            irt::project         pj;
-            irt::component_id    cg_id{ 0 };
-            irt::port_id         cg_output_port_id{ 0 };
-            irt::port_id         p_out{ 0 };
-            irt::component_id    compo_id{ 0 };
-            irt::child_id        counter_child_id{ 0 };
+            irt::modeling     mod;
+            irt::project      pj;
+            irt::component_id cg_id{ 0 };
+            irt::port_id      cg_output_port_id{ 0 };
+            irt::port_id      p_out{ 0 };
+            irt::component_id compo_id{ 0 };
+            irt::child_id     counter_child_id{ 0 };
 
             const auto root_id = mod.ids.write([&](auto& ids) {
                 compo_id    = ids.alloc_generic_component();
@@ -1634,7 +1970,6 @@ int main()
 
                 expect(root_gen
                          .connect(
-                           mod,
                            grid_child,
                            irt::connection::port{ .compo = cg_output_port_id },
                            counter_child,
@@ -1644,7 +1979,11 @@ int main()
                 return root_id;
             });
 
-            expect(pj.set(mod, root_id).has_value());
+            mod.ids.read([&](const auto& ids, auto) {
+                mod.files.read([&](const auto& fs, auto) {
+                    expect(!!pj.set(ids, fs, root_id));
+                });
+            });
 
             int nb_sum_model      = 0;
             int nb_counter_model  = 0;
@@ -1689,7 +2028,11 @@ int main()
                                         .child_component = compo_id });
             });
 
-            expect(pj.set(mod, root_id).has_value());
+            mod.ids.read([&](const auto& ids, auto) {
+                mod.files.read([&](const auto& fs, auto) {
+                    expect(!!pj.set(ids, fs, root_id));
+                });
+            });
 
             nb_sum_model      = 0;
             nb_counter_model  = 0;
@@ -1719,10 +2062,13 @@ int main()
                       ));
 
             mod.ids.read([&](const auto& ids, auto) noexcept {
-                expect(
-                  eq(get_input_connection_number(
-                       pj.sim, pj.tn_head()->children[counter_child_id].mdl, 0),
-                     25u));
+                expect(eq(get_input_connection_number(
+                            pj.sim,
+                            pj.tree_nodes.try_to_get(pj.tn_head())
+                              ->children[counter_child_id]
+                              .mdl,
+                            0),
+                          25u));
 
                 auto& cg = ids.components[cg_id];
 
@@ -1745,7 +2091,11 @@ int main()
                        irt::port_option::sum);
             });
 
-            expect(pj.set(mod, root_id).has_value());
+            mod.ids.read([&](const auto& ids, auto) {
+                mod.files.read([&](const auto& fs, auto) {
+                    expect(!!pj.set(ids, fs, root_id));
+                });
+            });
 
             nb_sum_model      = 0;
             nb_counter_model  = 0;
@@ -1775,10 +2125,13 @@ int main()
                         + 25u / 3u + 1u // The 9 sum models
                       ));
 
-            expect(
-              eq(get_input_connection_number(
-                   pj.sim, pj.tn_head()->children[counter_child_id].mdl, 0),
-                 1u));
+            expect(eq(get_input_connection_number(
+                        pj.sim,
+                        pj.tree_nodes.try_to_get(pj.tn_head())
+                          ->children[counter_child_id]
+                          .mdl,
+                        0),
+                      1u));
         }
     };
 
@@ -1796,11 +2149,10 @@ int main()
         //      | +----+  +----+ |
         //      +----------------+
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    cg_id{ 0 };
-        irt::component_id    compo_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id cg_id{ 0 };
+        irt::component_id compo_id{ 0 };
 
         mod.ids.write([&](auto& ids) {
             compo_id    = ids.alloc_generic_component();
@@ -1874,7 +2226,11 @@ int main()
             edge_size = g.g.edges.size() * 2u * 2u;
         });
 
-        expect(pj.set(mod, cg_id).has_value());
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
+
         expect(eq(pj.sim.models.ssize(), 3 * 4));
         expect(eq(get_connection_number(pj.sim), edge_size));
     };
@@ -1893,11 +2249,10 @@ int main()
         //      | +----+  +----+ |
         //      +----------------+
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    compo_id{ 0 };
-        irt::component_id    cg_id{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id compo_id{ 0 };
+        irt::component_id cg_id{ 0 };
 
         mod.ids.write([&](auto& ids) noexcept {
             compo_id    = ids.alloc_generic_component();
@@ -1980,7 +2335,10 @@ int main()
             edge_size = g.g.edges.size();
         });
 
-        expect(pj.set(mod, cg_id).has_value());
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read(
+              [&](const auto& fs, auto) { expect(!!pj.set(ids, fs, cg_id)); });
+        });
 
         // Six components plus 2 automatic 4 sum models (5 input models
         // A,
@@ -2039,13 +2397,12 @@ int main()
         //              |sum+---->counter|
         //              +---+    +-------+
 
-        irt::journal_handler jn;
-        irt::modeling        mod{ jn };
-        irt::project         pj;
-        irt::component_id    compo_id{ 0 };
-        irt::component_id    cg_id{ 0 };
-        irt::component_id    head_id{ 0 };
-        irt::port_id         p_cg_m_out{ 0 };
+        irt::modeling     mod;
+        irt::project      pj;
+        irt::component_id compo_id{ 0 };
+        irt::component_id cg_id{ 0 };
+        irt::component_id head_id{ 0 };
+        irt::port_id      p_cg_m_out{ 0 };
 
         mod.ids.write([&](auto& ids) noexcept {
             compo_id    = ids.alloc_generic_component();
@@ -2146,8 +2503,7 @@ int main()
             auto& ch_head_cnt   = gen_head.alloc(irt::dynamics_type::counter);
 
             expect(gen_head
-                     .connect(mod,
-                              ch_head_graph,
+                     .connect(ch_head_graph,
                               irt::connection::port{ .compo = p_cg_m_out },
                               ch_head_cnt,
                               irt::connection::port{ .model = 0 })
@@ -2156,7 +2512,11 @@ int main()
             edge_size = g.g.edges.size();
         });
 
-        expect(pj.set(mod, head_id).has_value());
+        mod.ids.read([&](const auto& ids, auto) {
+            mod.files.read([&](const auto& fs, auto) {
+                expect(!!pj.set(ids, fs, head_id));
+            });
+        });
 
         // Six components plus 2 automatic 4 sum models (5 input models
         // A,
@@ -2168,5 +2528,17 @@ int main()
         // sum models and 1 edge between sum models and finally on 1edge
         // from sum model to counter.
         expect(eq(get_connection_number(pj.sim), (edge_size + 2u) * 2u) + 8u);
+    };
+
+    "simulation-component"_test = [] {
+        simulation_component_tester(
+          std::array{ 0.0, 1.0, 2.0, 1.0 },
+          std::array{ 1.0, 2.0, 3.0, 4.0 },
+          std::array{ 1.0, 6.0, 6.0, 1.0, 2.0, 2.0, 1.0, 4.0, 4.0 });
+
+        simulation_component_tester(
+          std::array{ 0.0, 1.0, 2.0, 1.0 },
+          std::array{ 5.0, 2.0, 3.0, 3.0 },
+          std::array{ 1.0, 7.0, 7.0, 1.0, 2.0, 2.0, 1.0, 5.0, 5.0 });
     };
 }

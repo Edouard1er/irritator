@@ -53,6 +53,38 @@ constexpr void debug_logi([[maybe_unused]] int      indent,
 {}
 #endif
 
+/// Debug log with indent support. Use the underlying @c fmt::print function.
+///
+///     debug_logi(4, "to-do {}\n", 1); /* -> "    to-do 1\n */
+#ifdef IRRITATOR_ENABLE_DEBUG
+template<typename S, typename... Args>
+constexpr void dlog(int indent, const S& s, Args&&... args) noexcept
+{
+    fmt::print(stderr, "{:{}}", "", indent);
+    fmt::vprint(stderr, s, fmt::make_format_args(args...));
+}
+
+template<typename S, typename... Args>
+constexpr void dlogln(int indent, const S& s, Args&&... args) noexcept
+{
+    fmt::print(stderr, "{:{}}", "", indent);
+    fmt::vprintln(stderr, s, fmt::make_format_args(args...));
+}
+
+#else
+template<typename S, typename... Args>
+constexpr void dlog([[maybe_unused]] int      indent,
+                    [[maybe_unused]] const S& s,
+                    [[maybe_unused]] Args&&... args) noexcept
+{}
+
+template<typename S, typename... Args>
+constexpr void dlogln([[maybe_unused]] int      indent,
+                      [[maybe_unused]] const S& s,
+                      [[maybe_unused]] Args&&... args) noexcept
+{}
+#endif
+
 //! Helper function to assign fmtlib format string to an irt::small_string
 //! object. This function ensure to put a null string characters (i.e. '\0') in
 //! the last buffer space after the string. The string can be truncate if the
@@ -65,13 +97,12 @@ inline void format(small_string<N>&            str,
                    fmt::format_string<Args...> fmt_str,
                    Args&&... args) noexcept
 {
-    auto result = fmt::vformat_to_n(str.data(),
-                                    static_cast<std::size_t>(str.capacity()),
-                                    fmt_str,
-                                    fmt::make_format_args(args...));
-
-    str.resize(static_cast<typename small_string<N>::index_type>(
-      std::min<std::size_t>(result.size, str.capacity())));
+    str.resize_and_overwrite(
+      str.capacity(), [&](char* buf, std::size_t n) noexcept {
+          const auto r = fmt::format_to_n(buf, n, fmt_str,
+                                          std::forward<Args>(args)...);
+          return std::min<std::size_t>(r.size, n);
+      });
 }
 
 template<std::size_t N, typename... Args>
@@ -79,17 +110,87 @@ inline small_string<N> format_n(fmt::format_string<Args...> fmt_str,
                                 Args&&... args) noexcept
 {
     small_string<N> str;
-
-    auto result = fmt::vformat_to_n(
-      str.data(), str.capacity(), fmt_str, fmt::make_format_args(args...));
-
-    str.resize(static_cast<typename small_string<N>::index_type>(
-      std::min<std::size_t>(result.size, str.capacity())));
-
+    format(str, fmt_str, std::forward<Args>(args)...);
     return str;
 }
 
 } //  irt
+
+/**
+ * @brief Format @c resampled_sample
+ *
+ * @code
+ * fmt::print("{:.0f;.6g}\n", r);   // t use .0f, value use .6g
+ * fmt::print("{:.3f}\n", r);       // no ';' -> t use .3f, value as default
+ * @endcode
+ */
+template<>
+struct fmt::formatter<::irt::resampled_sample> {
+    fmt::formatter<double> t_formatter;
+    fmt::formatter<double> value_formatter;
+
+    constexpr auto parse(format_parse_context& ctx) noexcept
+      -> format_parse_context::iterator
+    {
+        auto it  = ctx.begin();
+        auto end = ctx.end();
+
+        auto sep = it;
+        while (sep != end && *sep != '}' && *sep != ';')
+            ++sep;
+
+        {
+            format_parse_context t_ctx(
+              fmt::string_view(it, static_cast<size_t>(sep - it)));
+            auto t_end = t_formatter.parse(t_ctx);
+
+            if (t_end != t_ctx.end()) {
+                using namespace std::literals;
+
+                log(::irt::log_level::critical,
+                    "format.hpp"sv
+                    "invalid spec for resampled-sample::t\n"sv);
+
+                return ctx.begin();
+            }
+        }
+
+        if (sep == end || *sep == '}')
+            return sep;
+
+        ++sep;
+        auto vend = sep;
+        while (vend != end && *vend != '}')
+            ++vend;
+
+        {
+            format_parse_context v_ctx(
+              fmt::string_view(sep, static_cast<size_t>(vend - sep)));
+            auto v_end = value_formatter.parse(v_ctx);
+            if (v_end != v_ctx.end()) {
+                using namespace std::literals;
+
+                log(::irt::log_level::critical,
+                    "format.hpp"sv
+                    "invalid spec for resampled-sample::value\n"sv);
+
+                return ctx.begin();
+            }
+        }
+
+        return vend;
+    }
+
+    constexpr auto format(const ::irt::resampled_sample& r,
+                          format_context&                ctx) const noexcept
+      -> format_context::iterator
+    {
+        auto out = t_formatter.format(r.t, ctx);
+        *out++   = ' ';
+        ctx.advance_to(out);
+        return value_formatter.format(r.value, ctx);
+    }
+};
 
 template<>
 struct fmt::formatter<::irt::human_readable_bytes> {
@@ -146,6 +247,33 @@ struct fmt::formatter<::irt::human_readable_time> {
         }
 
         irt::unreachable();
+    }
+};
+
+template<>
+struct fmt::formatter<::irt::error_code> {
+
+    constexpr auto parse(format_parse_context& ctx) noexcept
+      -> format_parse_context::iterator
+    {
+        return ctx.begin();
+    }
+
+    auto format(const ::irt::error_code& ec, format_context& ctx) const noexcept
+      -> format_context::iterator
+    {
+        switch (ec.cat()) {
+        case irt::category::generic:
+            return format_to(ctx.out(), "generic error: {}", ec.value());
+        case irt::category::project:
+            return format_to(ctx.out(), "project error: {}", ec.value());
+        case irt::category::simulation:
+            return format_to(ctx.out(), "simulation error: {}", ec.value());
+        case irt::category::modeling:
+            return format_to(ctx.out(), "modeling error: {}", ec.value());
+        default:
+            return format_to(ctx.out(), "unknown error: {}", ec.value());
+        }
     }
 };
 

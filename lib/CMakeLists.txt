@@ -16,7 +16,6 @@ set(public_irritator_header
     include/irritator/macros.hpp
     include/irritator/modeling-helpers.hpp
     include/irritator/modeling.hpp
-    include/irritator/observation.hpp
     include/irritator/random.hpp
     include/irritator/thread.hpp
     include/irritator/timeline.hpp)
@@ -28,7 +27,6 @@ set(private_irritator_sources
     src/external_source.cpp
     src/filesystem.cpp
     src/file.cpp
-    src/file-observer.cpp
     src/global.cpp
     src/graph-observer.cpp
     src/grid-observer.cpp
@@ -41,13 +39,17 @@ set(private_irritator_sources
     src/modeling-graph.cpp
     src/modeling-grid.cpp
     src/modeling-internal.cpp
+    src/modeling-simulation.cpp
+    src/observer.cpp
     src/parameter.cpp
     src/project.cpp
+    src/project-simulation.cpp
     src/simulation.cpp
     src/timeline.cpp
+    src/thread.cpp
     src/variable-observer.cpp)
 
-add_library(libirritator STATIC ${public_irritator_header} ${private_irritator_sources} "src/simulation.cpp")
+add_library(libirritator STATIC ${public_irritator_header} ${private_irritator_sources})
 add_library(libirritator::libirritator ALIAS libirritator)
 
 target_sources(libirritator
@@ -66,14 +68,13 @@ target_compile_options(libirritator PRIVATE
         $<$<CONFIG:Debug>:/Od /W3 /Zi>>)
 
 target_compile_definitions(libirritator PRIVATE
-      $<$<BOOL:${WITH_DEBUG}>:IRRITATOR_ENABLE_DEBUG>
+      $<$<BOOL:${IRRITATOR_DEBUG_COND}>:IRRITATOR_ENABLE_DEBUG>
       $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
       $<$<CXX_COMPILER_ID:MSVC>:_SCL_SECURE_NO_WARNINGS>
       $<$<CXX_COMPILER_ID:MSVC>:BOOST_UT_DISABLE_MODULE>
       VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
       VERSION_MINOR=${PROJECT_VERSION_MINOR}
-      VERSION_PATCH=${PROJECT_VERSION_PATCH}
-      VERSION_TWEAK=${PROJECT_VERSION_TWEAK})
+      VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 target_include_directories(libirritator PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -119,54 +120,3 @@ install(FILES
 install(DIRECTORY include/irritator
   DESTINATION
   ${CMAKE_INSTALL_INCLUDEDIR}/irritator-${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
-
-function(irritator_add_test test_name)
-  add_executable(${test_name} ${ARGN} "src/simulation.cpp")
-
-  set_target_properties(${test_name} PROPERTIES
-    COMPILE_DEFINITIONS EXAMPLES_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test\"
-    CXX_STANDARD 20)
-
-  target_compile_options(${test_name} BEFORE
-    PRIVATE
-    $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:
-        -pipe -march=native
-        $<$<CONFIG:Debug>:-O0 -g -Wall -Wextra>>
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<VERSION_LESS_EQUAL:${MSVC_TOOLSET_VERSION},142>>:
-        /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd4251 /wd5030 /std:c++latest
-        $<$<CONFIG:Debug>:/Od /W3 /Zi>>
-    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<VERSION_GREATER:${MSVC_TOOLSET_VERSION},142>>:
-        /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd4251 /wd5030 /std:c++20
-        $<$<CONFIG:Debug>:/Od /W3 /Zi>>)
-
-  target_compile_definitions(${test_name}
-    PRIVATE
-    $<$<BOOL:${WITH_DEBUG}>:IRRITATOR_ENABLE_DEBUG>
-    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
-    $<$<CXX_COMPILER_ID:MSVC>:_SCL_SECURE_NO_WARNINGS>
-    $<$<CXX_COMPILER_ID:MSVC>:BOOST_UT_DISABLE_MODULE>
-    IRT_DATAROOTDIR="${CMAKE_INSTALL_FULL_DATAROOTDIR}")
-
-  target_include_directories(${test_name} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    $<INSTALL_INTERFACE:include>
-    PRIVATE
-    src
-    ${CMAKE_CURRENT_BINARY_DIR})
-
-  target_link_libraries(${test_name}
-    $<$<AND:$<PLATFORM_ID:Linux>,$<CXX_COMPILER_ID:GNU>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9.0>>:stdc++fs>
-    $<$<AND:$<PLATFORM_ID:Linux>,$<CXX_COMPILER_ID:Clang>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9.0>>:c++fs>
-    $<$<AND:$<PLATFORM_ID:Darwin>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,9.0>>:c++fs>
-    threads
-    libirritator)
-
-  add_test(${test_name} ${test_name})
-endfunction()
-
-irritator_add_test(test-container test/containers.cpp)
-irritator_add_test(test-api test/public-api.cpp)
-irritator_add_test(test-mod-to-sim test/mod-to-sim.cpp)
-irritator_add_test(test-thread test/threading.cpp)
-irritator_add_test(test-simulations test/simulations.cpp)
-irritator_add_test(test-dot-parser test/dot-parser-test.cpp)

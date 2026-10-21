@@ -124,6 +124,7 @@ static bool show_grid_component_options(grid_component& grid) noexcept
     return u > 0;
 }
 
+#if 0
 static bool get_or_add_x(component& compo, std::string_view name) noexcept
 {
     if (is_defined(compo.get_x(name)))
@@ -293,11 +294,7 @@ static bool assign_name_y(grid_component& grid, component& compo) noexcept
 
     unreachable();
 }
-
-static bool assign_name(grid_component& grid, component& compo) noexcept
-{
-    return assign_name_x(grid, compo) and assign_name_y(grid, compo);
-}
+#endif
 
 static bool show_grid_editor_options(application&                app,
                                      grid_component_editor_data& ed,
@@ -497,10 +494,9 @@ static bool show_grid(const component_access&     ids,
                                     auto ret = data.connect_input(
                                       s_id, ed.row, ed.col, id);
                                     if (!ret) {
-                                        app.jn.push(
-                                          log_level::error, [](auto& t, auto&) {
-                                              t = "Fail to connect input ";
-                                          });
+                                        log(log_level::error, [](auto& m) {
+                                            m = "Fail to connect input ";
+                                        });
                                     }
                                     ++u;
                                 }
@@ -531,10 +527,9 @@ static bool show_grid(const component_access&     ids,
                                     auto ret = data.connect_output(
                                       id, ed.row, ed.col, s_id);
                                     if (!ret) {
-                                        app.jn.push(
-                                          log_level::error, [](auto& t, auto&) {
-                                              t = "Fail to connect output ";
-                                          });
+                                        log(log_level::error, [](auto& m) {
+                                            m = "Fail to connect output ";
+                                        });
                                     }
                                     ++u;
                                 }

@@ -10,10 +10,29 @@
 
 namespace irt {
 
+static auto init_or_reuse_observer(project&               pj,
+                                   model&                 mdl,
+                                   const fraction         timestep,
+                                   const std::string_view str) noexcept
+  -> observer_id
+{
+    if (auto* obs = pj.sim.observers.try_to_get(mdl.obs_id)) {
+        obs->reset();
+    } else {
+        if (const auto ret = pj.sim.observe(mdl, timestep.to_double());
+            ret.has_error()) {
+            log(log_level::error, [&](auto& m) {
+                format(m, "graph-observation: fail to observe a model {}\n",
+                       str);
+            });
+        }
+    }
+
+    return mdl.obs_id;
+}
+
 static void build_graph(graph_observer&  graph_obs,
-                        modeling&        mod,
                         project&         pj,
-                        simulation&      sim,
                         tree_node&       graph_parent,
                         graph_component& graph_compo) noexcept
 {
@@ -21,115 +40,97 @@ static void build_graph(graph_observer&  graph_obs,
 
     const auto* to = pj.tree_nodes.try_to_get(graph_obs.tn_id);
 
-    if (!to)
-        return;
+    if (debug::check(to)) {
+        const auto relative_path =
+          pj.build_relative_path(graph_parent, *to, graph_obs.mdl_id);
 
-    const auto relative_path =
-      pj.build_relative_path(graph_parent, *to, graph_obs.mdl_id);
+        const auto* child = graph_parent.tree.get_child();
+        while (child) {
+            if (child->id == graph_obs.compo_id) {
+                const auto  tn_mdl = pj.get_model(*child, relative_path);
+                const auto* tn     = pj.tree_nodes.try_to_get(tn_mdl.first);
+                auto*       mdl    = pj.sim.models.try_to_get(tn_mdl.second);
 
-    const auto* child = graph_parent.tree.get_child();
-    while (child) {
-        if (child->id == graph_obs.compo_id) {
-            const auto  tn_mdl = pj.get_model(*child, relative_path);
-            const auto* tn     = pj.tree_nodes.try_to_get(tn_mdl.first);
-            auto*       mdl    = sim.models.try_to_get(tn_mdl.second);
+                if (not(tn and mdl))
+                    continue;
 
-            if (tn and mdl) {
-                sz index = 0;
+                std::size_t index = 0;
+                const auto  ret   = std::from_chars(
+                  child->unique_id.begin(), child->unique_id.end(), index);
 
-                if (auto ret = std::from_chars(
-                      child->unique_id.begin(), child->unique_id.end(), index);
-                    ret.ec == std::errc{}) {
+                if (ret.ec == std::errc{}) {
                     debug::ensure(graph_obs.observers.size() ==
                                   graph_compo.g.nodes.size());
                     debug::ensure(index < graph_obs.observers.size());
 
-                    auto&      obs    = sim.observers.alloc();
-                    const auto obs_id = sim.observers.get_id(obs);
-                    sim.observe(*mdl, obs);
-
-                    graph_obs.observers[index] = obs_id;
+                    graph_obs.observers[index] = init_or_reuse_observer(
+                      pj, *mdl, graph_obs.timestep, child->unique_id.sv());
                 } else {
-                    mod.journal.push(log_level::warning,
-                                     [&](auto& t, auto& m) noexcept {
-                                         t = "Graph observer error";
-                                         format(m,
-                                                "unique_id {} is not found",
-                                                child->unique_id.sv());
-                                     });
+                    log(log_level::warning, [&](auto& m) noexcept {
+                        format(m,
+                               "graph-observation: unique_id {} is not found",
+                               child->unique_id.sv());
+                    });
                 }
             }
+
+            child = child->tree.get_sibling();
         }
-        child = child->tree.get_sibling();
     }
 }
 
-void graph_observer::init(project& pj, modeling& mod, simulation& sim) noexcept
+status graph_observer::init(project& pj, const modeling& mod) noexcept
 {
-    observers.clear();
+    return mod.ids.read([&](const auto& ids, auto) noexcept -> status {
+        auto* tn = pj.tree_nodes.try_to_get(parent_id);
 
-    values.write([&](auto& v) noexcept {
-        if (auto* tn = pj.tree_nodes.try_to_get(parent_id); tn) {
-            mod.ids.read([&](const auto& ids, auto) noexcept {
-                if (ids.exists(tn->id)) {
-                    if (ids.components[tn->id].type == component_type::graph) {
-                        if (auto* graph = ids.graph_components.try_to_get(
-                              ids.components[tn->id].id.graph_id)) {
-                            const auto len = graph->g.nodes.ssize();
+        if (not tn or not ids.exists(tn->id) or
+            ids.components[tn->id].type != component_type::graph)
+            return success();
 
-                            observers.resize(len);
-                            std::fill_n(
-                              observers.data(), len, undefined<observer_id>());
-                            v.resize(len, zero);
+        observers.clear();
+        values.clear();
 
-                            build_graph(*this, mod, pj, sim, *tn, *graph);
-                        }
-                    }
-                }
-            });
+        if (auto* graph = ids.graph_components.try_to_get(
+              ids.components[tn->id].id.graph_id)) {
+            const auto len = graph->g.nodes.ssize();
+
+            debug::ensure(len > 0);
+
+            if (not observers.resize(len) or not values.resize(len))
+                return make_error(simulation_errc::observers_container_full);
+
+            std::ranges::fill(observers, undefined<observer_id>());
+            std::ranges::fill(values, zero);
+
+            build_graph(*this, pj, *tn, *graph);
         }
-    });
 
-    tn = sim.current_time();
+        return success();
+    });
 }
 
 void graph_observer::clear() noexcept
 {
     observers.clear();
-    values.write([](auto& v) noexcept { v.clear(); });
-
-    tn = 0;
+    values.clear();
 }
 
-void graph_observer::update(const simulation& sim) noexcept
+void graph_observer::update(const project& pj) noexcept
 {
-    values.write([&](auto& v) noexcept {
-        debug::ensure(v.size() == observers.size());
-
-        if (v.size() != observers.size())
-            return;
-
-        std::fill_n(v.data(), v.capacity(), 0.0);
+    if (values.size() == observers.size()) {
         for (sz i = 0, e = observers.size(); i < e; ++i) {
-            if (const auto* obs = sim.observers.try_to_get(observers[i]); obs) {
-                if (obs->states[observer_flags::use_linear_buffer]) {
-                    obs->linearized_buffer.read(
-                      [](const auto& buf, auto /*version*/, auto& v) {
-                          v = not buf.empty() ? buf.back().y : zero;
-                      },
-                      v[i]);
-                } else {
-                    obs->buffer.read(
-                      [](const auto& buf, auto /*version*/, auto& v) {
-                          v = not buf.empty() ? buf.back()[1] : zero;
-                      },
-                      v[i]);
-                }
+            const auto  obs_id = observers[i];
+            const auto* obs    = pj.sim.observers.try_to_get(obs_id);
+
+            if (obs) {
+                obs->read_history([&](const auto& h, const auto) {
+                    if (not h.empty())
+                        values[i] = h.back().value;
+                });
             }
         }
-
-        tn = sim.current_time() + static_cast<time>(time_step);
-    });
+    }
 }
 
 } // namespace irt

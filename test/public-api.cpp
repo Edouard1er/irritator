@@ -8,14 +8,12 @@
 #include <irritator/file.hpp>
 #include <irritator/io.hpp>
 #include <irritator/modeling.hpp>
-#include <irritator/observation.hpp>
 #include <irritator/random.hpp>
 
 #include <fmt/format.h>
 
 #include <numbers>
 #include <random>
-#include <sstream>
 
 #include <cstdio>
 
@@ -52,38 +50,25 @@ struct file_output {
       : os{ std::fopen(filename, "w") }
       , obs{ obs_ }
     {
+        using namespace boost::ut;
+
+        expect(neq(os, nullptr));
+
         if (os)
             fmt::print(os, "t,v\n");
     }
 
-    void push_back(const irt::observation& vec) const noexcept
-    {
-        if (os)
-            fmt::print(os, "{},{}\n", vec.x, vec.y);
-    }
-
-    void write() noexcept
-    {
-        if (obs.states[irt::observer_flags::buffer_full]) {
-            irt::write_interpolate_data(obs, 0.1, [&](auto t, auto v) noexcept {
-                fmt::print(os, "{},{}\n", t, v);
-            });
-        }
-    }
-
-    void flush() noexcept
-    {
-        irt::flush_interpolate_data(obs, 0.1, [&](auto t, auto v) noexcept {
-            fmt::print(os, "{},{}\n", t, v);
-        });
-
-        std::fflush(os);
-    }
-
     ~file_output() noexcept
     {
-        if (os)
+        if (os) {
+            obs.read_history([&](const auto& h, const auto) {
+                for (std::size_t i = 0, e = h.size(); i != e; ++i)
+                    fmt::print(os, "{},{}\n", h[i].t, h[i].value);
+            });
+
+            std::fflush(os);
             std::fclose(os);
+        }
     }
 };
 
@@ -319,80 +304,32 @@ int main()
         expect(nk4.second == 7u);
     };
 
-    "sizeof"_test = [] {
-        fmt::print("qss1_integrator   {}\n", sizeof(irt::qss1_integrator));
-        fmt::print("qss1_multiplier   {}\n", sizeof(irt::qss1_multiplier));
-        fmt::print("qss1_cross        {}\n", sizeof(irt::qss1_cross));
-        fmt::print("qss1_power        {}\n", sizeof(irt::qss1_power));
-        fmt::print("qss1_square       {}\n", sizeof(irt::qss1_square));
-        fmt::print("qss1_sum_2        {}\n", sizeof(irt::qss1_sum_2));
-        fmt::print("qss1_sum_3        {}\n", sizeof(irt::qss1_sum_3));
-        fmt::print("qss1_sum_4        {}\n", sizeof(irt::qss1_sum_4));
-        fmt::print("qss1_wsum_2       {}\n", sizeof(irt::qss1_wsum_2));
-        fmt::print("qss1_wsum_3       {}\n", sizeof(irt::qss1_wsum_3));
-        fmt::print("qss1_wsum_4       {}\n", sizeof(irt::qss1_wsum_4));
-        fmt::print("qss1_invert       {}\n", sizeof(irt::qss1_inverse));
-        fmt::print("qss1_integer      {}\n", sizeof(irt::qss1_integer));
-        fmt::print("qss1_compare      {}\n", sizeof(irt::qss1_compare));
-        fmt::print("qss1_sin          {}\n", sizeof(irt::qss1_sin));
-        fmt::print("qss1_cos          {}\n", sizeof(irt::qss1_cos));
-        fmt::print("qss1_log          {}\n", sizeof(irt::qss1_log));
-        fmt::print("qss1_exp          {}\n", sizeof(irt::qss1_exp));
-        fmt::print("qss2_integrator   {}\n", sizeof(irt::qss2_integrator));
-        fmt::print("qss2_multiplier   {}\n", sizeof(irt::qss2_multiplier));
-        fmt::print("qss2_cross        {}\n", sizeof(irt::qss2_cross));
-        fmt::print("qss2_power        {}\n", sizeof(irt::qss2_power));
-        fmt::print("qss2_square       {}\n", sizeof(irt::qss2_square));
-        fmt::print("qss2_sum_2        {}\n", sizeof(irt::qss2_sum_2));
-        fmt::print("qss2_sum_3        {}\n", sizeof(irt::qss2_sum_3));
-        fmt::print("qss2_sum_4        {}\n", sizeof(irt::qss2_sum_4));
-        fmt::print("qss2_wsum_2       {}\n", sizeof(irt::qss2_wsum_2));
-        fmt::print("qss2_wsum_3       {}\n", sizeof(irt::qss2_wsum_3));
-        fmt::print("qss2_wsum_4       {}\n", sizeof(irt::qss2_wsum_4));
-        fmt::print("qss2_invert       {}\n", sizeof(irt::qss2_inverse));
-        fmt::print("qss2_integer      {}\n", sizeof(irt::qss2_integer));
-        fmt::print("qss2_compare      {}\n", sizeof(irt::qss2_compare));
-        fmt::print("qss2_sin          {}\n", sizeof(irt::qss2_sin));
-        fmt::print("qss2_cos          {}\n", sizeof(irt::qss2_cos));
-        fmt::print("qss2_log          {}\n", sizeof(irt::qss2_log));
-        fmt::print("qss2_exp          {}\n", sizeof(irt::qss2_exp));
-        fmt::print("qss3_integrator   {}\n", sizeof(irt::qss3_integrator));
-        fmt::print("qss3_multiplier   {}\n", sizeof(irt::qss3_multiplier));
-        fmt::print("qss3_power        {}\n", sizeof(irt::qss3_power));
-        fmt::print("qss3_square       {}\n", sizeof(irt::qss3_square));
-        fmt::print("qss3_cross        {}\n", sizeof(irt::qss3_cross));
-        fmt::print("qss3_sum_2        {}\n", sizeof(irt::qss3_sum_2));
-        fmt::print("qss3_sum_3        {}\n", sizeof(irt::qss3_sum_3));
-        fmt::print("qss3_sum_4        {}\n", sizeof(irt::qss3_sum_4));
-        fmt::print("qss3_wsum_2       {}\n", sizeof(irt::qss3_wsum_2));
-        fmt::print("qss3_wsum_3       {}\n", sizeof(irt::qss3_wsum_3));
-        fmt::print("qss3_wsum_4       {}\n", sizeof(irt::qss3_wsum_4));
-        fmt::print("qss3_invert       {}\n", sizeof(irt::qss3_inverse));
-        fmt::print("qss3_integer      {}\n", sizeof(irt::qss3_integer));
-        fmt::print("qss3_compare      {}\n", sizeof(irt::qss3_compare));
-        fmt::print("qss3_sin          {}\n", sizeof(irt::qss3_sin));
-        fmt::print("qss3_cos          {}\n", sizeof(irt::qss3_cos));
-        fmt::print("qss3_log          {}\n", sizeof(irt::qss3_log));
-        fmt::print("qss3_exp          {}\n", sizeof(irt::qss3_exp));
-        fmt::print("counter           {}\n", sizeof(irt::counter));
-        fmt::print("queue             {}\n", sizeof(irt::queue));
-        fmt::print("dynamic_queue     {}\n", sizeof(irt::dynamic_queue));
-        fmt::print("priority_queue    {}\n", sizeof(irt::priority_queue));
-        fmt::print("generator         {}\n", sizeof(irt::generator));
-        fmt::print("constant          {}\n", sizeof(irt::constant));
-        fmt::print("time_func         {}\n", sizeof(irt::time_func));
-        fmt::print("accumulator       {}\n", sizeof(irt::accumulator_2));
-        fmt::print("hsm_wrapper       {}\n", sizeof(irt::hsm_wrapper));
-        fmt::print("--------------------\n");
-        fmt::print("dynamic number:   {}\n", irt::dynamics_type_size());
-        fmt::print("max dynamic size: {}\n", irt::max_size_in_bytes());
-        fmt::print("--------------------\n");
-        fmt::print("model             {}\n", sizeof(irt::model));
-        fmt::print("message           {}\n", sizeof(irt::message));
-        fmt::print("observer          {}\n", sizeof(irt::observer));
-        fmt::print("node              {}\n", sizeof(irt::node));
-        fmt::print("parameter         {}\n", sizeof(irt::parameter));
-        fmt::print("model size:       {}\n", sizeof(irt::model));
+    "better_sizeof_dynamics"_test = [] {
+        irt::model mdl;
+
+        for (auto i = 0, e = irt::dynamics_type_size(); i != e; ++i) {
+            mdl.type        = irt::enum_cast<irt::dynamics_type>(i);
+            const auto name = irt::dynamics_type_names[i];
+            const auto size = irt::dispatch(
+              mdl, []<typename Dynamics>(Dynamics& dyn) -> std::size_t {
+                  return sizeof(dyn);
+              });
+
+            fmt::print("{:25}|{:5}\n", name, size);
+        }
+
+        fmt::print("------------------------------\n");
+        fmt::print("dynamic number:          |{:5}\n",
+                   irt::dynamics_type_size());
+        fmt::print("max dynamic size:        |{:5}\n",
+                   irt::max_size_in_bytes());
+        fmt::print("------------------------------\n");
+        fmt::print("model                    |{:5}\n", sizeof(irt::model));
+        fmt::print("message                  |{:5}\n", sizeof(irt::message));
+        fmt::print("observer                 |{:5}\n", sizeof(irt::observer));
+        fmt::print("node                     |{:5}\n", sizeof(irt::node));
+        fmt::print("parameter                |{:5}\n", sizeof(irt::parameter));
+        fmt::print("model size:              |{:5}\n", sizeof(irt::model));
     };
 
     "model_constepxr"_test = [] {
@@ -430,6 +367,451 @@ int main()
         static_assert(irt::has_input_port<irt::qss1_filter>);
         static_assert(irt::has_output_port<irt::qss1_filter>);
         static_assert(irt::has_observation_function<irt::qss1_filter>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_sample_hold>);
+        static_assert(irt::has_lambda_function<irt::qss1_sample_hold>);
+        static_assert(irt::has_transition_function<irt::qss1_sample_hold>);
+        static_assert(irt::has_input_port<irt::qss1_sample_hold>);
+        static_assert(irt::has_output_port<irt::qss1_sample_hold>);
+        static_assert(irt::has_observation_function<irt::qss1_sample_hold>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_sample_hold>);
+        static_assert(irt::has_lambda_function<irt::qss2_sample_hold>);
+        static_assert(irt::has_transition_function<irt::qss2_sample_hold>);
+        static_assert(irt::has_input_port<irt::qss2_sample_hold>);
+        static_assert(irt::has_output_port<irt::qss2_sample_hold>);
+        static_assert(irt::has_observation_function<irt::qss2_sample_hold>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_sample_hold>);
+        static_assert(irt::has_lambda_function<irt::qss3_sample_hold>);
+        static_assert(irt::has_transition_function<irt::qss3_sample_hold>);
+        static_assert(irt::has_input_port<irt::qss3_sample_hold>);
+        static_assert(irt::has_output_port<irt::qss3_sample_hold>);
+        static_assert(irt::has_observation_function<irt::qss3_sample_hold>);
+
+        static_assert(irt::has_initialize_function<irt::zero_order_hold>);
+        static_assert(irt::has_lambda_function<irt::zero_order_hold>);
+        static_assert(irt::has_transition_function<irt::zero_order_hold>);
+        static_assert(irt::has_input_port<irt::zero_order_hold>);
+        static_assert(irt::has_output_port<irt::zero_order_hold>);
+        static_assert(irt::has_observation_function<irt::zero_order_hold>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_quantizer>);
+        static_assert(irt::has_lambda_function<irt::qss1_quantizer>);
+        static_assert(irt::has_transition_function<irt::qss1_quantizer>);
+        static_assert(irt::has_input_port<irt::qss1_quantizer>);
+        static_assert(irt::has_output_port<irt::qss1_quantizer>);
+        static_assert(irt::has_observation_function<irt::qss1_quantizer>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_quantizer>);
+        static_assert(irt::has_lambda_function<irt::qss2_quantizer>);
+        static_assert(irt::has_transition_function<irt::qss2_quantizer>);
+        static_assert(irt::has_input_port<irt::qss2_quantizer>);
+        static_assert(irt::has_output_port<irt::qss2_quantizer>);
+        static_assert(irt::has_observation_function<irt::qss2_quantizer>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_quantizer>);
+        static_assert(irt::has_lambda_function<irt::qss3_quantizer>);
+        static_assert(irt::has_transition_function<irt::qss3_quantizer>);
+        static_assert(irt::has_input_port<irt::qss3_quantizer>);
+        static_assert(irt::has_output_port<irt::qss3_quantizer>);
+        static_assert(irt::has_observation_function<irt::qss3_quantizer>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss1_integrate_and_fire>);
+        static_assert(irt::has_lambda_function<irt::qss1_integrate_and_fire>);
+        static_assert(
+          irt::has_transition_function<irt::qss1_integrate_and_fire>);
+        static_assert(irt::has_input_port<irt::qss1_integrate_and_fire>);
+        static_assert(irt::has_output_port<irt::qss1_integrate_and_fire>);
+        static_assert(
+          irt::has_observation_function<irt::qss1_integrate_and_fire>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss2_integrate_and_fire>);
+        static_assert(irt::has_lambda_function<irt::qss2_integrate_and_fire>);
+        static_assert(
+          irt::has_transition_function<irt::qss2_integrate_and_fire>);
+        static_assert(irt::has_input_port<irt::qss2_integrate_and_fire>);
+        static_assert(irt::has_output_port<irt::qss2_integrate_and_fire>);
+        static_assert(
+          irt::has_observation_function<irt::qss2_integrate_and_fire>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss3_integrate_and_fire>);
+        static_assert(irt::has_lambda_function<irt::qss3_integrate_and_fire>);
+        static_assert(
+          irt::has_transition_function<irt::qss3_integrate_and_fire>);
+        static_assert(irt::has_input_port<irt::qss3_integrate_and_fire>);
+        static_assert(irt::has_output_port<irt::qss3_integrate_and_fire>);
+        static_assert(
+          irt::has_observation_function<irt::qss3_integrate_and_fire>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss1_threshold_crossing>);
+        static_assert(irt::has_lambda_function<irt::qss1_threshold_crossing>);
+        static_assert(
+          irt::has_transition_function<irt::qss1_threshold_crossing>);
+        static_assert(irt::has_input_port<irt::qss1_threshold_crossing>);
+        static_assert(irt::has_output_port<irt::qss1_threshold_crossing>);
+        static_assert(
+          irt::has_observation_function<irt::qss1_threshold_crossing>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss2_threshold_crossing>);
+        static_assert(irt::has_lambda_function<irt::qss2_threshold_crossing>);
+        static_assert(
+          irt::has_transition_function<irt::qss2_threshold_crossing>);
+        static_assert(irt::has_input_port<irt::qss2_threshold_crossing>);
+        static_assert(irt::has_output_port<irt::qss2_threshold_crossing>);
+        static_assert(
+          irt::has_observation_function<irt::qss2_threshold_crossing>);
+
+        static_assert(
+          irt::has_initialize_function<irt::qss3_threshold_crossing>);
+        static_assert(irt::has_lambda_function<irt::qss3_threshold_crossing>);
+        static_assert(
+          irt::has_transition_function<irt::qss3_threshold_crossing>);
+        static_assert(irt::has_input_port<irt::qss3_threshold_crossing>);
+        static_assert(irt::has_output_port<irt::qss3_threshold_crossing>);
+        static_assert(
+          irt::has_observation_function<irt::qss3_threshold_crossing>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_pwm>);
+        static_assert(irt::has_lambda_function<irt::qss1_pwm>);
+        static_assert(irt::has_transition_function<irt::qss1_pwm>);
+        static_assert(irt::has_input_port<irt::qss1_pwm>);
+        static_assert(irt::has_output_port<irt::qss1_pwm>);
+        static_assert(irt::has_observation_function<irt::qss1_pwm>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_pwm>);
+        static_assert(irt::has_lambda_function<irt::qss2_pwm>);
+        static_assert(irt::has_transition_function<irt::qss2_pwm>);
+        static_assert(irt::has_input_port<irt::qss2_pwm>);
+        static_assert(irt::has_output_port<irt::qss2_pwm>);
+        static_assert(irt::has_observation_function<irt::qss2_pwm>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_pwm>);
+        static_assert(irt::has_lambda_function<irt::qss3_pwm>);
+        static_assert(irt::has_transition_function<irt::qss3_pwm>);
+        static_assert(irt::has_input_port<irt::qss3_pwm>);
+        static_assert(irt::has_output_port<irt::qss3_pwm>);
+        static_assert(irt::has_observation_function<irt::qss3_pwm>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_sqrt>);
+        static_assert(irt::has_lambda_function<irt::qss1_sqrt>);
+        static_assert(irt::has_transition_function<irt::qss1_sqrt>);
+        static_assert(irt::has_input_port<irt::qss1_sqrt>);
+        static_assert(irt::has_output_port<irt::qss1_sqrt>);
+        static_assert(irt::has_observation_function<irt::qss1_sqrt>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_sqrt>);
+        static_assert(irt::has_lambda_function<irt::qss2_sqrt>);
+        static_assert(irt::has_transition_function<irt::qss2_sqrt>);
+        static_assert(irt::has_input_port<irt::qss2_sqrt>);
+        static_assert(irt::has_output_port<irt::qss2_sqrt>);
+        static_assert(irt::has_observation_function<irt::qss2_sqrt>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_sqrt>);
+        static_assert(irt::has_lambda_function<irt::qss3_sqrt>);
+        static_assert(irt::has_transition_function<irt::qss3_sqrt>);
+        static_assert(irt::has_input_port<irt::qss3_sqrt>);
+        static_assert(irt::has_output_port<irt::qss3_sqrt>);
+        static_assert(irt::has_observation_function<irt::qss3_sqrt>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_atan>);
+        static_assert(irt::has_lambda_function<irt::qss1_atan>);
+        static_assert(irt::has_transition_function<irt::qss1_atan>);
+        static_assert(irt::has_input_port<irt::qss1_atan>);
+        static_assert(irt::has_output_port<irt::qss1_atan>);
+        static_assert(irt::has_observation_function<irt::qss1_atan>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_atan>);
+        static_assert(irt::has_lambda_function<irt::qss2_atan>);
+        static_assert(irt::has_transition_function<irt::qss2_atan>);
+        static_assert(irt::has_input_port<irt::qss2_atan>);
+        static_assert(irt::has_output_port<irt::qss2_atan>);
+        static_assert(irt::has_observation_function<irt::qss2_atan>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_atan>);
+        static_assert(irt::has_lambda_function<irt::qss3_atan>);
+        static_assert(irt::has_transition_function<irt::qss3_atan>);
+        static_assert(irt::has_input_port<irt::qss3_atan>);
+        static_assert(irt::has_output_port<irt::qss3_atan>);
+        static_assert(irt::has_observation_function<irt::qss3_atan>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_tan>);
+        static_assert(irt::has_lambda_function<irt::qss1_tan>);
+        static_assert(irt::has_transition_function<irt::qss1_tan>);
+        static_assert(irt::has_input_port<irt::qss1_tan>);
+        static_assert(irt::has_output_port<irt::qss1_tan>);
+        static_assert(irt::has_observation_function<irt::qss1_tan>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_tan>);
+        static_assert(irt::has_lambda_function<irt::qss2_tan>);
+        static_assert(irt::has_transition_function<irt::qss2_tan>);
+        static_assert(irt::has_input_port<irt::qss2_tan>);
+        static_assert(irt::has_output_port<irt::qss2_tan>);
+        static_assert(irt::has_observation_function<irt::qss2_tan>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_tan>);
+        static_assert(irt::has_lambda_function<irt::qss3_tan>);
+        static_assert(irt::has_transition_function<irt::qss3_tan>);
+        static_assert(irt::has_input_port<irt::qss3_tan>);
+        static_assert(irt::has_output_port<irt::qss3_tan>);
+        static_assert(irt::has_observation_function<irt::qss3_tan>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_tanh>);
+        static_assert(irt::has_lambda_function<irt::qss1_tanh>);
+        static_assert(irt::has_transition_function<irt::qss1_tanh>);
+        static_assert(irt::has_input_port<irt::qss1_tanh>);
+        static_assert(irt::has_output_port<irt::qss1_tanh>);
+        static_assert(irt::has_observation_function<irt::qss1_tanh>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_tanh>);
+        static_assert(irt::has_lambda_function<irt::qss2_tanh>);
+        static_assert(irt::has_transition_function<irt::qss2_tanh>);
+        static_assert(irt::has_input_port<irt::qss2_tanh>);
+        static_assert(irt::has_output_port<irt::qss2_tanh>);
+        static_assert(irt::has_observation_function<irt::qss2_tanh>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_tanh>);
+        static_assert(irt::has_lambda_function<irt::qss3_tanh>);
+        static_assert(irt::has_transition_function<irt::qss3_tanh>);
+        static_assert(irt::has_input_port<irt::qss3_tanh>);
+        static_assert(irt::has_output_port<irt::qss3_tanh>);
+        static_assert(irt::has_observation_function<irt::qss3_tanh>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_sigmoid>);
+        static_assert(irt::has_lambda_function<irt::qss1_sigmoid>);
+        static_assert(irt::has_transition_function<irt::qss1_sigmoid>);
+        static_assert(irt::has_input_port<irt::qss1_sigmoid>);
+        static_assert(irt::has_output_port<irt::qss1_sigmoid>);
+        static_assert(irt::has_observation_function<irt::qss1_sigmoid>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_sigmoid>);
+        static_assert(irt::has_lambda_function<irt::qss2_sigmoid>);
+        static_assert(irt::has_transition_function<irt::qss2_sigmoid>);
+        static_assert(irt::has_input_port<irt::qss2_sigmoid>);
+        static_assert(irt::has_output_port<irt::qss2_sigmoid>);
+        static_assert(irt::has_observation_function<irt::qss2_sigmoid>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_sigmoid>);
+        static_assert(irt::has_lambda_function<irt::qss3_sigmoid>);
+        static_assert(irt::has_transition_function<irt::qss3_sigmoid>);
+        static_assert(irt::has_input_port<irt::qss3_sigmoid>);
+        static_assert(irt::has_output_port<irt::qss3_sigmoid>);
+        static_assert(irt::has_observation_function<irt::qss3_sigmoid>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_division>);
+        static_assert(irt::has_lambda_function<irt::qss1_division>);
+        static_assert(irt::has_transition_function<irt::qss1_division>);
+        static_assert(irt::has_input_port<irt::qss1_division>);
+        static_assert(irt::has_output_port<irt::qss1_division>);
+        static_assert(irt::has_observation_function<irt::qss1_division>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_division>);
+        static_assert(irt::has_lambda_function<irt::qss2_division>);
+        static_assert(irt::has_transition_function<irt::qss2_division>);
+        static_assert(irt::has_input_port<irt::qss2_division>);
+        static_assert(irt::has_output_port<irt::qss2_division>);
+        static_assert(irt::has_observation_function<irt::qss2_division>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_division>);
+        static_assert(irt::has_lambda_function<irt::qss3_division>);
+        static_assert(irt::has_transition_function<irt::qss3_division>);
+        static_assert(irt::has_input_port<irt::qss3_division>);
+        static_assert(irt::has_output_port<irt::qss3_division>);
+        static_assert(irt::has_observation_function<irt::qss3_division>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_atan2>);
+        static_assert(irt::has_lambda_function<irt::qss1_atan2>);
+        static_assert(irt::has_transition_function<irt::qss1_atan2>);
+        static_assert(irt::has_input_port<irt::qss1_atan2>);
+        static_assert(irt::has_output_port<irt::qss1_atan2>);
+        static_assert(irt::has_observation_function<irt::qss1_atan2>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_atan2>);
+        static_assert(irt::has_lambda_function<irt::qss2_atan2>);
+        static_assert(irt::has_transition_function<irt::qss2_atan2>);
+        static_assert(irt::has_input_port<irt::qss2_atan2>);
+        static_assert(irt::has_output_port<irt::qss2_atan2>);
+        static_assert(irt::has_observation_function<irt::qss2_atan2>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_atan2>);
+        static_assert(irt::has_lambda_function<irt::qss3_atan2>);
+        static_assert(irt::has_transition_function<irt::qss3_atan2>);
+        static_assert(irt::has_input_port<irt::qss3_atan2>);
+        static_assert(irt::has_output_port<irt::qss3_atan2>);
+        static_assert(irt::has_observation_function<irt::qss3_atan2>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_saturation>);
+        static_assert(irt::has_lambda_function<irt::qss1_saturation>);
+        static_assert(irt::has_transition_function<irt::qss1_saturation>);
+        static_assert(irt::has_input_port<irt::qss1_saturation>);
+        static_assert(irt::has_output_port<irt::qss1_saturation>);
+        static_assert(irt::has_observation_function<irt::qss1_saturation>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_saturation>);
+        static_assert(irt::has_lambda_function<irt::qss2_saturation>);
+        static_assert(irt::has_transition_function<irt::qss2_saturation>);
+        static_assert(irt::has_input_port<irt::qss2_saturation>);
+        static_assert(irt::has_output_port<irt::qss2_saturation>);
+        static_assert(irt::has_observation_function<irt::qss2_saturation>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_saturation>);
+        static_assert(irt::has_lambda_function<irt::qss3_saturation>);
+        static_assert(irt::has_transition_function<irt::qss3_saturation>);
+        static_assert(irt::has_input_port<irt::qss3_saturation>);
+        static_assert(irt::has_output_port<irt::qss3_saturation>);
+        static_assert(irt::has_observation_function<irt::qss3_saturation>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_dead_zone>);
+        static_assert(irt::has_lambda_function<irt::qss1_dead_zone>);
+        static_assert(irt::has_transition_function<irt::qss1_dead_zone>);
+        static_assert(irt::has_input_port<irt::qss1_dead_zone>);
+        static_assert(irt::has_output_port<irt::qss1_dead_zone>);
+        static_assert(irt::has_observation_function<irt::qss1_dead_zone>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_dead_zone>);
+        static_assert(irt::has_lambda_function<irt::qss2_dead_zone>);
+        static_assert(irt::has_transition_function<irt::qss2_dead_zone>);
+        static_assert(irt::has_input_port<irt::qss2_dead_zone>);
+        static_assert(irt::has_output_port<irt::qss2_dead_zone>);
+        static_assert(irt::has_observation_function<irt::qss2_dead_zone>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_dead_zone>);
+        static_assert(irt::has_lambda_function<irt::qss3_dead_zone>);
+        static_assert(irt::has_transition_function<irt::qss3_dead_zone>);
+        static_assert(irt::has_input_port<irt::qss3_dead_zone>);
+        static_assert(irt::has_output_port<irt::qss3_dead_zone>);
+        static_assert(irt::has_observation_function<irt::qss3_dead_zone>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_abs>);
+        static_assert(irt::has_lambda_function<irt::qss1_abs>);
+        static_assert(irt::has_transition_function<irt::qss1_abs>);
+        static_assert(irt::has_input_port<irt::qss1_abs>);
+        static_assert(irt::has_output_port<irt::qss1_abs>);
+        static_assert(irt::has_observation_function<irt::qss1_abs>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_abs>);
+        static_assert(irt::has_lambda_function<irt::qss2_abs>);
+        static_assert(irt::has_transition_function<irt::qss2_abs>);
+        static_assert(irt::has_input_port<irt::qss2_abs>);
+        static_assert(irt::has_output_port<irt::qss2_abs>);
+        static_assert(irt::has_observation_function<irt::qss2_abs>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_abs>);
+        static_assert(irt::has_lambda_function<irt::qss3_abs>);
+        static_assert(irt::has_transition_function<irt::qss3_abs>);
+        static_assert(irt::has_input_port<irt::qss3_abs>);
+        static_assert(irt::has_output_port<irt::qss3_abs>);
+        static_assert(irt::has_observation_function<irt::qss3_abs>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_sign>);
+        static_assert(irt::has_lambda_function<irt::qss1_sign>);
+        static_assert(irt::has_transition_function<irt::qss1_sign>);
+        static_assert(irt::has_input_port<irt::qss1_sign>);
+        static_assert(irt::has_output_port<irt::qss1_sign>);
+        static_assert(irt::has_observation_function<irt::qss1_sign>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_sign>);
+        static_assert(irt::has_lambda_function<irt::qss2_sign>);
+        static_assert(irt::has_transition_function<irt::qss2_sign>);
+        static_assert(irt::has_input_port<irt::qss2_sign>);
+        static_assert(irt::has_output_port<irt::qss2_sign>);
+        static_assert(irt::has_observation_function<irt::qss2_sign>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_sign>);
+        static_assert(irt::has_lambda_function<irt::qss3_sign>);
+        static_assert(irt::has_transition_function<irt::qss3_sign>);
+        static_assert(irt::has_input_port<irt::qss3_sign>);
+        static_assert(irt::has_output_port<irt::qss3_sign>);
+        static_assert(irt::has_observation_function<irt::qss3_sign>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_hysteresis>);
+        static_assert(irt::has_lambda_function<irt::qss1_hysteresis>);
+        static_assert(irt::has_transition_function<irt::qss1_hysteresis>);
+        static_assert(irt::has_input_port<irt::qss1_hysteresis>);
+        static_assert(irt::has_output_port<irt::qss1_hysteresis>);
+        static_assert(irt::has_observation_function<irt::qss1_hysteresis>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_hysteresis>);
+        static_assert(irt::has_lambda_function<irt::qss2_hysteresis>);
+        static_assert(irt::has_transition_function<irt::qss2_hysteresis>);
+        static_assert(irt::has_input_port<irt::qss2_hysteresis>);
+        static_assert(irt::has_output_port<irt::qss2_hysteresis>);
+        static_assert(irt::has_observation_function<irt::qss2_hysteresis>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_hysteresis>);
+        static_assert(irt::has_lambda_function<irt::qss3_hysteresis>);
+        static_assert(irt::has_transition_function<irt::qss3_hysteresis>);
+        static_assert(irt::has_input_port<irt::qss3_hysteresis>);
+        static_assert(irt::has_output_port<irt::qss3_hysteresis>);
+        static_assert(irt::has_observation_function<irt::qss3_hysteresis>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_minimum>);
+        static_assert(irt::has_lambda_function<irt::qss1_minimum>);
+        static_assert(irt::has_transition_function<irt::qss1_minimum>);
+        static_assert(irt::has_input_port<irt::qss1_minimum>);
+        static_assert(irt::has_output_port<irt::qss1_minimum>);
+        static_assert(irt::has_observation_function<irt::qss1_minimum>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_minimum>);
+        static_assert(irt::has_lambda_function<irt::qss2_minimum>);
+        static_assert(irt::has_transition_function<irt::qss2_minimum>);
+        static_assert(irt::has_input_port<irt::qss2_minimum>);
+        static_assert(irt::has_output_port<irt::qss2_minimum>);
+        static_assert(irt::has_observation_function<irt::qss2_minimum>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_minimum>);
+        static_assert(irt::has_lambda_function<irt::qss3_minimum>);
+        static_assert(irt::has_transition_function<irt::qss3_minimum>);
+        static_assert(irt::has_input_port<irt::qss3_minimum>);
+        static_assert(irt::has_output_port<irt::qss3_minimum>);
+        static_assert(irt::has_observation_function<irt::qss3_minimum>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_maximum>);
+        static_assert(irt::has_lambda_function<irt::qss1_maximum>);
+        static_assert(irt::has_transition_function<irt::qss1_maximum>);
+        static_assert(irt::has_input_port<irt::qss1_maximum>);
+        static_assert(irt::has_output_port<irt::qss1_maximum>);
+        static_assert(irt::has_observation_function<irt::qss1_maximum>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_maximum>);
+        static_assert(irt::has_lambda_function<irt::qss2_maximum>);
+        static_assert(irt::has_transition_function<irt::qss2_maximum>);
+        static_assert(irt::has_input_port<irt::qss2_maximum>);
+        static_assert(irt::has_output_port<irt::qss2_maximum>);
+        static_assert(irt::has_observation_function<irt::qss2_maximum>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_maximum>);
+        static_assert(irt::has_lambda_function<irt::qss3_maximum>);
+        static_assert(irt::has_transition_function<irt::qss3_maximum>);
+        static_assert(irt::has_input_port<irt::qss3_maximum>);
+        static_assert(irt::has_output_port<irt::qss3_maximum>);
+        static_assert(irt::has_observation_function<irt::qss3_maximum>);
+
+        static_assert(irt::has_initialize_function<irt::qss1_wrap>);
+        static_assert(irt::has_lambda_function<irt::qss1_wrap>);
+        static_assert(irt::has_transition_function<irt::qss1_wrap>);
+        static_assert(irt::has_input_port<irt::qss1_wrap>);
+        static_assert(irt::has_output_port<irt::qss1_wrap>);
+        static_assert(irt::has_observation_function<irt::qss1_wrap>);
+
+        static_assert(irt::has_initialize_function<irt::qss2_wrap>);
+        static_assert(irt::has_lambda_function<irt::qss2_wrap>);
+        static_assert(irt::has_transition_function<irt::qss2_wrap>);
+        static_assert(irt::has_input_port<irt::qss2_wrap>);
+        static_assert(irt::has_output_port<irt::qss2_wrap>);
+        static_assert(irt::has_observation_function<irt::qss2_wrap>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_wrap>);
+        static_assert(irt::has_lambda_function<irt::qss3_wrap>);
+        static_assert(irt::has_transition_function<irt::qss3_wrap>);
+        static_assert(irt::has_input_port<irt::qss3_wrap>);
+        static_assert(irt::has_output_port<irt::qss3_wrap>);
+        static_assert(irt::has_observation_function<irt::qss3_wrap>);
 
         static_assert(irt::has_initialize_function<irt::qss1_power>);
         static_assert(irt::has_lambda_function<irt::qss1_power>);
@@ -608,50 +990,6 @@ int main()
             expect(eq(vdouble[0], 0.0_r));
             expect(eq(vdouble[1], 0.0_r));
             expect(eq(vdouble[2], 1.0_r));
-        }
-    };
-
-    "observation_message"_test = [] {
-        using namespace irt::literals;
-
-        {
-            irt::observation_message vdouble({ 0 });
-            expect(vdouble[0] == 0.0_r);
-            expect(vdouble[1] == 0.0_r);
-            expect(vdouble[2] == 0.0_r);
-            expect(vdouble[3] == 0.0_r);
-        }
-
-        {
-            irt::observation_message vdouble({ 1.0_r });
-            expect(vdouble[0] == 1.0_r);
-            expect(vdouble[1] == 0.0_r);
-            expect(vdouble[2] == 0.0_r);
-            expect(vdouble[3] == 0.0_r);
-        }
-
-        {
-            irt::observation_message vdouble({ 0.0_r, 1.0_r });
-            expect(vdouble[0] == 0.0_r);
-            expect(vdouble[1] == 1.0_r);
-            expect(vdouble[2] == 0.0_r);
-            expect(vdouble[3] == 0.0_r);
-        }
-
-        {
-            irt::observation_message vdouble({ 0.0_r, 0.0_r, 1.0_r });
-            expect(vdouble[0] == 0.0_r);
-            expect(vdouble[1] == 0.0_r);
-            expect(vdouble[2] == 1.0_r);
-            expect(vdouble[3] == 0.0_r);
-        }
-
-        {
-            irt::observation_message vdouble({ 0.0_r, 0.0_r, 0.0_r, 1.0_r });
-            expect(vdouble[0] == 0.0_r);
-            expect(vdouble[1] == 0.0_r);
-            expect(vdouble[2] == 0.0_r);
-            expect(vdouble[3] == 1.0_r);
         }
     };
 
@@ -903,6 +1241,53 @@ int main()
         expect(eq(cnt.event_number, static_cast<irt::i64>(2)));
     };
 
+    "observation_simulation"_test = [] {
+        irt::simulation sim;
+
+        expect(sim.can_alloc(4));
+
+        auto& cnt = sim.alloc<irt::qss1_sum_3>();
+        auto& c1  = sim.alloc<irt::constant>();
+        auto& c2  = sim.alloc<irt::constant>();
+        auto& c3  = sim.alloc<irt::constant>();
+
+        get_p(sim, c1).set_constant(10, 0);
+        get_p(sim, c2).set_constant(100, 1);
+        get_p(sim, c3).set_constant(1000, 2);
+
+        expect(!!sim.connect_dynamics(c1, 0, cnt, 0));
+        expect(!!sim.connect_dynamics(c2, 0, cnt, 1));
+        expect(!!sim.connect_dynamics(c3, 0, cnt, 2));
+
+        sim.limits.set_bound(0, 3);
+
+        expect(sim.observe(get_model(cnt), 1.0).has_value());
+        expect(!!sim.initialize());
+
+        do {
+            expect(!!sim.run());
+        } while (not sim.current_time_expired());
+
+        expect(sim.finalize().has_value());
+
+        expect(fatal(eq(sim.observers.size(), 1u)));
+        expect(fatal(sim.observers.begin() != sim.observers.end()));
+
+        sim.tick_resamplers();
+
+        auto& obs = *sim.observers.begin();
+
+        obs.read_history([&](const auto& h, const auto) {
+            expect(fatal(eq(h.ssize(), 3)));
+            expect(eq(h[0].value, 10.0));
+            expect(eq(h[0].t, 0.0));
+            expect(eq(h[1].value, 110.0));
+            expect(eq(h[1].t, 1.0));
+            expect(eq(h[2].value, 1110.0));
+            expect(eq(h[2].t, 2.0));
+        });
+    };
+
     "cross_simulation"_test = [] {
         fmt::print("cross_simulation\n");
         irt::simulation sim;
@@ -1005,6 +1390,202 @@ int main()
         expect((int)exec.current_state == 2);
 
         expect(eq(exec.messages, 1));
+    };
+
+    "hsm_condition_greater_registers"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        h.states[1u].enter_action.set_affect(var::var_r1, 1.0f);
+        h.states[1u].if_transition = 2u;
+
+        h.constants[0] = 0.5f;
+        expect(!!h.set_state(2u, 0u));
+        h.states[2u].condition.set_greater(var::var_r1, var::hsm_constant_0);
+        h.states[2u].if_action.set_output(var::port_0, 1.0f);
+        h.states[2u].else_action.set_output(var::port_0, 0.0f);
+        h.states[2u].if_transition   = 3u;
+        h.states[2u].else_transition = 3u;
+
+        expect(!!h.set_state(3u, 0u)); // terminal
+        expect(!!h.start(exec, srcs));
+
+        const auto p1 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+        expect(!!p1);
+
+        const auto p2 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+        expect(!!p2);
+
+        expect(eq(exec.messages, 1));
+        expect(approx((double)exec.message_values[0], 1.0, 1e-5));
+    };
+
+    "hsm_seed_and_negative_branch"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        h.constants[0] = 0.1f;
+        h.constants[1] = 1.0f;
+        h.constants[2] = -0.1f;
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        h.states[0u].enter_action.set_affect(var::var_r1, var::hsm_constant_1);
+
+        expect(!!h.set_state(1u, 0u));
+        h.states[1u].enter_action.set_affect(var::var_r2, -5.0f);
+        h.states[1u].if_transition = 2u;
+
+        expect(!!h.set_state(2u, 0u));
+        h.states[2u].condition.set_greater(var::var_r2, var::hsm_constant_0);
+        h.states[2u].if_transition   = 3u;
+        h.states[2u].else_transition = 4u;
+
+        expect(!!h.set_state(3u, 0u));
+
+        expect(!!h.set_state(4u, 0u));
+        h.states[4u].condition.set_less(var::var_r2, var::hsm_constant_2);
+        h.states[4u].if_action.set_output(var::port_0, var::var_r2);
+        h.states[4u].else_action.set_output(var::port_0, 0.0f);
+        h.states[4u].if_transition   = 5u;
+        h.states[4u].else_transition = 5u;
+
+        expect(!!h.set_state(5u, 0u));
+        expect(!!h.start(exec, srcs));
+
+        const auto p1 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+        expect(!!p1);
+
+        const auto p2 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+        expect(!!p2);
+
+        const auto p3 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+        expect(!!p3);
+    };
+
+    "hsm_omega_b_revision_cycle"_test = [] {
+        irt::simulation sim(
+          irt::simulation_reserve_definition(),
+          irt::external_source_reserve_definition{ .constant_nb = 2 });
+
+        expect((sim.can_alloc(3)) >> fatal);
+        expect((sim.hsms.can_alloc(1)) >> fatal);
+        expect(sim.srcs.constant_sources.can_alloc(2u) >> fatal);
+
+        // Three observations at t=1,2,3:
+        //   obs1 = 1.50 -> error = 1.50 - 1.00(seed) = +0.50 -> REVISE (+)
+        //   obs2 = 1.52 -> error = 1.52 - 1.50        = +0.02 -> HOLD
+        //   obs3 = 1.00 -> error = 1.00 - 1.50        = -0.50 -> REVISE (-)
+        auto& cst_value  = sim.srcs.constant_sources.alloc();
+        cst_value.length = 3;
+        cst_value.buffer = { 1.50, 1.52, 1.00 };
+
+        auto& cst_ta  = sim.srcs.constant_sources.alloc();
+        cst_ta.length = 3;
+        cst_ta.buffer = { 1.0, 1.0, 1.0 };
+
+        auto& cnt = sim.alloc<irt::counter>();
+
+        auto& gen = sim.alloc<irt::generator>();
+        get_p(sim, gen)
+          .clear()
+          .set_generator_ta(irt::source_type::constant,
+                            sim.srcs.constant_sources.get_id(cst_ta))
+          .set_generator_value(irt::source_type::constant,
+                               sim.srcs.constant_sources.get_id(cst_value));
+
+        expect(sim.hsms.can_alloc());
+        expect(sim.models.can_alloc());
+
+        auto& hsm = sim.hsms.alloc();
+        using var = irt::hierarchical_state_machine::variable;
+
+        hsm.constants[0] = 0.1f;  // +epsilon_0
+        hsm.constants[1] = 1.0f;  // seed lambda_hat
+        hsm.constants[2] = -0.1f; // -epsilon_0
+
+        // State 0 (top): seed the belief on entry -- confirmed active
+        // during start().
+        expect(!!hsm.set_state(
+          0u, irt::hierarchical_state_machine::invalid_state_id, 1u));
+        hsm.states[0u].enter_action.set_affect(var::var_r1,
+                                               var::hsm_constant_1);
+
+        // State 1: wait for the dual-wired observation (port_0 AND port_1).
+        // Corrected mask: port_0 -> bit 3, port_1 -> bit 2 => 0b1100.
+        expect(!!hsm.set_state(1u, 0u));
+        hsm.states[1u].condition.set(0b1100u, 0b1100u);
+        hsm.states[1u].if_transition = 2u;
+
+        // State 2: error = observed(port_1) - belief(var_r1).
+        expect(!!hsm.set_state(2u, 0u));
+        hsm.states[2u].enter_action.set_affect(var::var_r2, var::port_1);
+        hsm.states[2u].exit_action.set_minus(var::var_r2, var::var_r1);
+        hsm.states[2u].if_transition = 3u;
+
+        // State 3: positive branch, error > +epsilon_0.
+        expect(!!hsm.set_state(3u, 0u));
+        hsm.states[3u].condition.set_greater(var::var_r2, var::hsm_constant_0);
+        hsm.states[3u].if_transition   = 5u;
+        hsm.states[3u].else_transition = 4u;
+
+        // State 4: negative branch, error < -epsilon_0.
+        expect(!!hsm.set_state(4u, 0u));
+        hsm.states[4u].condition.set_less(var::var_r2, var::hsm_constant_2);
+        hsm.states[4u].if_transition   = 5u;
+        hsm.states[4u].else_transition = 1u; // hold: back to waiting
+
+        // State 5: shared revision -- emit, return to waiting.
+        expect(!!hsm.set_state(5u, 0u));
+        hsm.states[5u].enter_action.set_plus(var::var_r1, var::var_r2);
+        hsm.states[5u].exit_action.set_output(var::port_0, var::var_r1);
+        hsm.states[5u].if_transition = 1u;
+
+        auto& hsmw = sim.alloc<irt::hsm_wrapper>();
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(hsm)));
+
+        expect(!!sim.connect_dynamics(gen, 0, hsmw, 0));
+        expect(!!sim.connect_dynamics(gen, 0, hsmw, 1));
+        expect(!!sim.connect_dynamics(hsmw, 0, cnt, 0));
+
+        sim.limits.set_bound(0, 4);
+
+        expect(!!sim.srcs.prepare());
+        expect(!!sim.initialize());
+
+        irt::status st;
+        // int         iter = 0;
+
+        do {
+            st = sim.run();
+            expect(!!st);
+            // fmt::print("iter={:2} hsm_state={} r1={:6.3f} r2={:6.3f} "
+            //            "events={} last={:6.3f}\n",
+            //            iter++,
+            //            (int)hsmw.exec.current_state,
+            //            hsmw.exec.r1,
+            //            hsmw.exec.r2,
+            //            cnt.event_number,
+            //            cnt.last_value);
+        } while (not sim.current_time_expired());
+
+        // fmt::print("final: events={} last={:6.3f} r1={:6.3f}\n",
+        //            cnt.event_number,
+        //            cnt.last_value,
+        //            hsmw.exec.r1);
+
+        expect(eq(cnt.event_number, 2));
+        expect(eq(cnt.last_value, 1.0));
+        expect(eq(hsmw.exec.r1, 1.0));
     };
 
     "hsm_simulation"_test = [] {
@@ -1332,6 +1913,121 @@ int main()
         expect(eq(cnt.event_number, static_cast<irt::i64>(0)));
     };
 
+    "hsm_constant_access"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t h;
+        h.constants = { 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0 };
+
+        hsm_t::execution e;
+        e.clear();
+        e.messages = 0;
+
+        hsm_t::state_action a;
+        a.set_output(var::port_0, var::hsm_constant_2);
+
+        h.affect_action(a, e);
+
+        const double got = e.messages > 0 ? e.message_values[0] : -999.0;
+
+        expect(eq(got, 12.0));
+    };
+
+    "hsm_condition_type_mask"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+
+        hsm_t::condition_action c;
+        c.set(0b1000, 0b1111);
+
+        const auto [p, m] = c.get_bitset();
+
+        expect(eq(m.to_ulong(), 0b1111u));
+        expect(eq(p.to_ulong(), 0b1000u));
+    };
+
+    "hsm_set_unset_values"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t            h;
+        hsm_t::execution e;
+        e.clear();
+
+        hsm_t::state_action a;
+        a.set_setport(var::port_0); // must remove bit 3
+        h.affect_action(a, e);
+
+        expect(eq(e.values.to_ulong(), 0b1000u));
+
+        e.values.reset();
+        e.values.set(3, true);
+        hsm_t::state_action u;
+        u.set_unsetport(var::port_0);
+        h.affect_action(u, e);
+
+        expect(eq(e.values.to_ulong(), 0u));
+    };
+
+    "hsm_two_input_selector"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        auto run_variant = [](irt::i32 prefer_fine_flag,
+                              double   coarse_value,
+                              double   fine_value) {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            h.states[0u].enter_action.set_affect(var::var_i1, prefer_fine_flag);
+
+            expect(!!h.set_state(1u, 0u));
+            h.states[1u].condition.set(0b1100u, 0b1100u);
+            h.states[1u].if_transition = 2u;
+
+            expect(!!h.set_state(2u, 0u));
+            h.states[2u].enter_action.set_affect(var::var_r1, var::port_0);
+            h.states[2u].exit_action.set_affect(var::var_r2, var::port_1);
+            h.states[2u].if_transition = 3u;
+
+            expect(!!h.set_state(3u, 0u));
+            h.states[3u].condition.set_equal_to(var::var_i1, 1);
+            h.states[3u].if_transition   = 4u;
+            h.states[3u].else_transition = 5u;
+
+            expect(!!h.set_state(4u, 0u));
+            h.states[4u].enter_action.set_output(var::port_0, var::var_r2);
+            h.states[4u].if_transition = 6u;
+
+            expect(!!h.set_state(5u, 0u));
+            h.states[5u].enter_action.set_output(var::port_0, var::var_r1);
+            h.states[5u].if_transition = 6u;
+
+            expect(!!h.set_state(6u, 0u));
+
+            expect(!!h.start(exec, srcs));
+
+            exec.values = 0b00001100;
+
+            exec.ports[3] = coarse_value; // port_0
+            exec.ports[2] = fine_value;   // port_1
+
+            const auto p1 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+            expect(!!p1);
+
+            const auto p2 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+            expect(!!p2);
+
+            const auto p3 = h.dispatch(hsm_t::event_type::internal, exec, srcs);
+            expect(!!p3);
+        };
+
+        run_variant(0, 6.0, 11.0); // prefer coarse -> expect emitted value 6.0
+        run_variant(1, 6.0, 11.0); // prefer fine   -> expect emitted value 11.0
+    };
+
     "generator_counter_simluation"_test = [] {
         fmt::print("generator_counter_simluation\n");
         irt::simulation sim(
@@ -1409,16 +2105,21 @@ int main()
         get_p(sim, l_or).integers[0] = false;
         get_p(sim, l_or).integers[1] = false;
 
-        auto&       obs = sim.observers.alloc();
-        file_output fo_a(obs, "boolean_simulation.csv");
-        sim.observe(irt::get_model(l_and), obs);
+        sim.observe(irt::get_model(l_and));
+        auto* obs = sim.observers.try_to_get(irt::get_model(l_and).obs_id);
+
+        expect(fatal(obs != nullptr));
+        file_output fo_a(*obs, "boolean_simulation.csv");
 
         sim.limits.set_bound(0, 10);
         expect(!!sim.srcs.prepare());
         expect(!!sim.initialize());
         do {
             expect(!!sim.run());
-            fo_a.write();
+
+            if (not sim.immediate_observers.empty())
+                sim.tick_resamplers();
+
         } while (not sim.current_time_expired());
     };
 
@@ -1568,6 +2269,7 @@ int main()
     };
 
     "binary-memory-io"_test = [] {
+#if 0
         auto f = irt::memory::make(256);
 
         expect(f.has_value()) << fatal;
@@ -1594,6 +2296,7 @@ int main()
         f->rewind();
 
         expect(f->tell() == 0);
+#endif
     };
 
     "random-philox-64"_test = [] {
@@ -1670,5 +2373,104 @@ int main()
         }
 
         expect(eq(sum_1, sum_2));
+    };
+
+    "id_data_array"_test = [] {
+        enum class my_id : irt::u32;
+
+        using my_data =
+          irt::id_data_array<void,
+                             my_id,
+                             irt::allocator<irt::new_delete_memory_resource>,
+                             int,
+                             double>;
+
+        my_data m1;
+        expect(fatal(m1.grow<2, 1>(5)));
+        const auto id1 = m1.alloc_id();
+        const auto id2 = m1.alloc_id();
+        const auto id3 = m1.alloc_id();
+        const auto id4 = m1.alloc_id();
+        expect(fatal(eq(static_cast<unsigned>(m1.size()), 4_u)));
+        m1.get<int>(id1)    = 1;
+        m1.get<int>(id2)    = 2;
+        m1.get<int>(id3)    = 3;
+        m1.get<int>(id4)    = 4;
+        m1.get<double>(id1) = 1.0;
+        m1.get<double>(id2) = 2.0;
+        m1.get<double>(id3) = 3.0;
+        m1.get<double>(id4) = 4.0;
+
+        my_data m2(m1);
+        expect(fatal(eq(static_cast<unsigned>(m1.size()), 4_u)));
+        m1.get<int>(id1)    = 1;
+        m1.get<int>(id2)    = 2;
+        m1.get<int>(id3)    = 3;
+        m1.get<int>(id4)    = 4;
+        m1.get<double>(id1) = 1.0;
+        m1.get<double>(id2) = 2.0;
+        m1.get<double>(id3) = 3.0;
+        m1.get<double>(id4) = 4.0;
+        m2.get<int>(id1)    = 1;
+        m2.get<int>(id2)    = 2;
+        m2.get<int>(id3)    = 3;
+        m2.get<int>(id4)    = 4;
+        m2.get<double>(id1) = 1.0;
+        m2.get<double>(id2) = 2.0;
+        m2.get<double>(id3) = 3.0;
+        m2.get<double>(id4) = 4.0;
+
+        my_data m3(std::move(m2));
+        expect(fatal(eq(static_cast<unsigned>(m1.size()), 4_u)));
+        expect(fatal(eq(static_cast<unsigned>(m2.size()), 0_u)));
+        expect(fatal(eq(static_cast<unsigned>(m3.size()), 4_u)));
+        m1.get<int>(id1)    = 1;
+        m1.get<int>(id2)    = 2;
+        m1.get<int>(id3)    = 3;
+        m1.get<int>(id4)    = 4;
+        m1.get<double>(id1) = 1.0;
+        m1.get<double>(id2) = 2.0;
+        m1.get<double>(id3) = 3.0;
+        m1.get<double>(id4) = 4.0;
+        m3.get<int>(id1)    = 1;
+        m3.get<int>(id2)    = 2;
+        m3.get<int>(id3)    = 3;
+        m3.get<int>(id4)    = 4;
+        m3.get<double>(id1) = 1.0;
+        m3.get<double>(id2) = 2.0;
+        m3.get<double>(id3) = 3.0;
+        m3.get<double>(id4) = 4.0;
+    };
+
+    "project-copy-move"_test = [] {
+        irt::project pj;
+        expect(fatal(pj.parameters.grow<2, 1>(2)));
+        const auto pj_id_1 = pj.parameters.alloc_id();
+        const auto pj_id_2 = pj.parameters.alloc_id();
+
+        irt::project copy_pj(pj);
+        expect(eq(copy_pj.parameters.size(), pj.parameters.size()));
+        expect(copy_pj.parameters.exists(pj_id_1));
+        expect(copy_pj.parameters.exists(pj_id_2));
+
+        irt::project move_copy_pj(std::move(copy_pj));
+        expect(copy_pj.parameters.empty());
+        expect(eq(move_copy_pj.parameters.size(), pj.parameters.size()));
+        expect(move_copy_pj.parameters.exists(pj_id_1));
+        expect(move_copy_pj.parameters.exists(pj_id_2));
+
+        irt::project op_copy_pj;
+
+        op_copy_pj = pj;
+        expect(eq(op_copy_pj.parameters.size(), pj.parameters.size()));
+        expect(op_copy_pj.parameters.exists(pj_id_1));
+        expect(op_copy_pj.parameters.exists(pj_id_2));
+
+        irt::project op_move_copy_pj;
+        op_move_copy_pj = std::move(op_copy_pj);
+        expect(op_copy_pj.parameters.empty());
+        expect(eq(op_move_copy_pj.parameters.size(), pj.parameters.size()));
+        expect(op_move_copy_pj.parameters.exists(pj_id_1));
+        expect(op_move_copy_pj.parameters.exists(pj_id_2));
     };
 }

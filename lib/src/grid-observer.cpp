@@ -12,26 +12,21 @@
 
 namespace irt {
 
-static auto init_or_reuse_observer(simulation& sim,
-                                   model&      mdl,
-                                   std::integral auto /*row*/,
-                                   std::integral auto /*col*/) noexcept
+static auto init_or_reuse_observer(project&       pj,
+                                   model&         mdl,
+                                   const fraction timestep) noexcept
   -> observer_id
 {
-    if (auto* obs = sim.observers.try_to_get(mdl.obs_id); obs) {
-        obs->init(observer::buffer_size_t(16),
-                  observer::linearized_buffer_size_t(32),
-                  0.01f);
-
-        mdl.obs_id = sim.observers.get_id(*obs);
-        sim.observe(mdl, *obs);
+    if (auto* obs = pj.sim.observers.try_to_get(mdl.obs_id)) {
+        obs->reset();
     } else {
-        auto& new_obs = sim.observers.alloc();
-        new_obs.init(observer::buffer_size_t(16),
-                     observer::linearized_buffer_size_t(32),
-                     0.01f);
-        mdl.obs_id = sim.observers.get_id(new_obs);
-        sim.observe(mdl, new_obs);
+        if (const auto ret = pj.sim.observe(mdl, timestep.to_double());
+            ret.has_error()) {
+            using namespace std::string_view_literals;
+
+            log(log_level::error,
+                "grid-observation: Fail to observe a model\n"sv);
+        }
     }
 
     return mdl.obs_id;
@@ -60,8 +55,6 @@ std::optional<std::pair<int, int>> get_row_column(
 
 static void build_grid_observer(grid_observer&  grid_obs,
                                 project&        pj,
-                                modeling&       mod,
-                                simulation&     sim,
                                 tree_node&      grid_parent,
                                 grid_component& grid_compo) noexcept
 {
@@ -77,30 +70,27 @@ static void build_grid_observer(grid_observer&  grid_obs,
         if (child->id == grid_obs.compo_id) {
             const auto  tn_mdl = pj.get_model(*child, relative_path);
             const auto* tn     = pj.tree_nodes.try_to_get(tn_mdl.first);
-            auto*       mdl    = sim.models.try_to_get(tn_mdl.second);
+            auto*       mdl    = pj.sim.models.try_to_get(tn_mdl.second);
 
-            if (tn and mdl) {
-                if (const auto w_opt = get_row_column(child->unique_id.sv());
-                    w_opt.has_value()) {
-                    const auto& w = *w_opt;
-                    debug::ensure(grid_compo.is_coord_valid(w.first, w.second));
-                    const auto index = grid_compo.pos(w.first, w.second);
+            if (not(tn and mdl))
+                continue;
 
-                    debug::ensure(0 <= index);
-                    debug::ensure(
-                      std::cmp_less(index, grid_obs.observers.size()));
+            if (const auto w_opt = get_row_column(child->unique_id.sv());
+                w_opt.has_value()) {
+                const auto& w = *w_opt;
+                debug::ensure(grid_compo.is_coord_valid(w.first, w.second));
+                const auto index = grid_compo.pos(w.first, w.second);
 
-                    grid_obs.observers[index] =
-                      init_or_reuse_observer(sim, *mdl, w.first, w.second);
-                } else {
-                    mod.journal.push(log_level::warning,
-                                     [&](auto& t, auto& m) noexcept {
-                                         t = "Grid observer error";
-                                         format(m,
-                                                "unique_id {} is not found",
-                                                child->unique_id.sv());
-                                     });
-                }
+                debug::ensure(0 <= index);
+                debug::ensure(std::cmp_less(index, grid_obs.observers.size()));
+
+                grid_obs.observers[index] =
+                  init_or_reuse_observer(pj, *mdl, grid_obs.timestep);
+            } else {
+                log(log_level::warning, [&](auto& m) noexcept {
+                    format(m, "grid-observation: unique_id {} is not found",
+                           child->unique_id.sv());
+                });
             }
         }
 
@@ -108,90 +98,69 @@ static void build_grid_observer(grid_observer&  grid_obs,
     }
 }
 
-void grid_observer::init(project& pj, modeling& mod, simulation& sim) noexcept
+status grid_observer::init(project& pj, const modeling& mod) noexcept
 {
-    observers.clear();
+    return mod.ids.read([&](const auto& ids, auto) noexcept -> status {
+        auto* tn = pj.tree_nodes.try_to_get(parent_id);
 
-    values.write([&](auto& v) noexcept {
-        v.clear();
+        if (not tn or not ids.exists(tn->id) or
+            ids.components[tn->id].type != component_type::grid)
+            return success();
 
-        if (auto* tn = pj.tree_nodes.try_to_get(parent_id); tn) {
-            mod.ids.read([&](const auto& ids, auto) noexcept {
-                if (ids.exists(tn->id)) {
-                    if (ids.components[tn->id].type == component_type::grid) {
-                        if (auto* grid = ids.grid_components.try_to_get(
-                              ids.components[tn->id].id.grid_id)) {
+        observers.clear();
+        values.clear();
 
-                            const auto len = grid->cells_number();
+        if (auto* grid = ids.grid_components.try_to_get(
+              ids.components[tn->id].id.grid_id)) {
 
-                            observers.resize(len);
-                            std::fill_n(
-                              observers.data(), len, undefined<observer_id>());
+            const auto len = grid->cells_number();
 
-                            v.resize(len, zero);
+            debug::ensure(len);
 
-                            rows = grid->row();
-                            cols = grid->column();
+            if (not observers.resize(len) or not values.resize(len))
+                return make_error(simulation_errc::observers_container_full);
 
-                            build_grid_observer(
-                              *this, pj, mod, sim, *tn, *grid);
-                        }
-                    }
-                }
-            });
+            std::ranges::fill(observers, undefined<observer_id>());
+            std::ranges::fill(values, zero);
+
+            rows = grid->row();
+            cols = grid->column();
+
+            build_grid_observer(*this, pj, *tn, *grid);
         }
-    });
 
-    tn = sim.current_time() + static_cast<time>(time_step);
+        return success();
+    });
 }
 
 void grid_observer::clear() noexcept
 {
     observers.clear();
-
-    values.write([](auto& v) noexcept { v.clear(); });
-
-    tn = 0;
+    values.clear();
 }
 
-void grid_observer::update(const simulation& sim) noexcept
+void grid_observer::update(const project& pj) noexcept
 {
-    values.write([&](auto& v) noexcept {
-        if (static_cast<sz>(rows * cols) != observers.size() or
-            v.size() != observers.size())
-            return;
+    const auto len        = static_cast<std::size_t>(rows * cols);
+    const auto obs_len    = observers.size();
+    const auto values_len = values.size();
 
-        std::fill_n(v.data(), v.capacity(), 0.0);
+    if (len == obs_len and len == values_len) {
         for (int row = 0; row < rows; ++row) {
             for (int col = 0; col < cols; ++col) {
-                const auto pos = col * rows + row;
-                const auto id  = observers[pos];
+                const auto  pos    = col * rows + row;
+                const auto  obs_id = observers[pos];
+                const auto* obs    = pj.sim.observers.try_to_get(obs_id);
 
-                if (is_undefined(id))
-                    continue;
-
-                if (const auto* obs =
-                      sim.observers.try_to_get(observers[pos])) {
-                    if (obs->states[observer_flags::use_linear_buffer]) {
-                        obs->linearized_buffer.read(
-                          [](const auto& buf, const auto /*version*/, auto& v) {
-                              v = not buf.empty() ? buf.back().y : zero;
-                          },
-                          v[pos]);
-
-                    } else {
-                        obs->buffer.read(
-                          [](const auto& buf, const auto /*version*/, auto& v) {
-                              v = not buf.empty() ? buf.back()[1] : zero;
-                          },
-                          v[pos]);
-                    }
+                if (obs) {
+                    obs->read_history([&](const auto& h, const auto) {
+                        if (not h.empty())
+                            values[pos] = h.back().value;
+                    });
                 }
             }
         }
-
-        tn = sim.current_time() + static_cast<time>(time_step);
-    });
+    }
 }
 
 } // namespace irt

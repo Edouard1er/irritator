@@ -20,87 +20,143 @@ static inline constexpr std::string_view log_level_enhanced_names[] = {
     "\ue08a", // debug
 };
 
-static auto get_level(const log_level level, const log_level config) noexcept
-  -> std::string_view
-
+static auto display_text(ImFont&                   font,
+                         const std::string_view    level,
+                         const log_record_message& msg) noexcept -> void
 {
-    constexpr auto empty_string = std::string_view{};
+    const auto sv = msg.sv();
 
-    return std::string_view(ordinal(level) > ordinal(config)
-                              ? empty_string
-                              : log_level_enhanced_names[ordinal(level)]);
-}
-
-static auto display_text(ImFont&                       font,
-                         std::string_view              level,
-                         const journal_handler::title& title,
-                         const journal_handler::descr& description) noexcept
-  -> void
-{
-    debug::ensure(not level.empty());
-
-    ImGui::PushFont(&font);
-    ImGui::TextFormat("{}", level);
-    ImGui::PopFont();
-
-    if (not title.empty()) {
+    if (not sv.starts_with("- ")) {
+        ImGui::Separator();
+        ImGui::PushFont(&font);
+        ImGui::TextFormat("{}", level);
+        ImGui::PopFont();
         ImGui::SameLine();
-        ImGui::TextFormat(" {}\n", title.sv());
-    }
-
-    if (not description.empty()) {
         ImGui::PushFont(&font);
         ImGui::TextUnformatted("\ue016");
         ImGui::PopFont();
         ImGui::SameLine();
-        ImGui::TextWrapped("%s", description.c_str());
     }
 
-    ImGui::Separator();
+    ImGui::TextWrapped("%s", msg.c_str());
 }
 
 void window_logger::show() noexcept
 {
+    auto&      app       = container_of(this, &application::log_wnd);
+    const auto level_min = app.config.vars.loglevel.load();
+
+    // Limits the refresh rate of the logs to one every 60 frames (one per
+    // second by default).
+
+    if (loop_number > max_loop_number) {
+        app.jn.collect();
+        loop_number = 0u;
+    } else {
+        ++loop_number;
+    }
+
+    if (clear_expected) {
+        app.jn.reset_history();
+        clear_expected = false;
+    }
+
     if (!ImGui::Begin(window_logger::name, &is_open)) {
         ImGui::End();
         return;
     }
 
-    auto& app = container_of(this, &application::log_wnd);
     if (ImGui::BeginPopup("Options")) {
         if (ImGui::Checkbox("Auto-scroll", &auto_scroll))
             if (auto_scroll)
                 scroll_to_bottom = true;
+
+        if (ImGui::BeginMenu("Log level")) {
+            auto sel = static_cast<std::size_t>(ordinal(level_min));
+
+            for (std::size_t i = 0, e = std::size(log_level_names); i != e;
+                 ++i) {
+                const auto label    = small_string<32>(log_level_names[i]);
+                const auto selected = sel == i;
+
+                if (ImGui::MenuItem(label.c_str(), nullptr, selected))
+                    sel = i;
+            }
+
+            if (sel != static_cast<std::size_t>(ordinal(level_min)))
+                app.config.vars.loglevel = enum_cast<log_level>(sel);
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("History Length")) {
+            auto use_64 = max_history_size == 64;
+            if (ImGui::Checkbox("64", &use_64))
+                max_history_size = 64u;
+
+            auto use_256 = max_history_size == 256;
+            if (ImGui::Checkbox("256", &use_256))
+                max_history_size = 256u;
+
+            auto use_4096 = max_history_size == 4096;
+            if (ImGui::Checkbox("4096", &use_4096))
+                max_history_size = 4096u;
+
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("History Refresh")) {
+            auto use_1 = max_loop_number == 1;
+            if (ImGui::Checkbox("1", &use_1))
+                max_loop_number = 1u;
+
+            auto use_60 = max_loop_number == 60;
+            if (ImGui::Checkbox("60", &use_60))
+                max_loop_number = 60u;
+
+            auto use_120 = max_loop_number == 120;
+            if (ImGui::Checkbox("120", &use_120))
+                max_loop_number = 120u;
+
+            ImGui::EndMenu();
+        }
+
+#if defined(IRRITATOR_ENABLE_DEBUG)
+        if (ImGui::MenuItem("Ping")) {
+            using namespace std::string_view_literals;
+            log(log_level::info, "Ping from menu"sv);
+        }
+#endif
+
         ImGui::EndPopup();
     }
-
-    const auto level_min = app.config.vars.loglevel.load();
 
     if (ImGui::Button("Options"))
         ImGui::OpenPopup("Options");
     ImGui::SameLine();
     if (ImGui::Button("Clear"))
-        app.jn.clear();
+        app.jn.reset_history();
 
     ImGui::Separator();
-    ImGui::BeginChild(
-      "scrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::BeginChild("scrolling", ImVec2(0, 0), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-    app.jn.read([&](const auto& ring,
-                    const auto& ids,
-                    const auto& titles,
-                    const auto& descriptions) noexcept {
-        for (const auto id : ring) {
-            if (not ids.exists(id))
-                continue;
 
-            const auto  level       = get_level(ids[id].second, level_min);
-            const auto& title       = titles[id];
-            const auto& description = descriptions[id];
+    auto version = u64{ 0 };
+    auto cursor = u64{ 0 };
 
-            display_text(*app.icons, level, title, description);
+    app.jn.read_log(version, cursor, [&](const auto span) {
+        for (const auto& l : span) {
+            const auto l_min     = ordinal(level_min);
+            const auto l_current = ordinal(l.level);
+            const auto str       = log_level_enhanced_names[l_current];
+
+            if (l_min >= l_current)
+                display_text(*app.icons, str, l.msg);
         }
+
+        if (span.size() > max_history_size)
+            clear_expected = true;
     });
 
     ImGui::PopStyleVar();

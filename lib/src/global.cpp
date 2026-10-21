@@ -44,38 +44,55 @@ constexpr Iterator sorted_vector_find(Iterator begin,
 static void do_build_default(variables& v) noexcept
 {
     v.rec_paths.write([&](recorded_paths& paths) noexcept {
-        paths.ids.reserve(16);
-        paths.paths.resize(16);
-        paths.priorities.resize(16);
-        paths.names.resize(16);
+        paths.recs.grow<2, 1>(16);
 
         if (auto sys = get_system_component_dir(); sys.has_value()) {
-            std::error_code ec;
-            if (std::filesystem::exists(*sys, ec)) {
-                const auto idx        = paths.ids.alloc();
-                paths.paths[idx]      = (const char*)sys->u8string().c_str();
-                paths.priorities[idx] = 20;
-                paths.names[idx]      = "system";
+            auto       ec       = std::error_code{};
+            const auto std_path = sys->to_std_path();
+
+            if (std::filesystem::exists(std_path, ec)) {
+                const auto  id  = paths.recs.alloc_id();
+                const auto  u8  = std_path.u8string();
+                const auto* ptr = reinterpret_cast<const char*>(u8.c_str());
+                const auto  len = u8.size();
+
+                paths.recs.template get<path>(id) = std::string_view(ptr, len);
+                paths.recs.template get<recorded_paths::name_str>(
+                  id)                           = "system";
+                paths.recs.template get<i8>(id) = 20;
             }
         }
 
         if (auto sys = get_system_prefix_component_dir(); sys.has_value()) {
-            std::error_code ec;
-            if (std::filesystem::exists(*sys, ec)) {
-                const auto idx        = paths.ids.alloc();
-                paths.paths[idx]      = (const char*)sys->u8string().c_str();
-                paths.priorities[idx] = 10;
-                paths.names[idx]      = "p-system";
+            auto       ec       = std::error_code{};
+            const auto std_path = sys->to_std_path();
+
+            if (std::filesystem::exists(std_path, ec)) {
+                const auto  id  = paths.recs.alloc_id();
+                const auto  u8  = std_path.u8string();
+                const auto* ptr = reinterpret_cast<const char*>(u8.c_str());
+                const auto  len = u8.size();
+
+                paths.recs.template get<path>(id) = std::string_view(ptr, len);
+                paths.recs.template get<recorded_paths::name_str>(
+                  id)                           = "p-system";
+                paths.recs.template get<i8>(id) = 10;
             }
         }
 
         if (auto sys = get_default_user_component_dir(); sys.has_value()) {
-            std::error_code ec;
-            if (std::filesystem::exists(*sys, ec)) {
-                const auto idx        = paths.ids.alloc();
-                paths.paths[idx]      = (const char*)sys->u8string().c_str();
-                paths.priorities[idx] = 0;
-                paths.names[idx]      = "user";
+            auto       ec       = std::error_code{};
+            const auto std_path = sys->to_std_path();
+
+            if (std::filesystem::exists(std_path, ec)) {
+                const auto  id  = paths.recs.alloc_id();
+                const auto  u8  = std_path.u8string();
+                const auto* ptr = reinterpret_cast<const char*>(u8.c_str());
+                const auto  len = u8.size();
+
+                paths.recs.template get<path>(id) = std::string_view(ptr, len);
+                paths.recs.template get<recorded_paths::name_str>(id) = "user";
+                paths.recs.template get<i8>(id)                       = 0;
             }
         }
     });
@@ -88,25 +105,26 @@ static std::error_code do_write(const variables& vars, std::FILE* file) noexcept
 {
     fmt::print(file, "[paths]\n");
 
-    vars.rec_paths.read(
-      [&](const recorded_paths& paths, const auto /*vers*/) noexcept {
-          for (const auto id : paths.ids) {
-              const auto idx = get_index(id);
+    vars.rec_paths.read([&](const recorded_paths& conf,
+                            const auto /*vers*/) noexcept {
+        const auto& paths = conf.recs.template get<path>();
+        const auto& names = conf.recs.template get<recorded_paths::name_str>();
+        const auto& priorities = conf.recs.template get<i8>();
 
-              if (paths.names[idx].empty() or paths.paths[idx].empty())
-                  continue;
+        for (const auto id : conf.recs) {
+            if (paths[id].empty() or names[id].empty())
+                continue;
 
-              fmt::print(file,
-                         "{} {} {}\n",
-                         paths.names[idx].sv(),
-                         paths.priorities[idx],
-                         paths.paths[idx].sv());
-          }
-      });
+            fmt::print(file, "{} {} {}\n", names[id].sv(),
+                       static_cast<int>(priorities[id]), paths[id].sv());
+        }
+    });
 
     fmt::print(file, "[options]\n");
-    fmt::print(
-      file, "log-level={}\n", log_level_names[ordinal(vars.loglevel.load())]);
+    fmt::print(file, "log-level={}\n",
+               log_level_names[ordinal(vars.loglevel.load())]);
+    fmt::print(file, "text-file-viewer-max-file-size={}\n",
+               vars.text_file_viewer_max_file_size.load());
 
     fmt::print(file, "[themes]\n");
     fmt::print(file, "selected={}\n", themes[vars.theme]);
@@ -127,15 +145,17 @@ static std::error_code do_save(std::FILE* file, const variables& vars) noexcept
     return do_write(vars, file);
 }
 
-static std::error_code do_save(const std::filesystem::path& filename,
-                               const variables&             vars) noexcept
+static std::error_code do_save(const path&      filename,
+                               const variables& vars) noexcept
 {
-    auto file = file::open(filename, file_mode(file_open_options::write));
-    if (file.has_error()) [[unlikely]]
+    const auto std_path = filename.to_std_path();
+    auto       file     = filename.open_std_file("w");
+
+    if (not file.get())
         return std::make_error_code(
           std::errc(std::errc::no_such_file_or_directory));
 
-    return do_save(file->to_file(), vars);
+    return do_save(file.get(), vars);
 }
 
 enum : u8 { section_colors, section_options, section_paths, section_COUNT };
@@ -167,6 +187,18 @@ static bool do_read_section(variables& /*vars*/,
     current_section.reset();
     current_section.set(it->section);
     return true;
+}
+
+std::optional<i64> do_read_integer(const std::string_view value) noexcept
+{
+    i64 i = 0;
+    if (const auto ec = std::from_chars(value.data(),
+                                        value.data() + value.size(), i);
+        ec.ec == std::errc{}) {
+        return i;
+    } else {
+        return std::nullopt;
+    }
 }
 
 static bool do_read_affect(variables&             vars,
@@ -221,35 +253,32 @@ static bool do_read_affect(variables&             vars,
         }
     }
 
+    if (current_section.test(section_options) and
+        key == "text-file-viewer-max-file-size") {
+        const auto i = do_read_integer(val);
+        if (not i.has_value())
+            return false;
+
+        vars.text_file_viewer_max_file_size.store(*i);
+        return true;
+    }
+
     return false;
 }
 
 static recorded_path_id find_name(const recorded_paths&  rec_paths,
                                   const recorded_path_id search) noexcept
 {
-    const auto search_idx = get_index(search);
+    const auto& names = rec_paths.recs.get<recorded_paths::name_str>();
 
-    for (const auto id : rec_paths.ids) {
+    for (const auto id : rec_paths.recs) {
         if (id != search) {
-            const auto idx = get_index(id);
-            if (rec_paths.names[idx] == rec_paths.names[search_idx])
+            if (names[id] == names[search])
                 return id;
         }
     }
 
     return undefined<recorded_path_id>();
-}
-
-std::optional<int> do_read_integer(const std::string_view value) noexcept
-{
-    int i = 0;
-    if (const auto ec =
-          std::from_chars(value.data(), value.data() + value.size(), i);
-        ec.ec == std::errc{}) {
-        return i;
-    } else {
-        return std::nullopt;
-    }
 }
 
 static bool do_read_elem(variables&             vars,
@@ -258,15 +287,20 @@ static bool do_read_elem(variables&             vars,
 {
     return vars.rec_paths.write([&](recorded_paths& rec_paths) noexcept {
         if (current_section.test(section_paths)) {
-            if (not rec_paths.ids.can_alloc(1))
+            if (not(rec_paths.recs.can_alloc(1) or
+                    rec_paths.recs.grow<3, 2>(1)))
                 return false;
 
-            const auto id  = rec_paths.ids.alloc();
+            const auto id  = rec_paths.recs.alloc_id();
             const auto idx = get_index(id);
 
-            rec_paths.priorities[idx] = 0;
-            rec_paths.names[idx].clear();
-            rec_paths.paths[idx].clear();
+            auto& paths      = rec_paths.recs.get<path>();
+            auto& names      = rec_paths.recs.get<recorded_paths::name_str>();
+            auto& priorities = rec_paths.recs.get<i8>();
+
+            priorities[idx] = 0;
+            names[idx].clear();
+            paths[idx].clear();
 
             const auto sep_1 = element.find(' ');
             if (sep_1 == std::string_view::npos or sep_1 + 1 > element.size())
@@ -282,15 +316,17 @@ static bool do_read_elem(variables&             vars,
             const auto priority = priority_and_path.substr(0, sep_2);
             const auto path     = priority_and_path.substr(sep_2 + 1);
 
-            rec_paths.names[idx]      = name;
-            rec_paths.paths[idx]      = path;
-            rec_paths.priorities[idx] = do_read_integer(priority).value_or(10);
+            names[idx]      = name;
+            paths[idx]      = path;
+            priorities[idx] = static_cast<int>(
+              std::clamp(do_read_integer(priority).value_or(10),
+                         i64{ INT8_MIN }, i64{ INT8_MAX }));
 
-            if (rec_paths.names[idx].empty() or rec_paths.paths[idx].empty()) {
-                rec_paths.ids.free(id);
+            if (names[idx].empty() or paths[idx].empty()) {
+                rec_paths.recs.free(id);
             } else if (const auto f_id = find_name(rec_paths, id);
                        is_defined(f_id)) {
-                rec_paths.ids.free(f_id);
+                rec_paths.recs.free(f_id);
             }
 
             return true;
@@ -333,9 +369,8 @@ static std::error_code do_parse(variables& v, std::string_view buffer) noexcept
 {
     std::bitset<3> s;
 
-    for (auto pos = buffer.find_first_of(";#[=\n");
-         pos != std::string_view::npos;
-         pos = buffer.find_first_of(";#[=\n")) {
+    for (auto pos                           = buffer.find_first_of(";#[=\n");
+         pos != std::string_view::npos; pos = buffer.find_first_of(";#[=\n")) {
 
         if (buffer[pos] == '#' or buffer[pos] == ';') { // A comment
             if (not in_range(buffer, pos + 1u))
@@ -364,9 +399,7 @@ static std::error_code do_parse(variables& v, std::string_view buffer) noexcept
 
             auto new_line = buffer.find('\n', pos + 1u);
             if (not do_read_affect(
-                  v,
-                  s,
-                  buffer.substr(0, pos),
+                  v, s, buffer.substr(0, pos),
                   buffer.substr(pos + 1u, new_line - pos - 1u)))
                 return std::make_error_code(std::errc::argument_out_of_domain);
             if (not in_range(buffer, new_line + 1u))
@@ -410,109 +443,34 @@ static std::error_code do_load(std::FILE* file, variables& vars) noexcept
     return do_parse(vars, std::string_view{ buffer.data(), buffer.size() });
 }
 
-static std::error_code do_load(const std::filesystem::path& filename,
-                               variables&                   vars) noexcept
+static std::error_code do_load(const path& filename, variables& vars) noexcept
 {
-    auto file = file::open(filename, file_mode{ file_open_options::read });
-    if (file.has_error()) [[unlikely]]
+    auto file = filename.open_std_file("r");
+    if (not file.get())
         return std::make_error_code(
           std::errc(std::errc::no_such_file_or_directory));
 
-    return do_load(file->to_file(), vars);
+    return do_load(file.get(), vars);
 }
 
 vector<recorded_path_id> recorded_paths::sort_by_priorities() const noexcept
 {
-    vector<recorded_path_id> ret(ids.size(), reserve_tag);
+    vector<recorded_path_id> ret(recs.size(), reserve_tag);
 
-    if (ids.capacity() >= ids.ssize()) {
-        for (auto id : ids)
+    if (recs.capacity() >= recs.size()) {
+        for (auto id : recs)
             ret.emplace_back(id);
 
-        std::sort(
-          ret.begin(), ret.end(), [&](const auto a, const auto b) noexcept {
-              const auto idx_a = get_index(a);
-              const auto idx_b = get_index(b);
+        std::ranges::sort(ret, [&](const auto a, const auto b) noexcept {
+            const auto& priorities = recs.template get<i8>();
+            const auto  idx_a      = get_index(a);
+            const auto  idx_b      = get_index(b);
 
-              return priorities[idx_a] < priorities[idx_b];
-          });
+            return priorities[idx_a] < priorities[idx_b];
+        });
     }
 
     return ret;
-}
-
-journal_handler::journal_handler() noexcept
-  : journal_handler(reserve_constraint(32u))
-{}
-
-journal_handler::journal_handler(reserve_constraint len) noexcept
-{
-    m_logs.write(
-      [](auto& buffer, const auto cap) noexcept {
-          buffer.ring.reserve(cap);
-          buffer.ids.reserve(cap);
-          buffer.titles.resize(cap);
-          buffer.descriptions.resize(cap);
-      },
-      len.value());
-}
-
-void journal_handler::clear() noexcept
-{
-    m_logs.write([](auto& buffer) noexcept {
-        buffer.ring.clear();
-        buffer.ids.clear();
-    });
-}
-
-u64 journal_handler::get_tick_count_in_milliseconds() noexcept
-{
-    namespace sc = std::chrono;
-
-    return duration_cast<sc::milliseconds>(
-             sc::steady_clock::now().time_since_epoch())
-      .count();
-}
-
-u64 journal_handler::get_elapsed_time(const u64 from) noexcept
-{
-    return get_tick_count_in_milliseconds() - from;
-}
-
-unsigned journal_handler::capacity() const noexcept
-{
-    auto capacity = 0u;
-
-    m_logs.read([](const auto& buffer,
-                   const auto /*version*/,
-                   auto& capacity) { capacity = buffer.ring.capacity(); },
-                capacity);
-
-    return capacity;
-}
-
-unsigned journal_handler::size() const noexcept
-{
-    auto len = 0u;
-
-    m_logs.read([](const auto& buffer,
-                   const auto /*version*/,
-                   auto& size) { size = buffer.ring.size(); },
-                len);
-
-    return len;
-}
-
-int journal_handler::ssize() const noexcept
-{
-    auto len = 0;
-
-    m_logs.read([](const auto& buffer,
-                   const auto /*version*/,
-                   auto& size) { size = buffer.ring.ssize(); },
-                len);
-
-    return len;
 }
 
 static inline u64 get_tick_count_in_milliseconds() noexcept
@@ -531,36 +489,16 @@ static bool is_expired(const u64 creation_time, const u64 duration) noexcept
     return elapsed_time >= duration;
 }
 
-void journal_handler::cleanup_expired(const u64 duration) noexcept
-{
-    m_logs.write([&](auto& buffer) {
-        for (const auto id : buffer.ring)
-            if (buffer.ids.exists(id) and
-                is_expired(buffer.ids[id].first, duration))
-                buffer.ids.free(id);
-
-        while (not buffer.ring.empty()) {
-            const auto id = buffer.ring.front();
-
-            if (not buffer.ids.exists(id))
-                buffer.ring.dequeue();
-            else
-                break;
-        }
-    });
-}
-
 config_manager::config_manager() noexcept { do_build_default(vars); }
 
-config_manager::config_manager(const std::string& config_path) noexcept
+config_manager::config_manager(const path& config_path) noexcept
   : m_path{ config_path }
 {
     do_build_default(vars);
 
     if (do_load(config_path, vars)) {
         if (not save()) {
-            std::fprintf(stderr,
-                         "Fail to store configuration in %s\n",
+            std::fprintf(stderr, "Fail to store configuration in %s\n",
                          config_path.c_str());
         }
     }

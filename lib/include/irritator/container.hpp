@@ -52,8 +52,8 @@ struct reserve_tag_t {
 constexpr inline reserve_tag_t reserve_tag;
 
 /**
-   Returns true if the integer @c t is greater or equal to @c min_include and
-   less or equal to @c max_include.
+ * Returns true if the integer @c t is greater or equal to @c min_include and
+ * less or equal to @c max_include.
  */
 template<std::integral T, std::integral R1, std::integral R2>
 constexpr bool is_included(const T  t,
@@ -129,17 +129,18 @@ inline constexpr auto right(std::unsigned_integral auto v) noexcept
 }
 
 template<typename T>
-concept is_identifier_type =
-  std::is_enum_v<T> and
-  (std::is_same_v<std::underlying_type_t<T>, std::uint32_t> or
-   std::is_same_v<std::underlying_type_t<T>, std::uint64_t>);
+concept is_identifier_type = std::is_enum_v<T> and
+                             (std::is_same_v<std::underlying_type_t<T>,
+                                             std::uint32_t> or
+                              std::is_same_v<std::underlying_type_t<T>,
+                                             std::uint64_t>);
 
 template<typename T>
 concept identifier = is_identifier_type<T>;
 
 template<typename T>
-concept is_index_type =
-  (std::is_same_v<T, std::uint16_t> or std::is_same_v<T, std::uint32_t>);
+concept is_index_type = (std::is_same_v<T, std::uint16_t> or
+                         std::is_same_v<T, std::uint32_t>);
 
 template<typename Identifier>
     requires(is_identifier_type<Identifier>)
@@ -179,9 +180,9 @@ template<typename Index>
 inline constexpr auto g_make_next_key(Index key) noexcept
 {
     if constexpr (std::is_same_v<std::uint16_t, Index>)
-        return key == 0xffffffff ? 1u : key + 1u;
+        return key == 0xffff ? 1u : key + 1u;
     else
-        return key == 0xffffffffffffffff ? 1u : key + 1u;
+        return key == 0xffffffff ? 1u : key + 1u;
 }
 
 template<typename Identifier>
@@ -211,25 +212,22 @@ inline constexpr auto g_get_index(Identifier id) noexcept
 }
 
 /**
-   Compute the best size to fit the small storage size.
-
-   This function is used into @c small_string, @c small_vector and @c
-   small_ring_buffer to determine the @c capacity and/or @c size type
-   (unsigned, short unsigned, long unsigned, long long unsigned.
-*/
-template<std::integral auto N>
+ * Compute the best size to fit the small storage size.
+ *
+ * This function is used into @c small_string, @c small_vector and @c
+ * small_ring_buffer to determine the @c capacity and/or @c size type
+ * (unsigned, short unsigned, long unsigned, long long unsigned.
+ */
+template<std::size_t N>
 using small_storage_size_t = std::conditional_t<
-  (N < std::numeric_limits<uint8_t>::max()),
-  uint8_t,
+  (N <= std::numeric_limits<std::uint8_t>::max()),
+  std::uint8_t,
   std::conditional_t<
-    (N < std::numeric_limits<uint16_t>::max()),
-    uint16_t,
-    std::conditional_t<
-      (N < std::numeric_limits<uint32_t>::max()),
-      uint32_t,
-      std::conditional_t<(N < std::numeric_limits<uint64_t>::max()),
-                         uint64_t,
-                         size_t>>>>;
+    (N <= std::numeric_limits<std::uint16_t>::max()),
+    std::uint16_t,
+    std::conditional_t<(N <= std::numeric_limits<std::uint32_t>::max()),
+                       std::uint32_t,
+                       std::uint64_t>>>;
 
 template<class T, class M>
 constexpr std::ptrdiff_t offset_of(const M T::* member)
@@ -239,19 +237,19 @@ constexpr std::ptrdiff_t offset_of(const M T::* member)
 }
 
 /**
-   A helper function to get a pointer to the parent container from a member:
-
-   @code
-   struct point { float x; float y; };
-   struct line { point p1, p2; };
-   line l;
-
-   void fn(point& p) {
-       line& ptr = container_of(&p, &line::p1);
-       ...
-   }
-   @endcode
-*/
+ * A helper function to get a pointer to the parent container from a member:
+ *
+ * @code
+ * struct point { float x; float y; };
+ * struct line { point p1, p2; };
+ * line l;
+ *
+ * void fn(point& p) {
+ *    line& ptr = container_of(&p, &line::p1);
+ *    ...
+ * }
+ * @endcode
+ */
 template<class T, class M>
 constexpr T& container_of(M* ptr, const M T::* member) noexcept
 {
@@ -260,20 +258,20 @@ constexpr T& container_of(M* ptr, const M T::* member) noexcept
 }
 
 /**
-   A helper function to get a constant pointer to the parent container from a
-   member:
-
-   @code
-   struct point { float x; float y; };
-   struct line { point p1, p2; };
-   line l;
-
-   void fn(const point& p) {
-       const line& ptr = container_of(&p, &line::p1);
-       ...
-   }
-   @endcode
-*/
+ * A helper function to get a constant pointer to the parent container from a
+ * member:
+ *
+ * @code
+ * struct point { float x; float y; };
+ * struct line { point p1, p2; };
+ * line l;
+ *
+ * void fn(const point& p) {
+ *    const line& ptr = container_of(&p, &line::p1);
+ *    ...
+ * }
+ * @endcode
+ */
 template<class T, class M>
 constexpr const T& container_of(const M* ptr, const M T::* member) noexcept
 {
@@ -281,13 +279,48 @@ constexpr const T& container_of(const M* ptr, const M T::* member) noexcept
                                        offset_of(member));
 }
 
+/// @c scope_exit is a general-purpose scope guard intended to
+/// call its exit function when a scope is exited.
+template<typename F>
+class scope_exit
+{
+public:
+    explicit scope_exit(F&& callable) noexcept
+      : action(std::forward<F>(callable))
+    {}
+
+    /// calls the exit function when the scope is exited if the scope_exit is
+    /// active, then destroys the scope_exit
+    ~scope_exit() noexcept
+    {
+        if (active)
+            action();
+    }
+
+    scope_exit(const scope_exit&)            = delete;
+    scope_exit& operator=(const scope_exit&) = delete;
+
+    /// makes the scope_exit inactive
+    void release() noexcept { active = false; }
+
+private:
+    F    action;
+    bool active = true;
+};
+
+template<typename F>
+scope_exit<typename std::decay<F>::type> make_scope_exit(F&& f)
+{
+    return scope_exit<typename std::decay<F>::type>(std::forward<F>(f));
+}
+
 /**
-   Build an human readable version of a number of bytes.
-
-   According to the number of bytes, it will produce an easy to read value of
-   byte, kilobytes, megabytes etc.
-
-   A fmt::formatter is provide in the file @c format.hpp
+ * Build an human readable version of a number of bytes.
+ *
+ * According to the number of bytes, it will produce an easy to read value of
+ * byte, kilobytes, megabytes etc.
+ *
+ * A fmt::formatter is provide in the file @c format.hpp
  */
 struct human_readable_bytes {
     enum class display_type : u8 { B, KB, MB, GB };
@@ -299,13 +332,13 @@ struct human_readable_bytes {
 };
 
 /**
-   Build  an human readable version of a duration.
-
-   According to the number of nanoseconds, producte an easy to read value of the
-   duration (ms, s, mn etc.).
-
-   A fmt::formatter is provide in the file @c format.hpp
-*/
+ *Build  an human readable version of a duration.
+ *
+ *According to the number of nanoseconds, producte an easy to read value of the
+ *duration (ms, s, mn etc.).
+ *
+ *A fmt::formatter is provide in the file @c format.hpp
+ */
 struct human_readable_time {
     enum class display_type : u8 {
         nanoseconds,
@@ -422,8 +455,8 @@ public:
                 debug_deallocate(p, bytes, alignment);
             } else {
                 deallocated += bytes;
-                return std::pmr::new_delete_resource()->deallocate(
-                  p, bytes, alignment);
+                return std::pmr::new_delete_resource()->deallocate(p, bytes,
+                                                                   alignment);
             }
         }
 
@@ -457,8 +490,7 @@ public:
     {
     private:
         std::pmr::synchronized_pool_resource mr{ std::pmr::pool_options{
-          max_blocks_per_chunk,
-          largest_required_pool_block } };
+          max_blocks_per_chunk, largest_required_pool_block } };
 
         std::size_t allocated   = 0;
         std::size_t deallocated = 0;
@@ -511,8 +543,7 @@ public:
     {
     private:
         std::pmr::unsynchronized_pool_resource mr{ std::pmr::pool_options{
-          max_blocks_per_chunk,
-          largest_required_pool_block } };
+          max_blocks_per_chunk, largest_required_pool_block } };
 
         std::size_t allocated   = 0;
         std::size_t deallocated = 0;
@@ -571,9 +602,7 @@ public:
         std::array<std::byte, Length> buffer;
 
         std::pmr::monotonic_buffer_resource mr{
-            buffer.data(),
-            buffer.size(),
-            std::pmr::new_delete_resource()
+            buffer.data(), buffer.size(), std::pmr::new_delete_resource()
         };
 
         std::size_t allocated   = 0;
@@ -676,22 +705,22 @@ public:
 };
 
 /**
-   A stateless allocator class to wrap static memory resource.
-
-   @verbatim
-                                   +----------+
-                                   |new-delete|
-                                   +----^-----+
-   +-----------+        +---------+        |
-   |vector<T,A>+------->|allocator+--------+
-   +-----------+ static +---------+ static |
-                                   +----v-----+
-                                   |fixed-size|
-                                   +----------+
-   @endverbatim
-
-   Enable the @c IRRITATOR_ENABLE_DEBUG preprocessor variable to enable a debug
-   for all allocation/deallocation for each memory resource.
+ * A stateless allocator class to wrap static memory resource.
+ *
+ * @verbatim
+ *                                +----------+
+ *                                |new-delete|
+ *                                +----^-----+
+ * +-----------+        +---------+        |
+ * |vector<T,A>+------->|allocator+--------+
+ * +-----------+ static +---------+ static |
+ *                                +----v-----+
+ *                                |fixed-size|
+ *                                +----------+
+ * @endverbatim
+ *
+ * Enable the @c IRRITATOR_ENABLE_DEBUG preprocessor variable to enable a debug
+ * for all allocation/deallocation for each memory resource.
  */
 template<typename MemoryResource = new_delete_memory_resource>
 struct allocator {
@@ -733,11 +762,11 @@ struct allocator {
     }
 };
 
-////////////////////////////////////////////////////////////////////////
-//                                                                    //
-// Container: vector, data_array and list............................ //
-//                                                                    //
-////////////////////////////////////////////////////////////////////////
+/* * * * * * * * * *
+ *
+ * Container: vector, data_array and list
+ *
+ * * * * * * * * * */
 
 //! A `std::mutex` like based on `std::atomic_flag::wait` and
 //! `std::atomic_flag::notify_one` standard functions.
@@ -775,17 +804,17 @@ class static_buffer
 {
 public:
     static_assert(Size > 0);
-
     static_assert(std::is_default_constructible_v<T>,
                   "T must be default-constructible for dynamic_buffer");
 
     using size_type  = small_storage_size_t<Size>;
     using index_type = std::make_signed_t<size_type>;
 
+    static_buffer() noexcept                                  = default;
     static_buffer(const static_buffer& o) noexcept            = delete;
-    static_buffer(static_buffer&& o) noexcept                 = delete;
     static_buffer& operator=(const static_buffer& o) noexcept = delete;
-    static_buffer& operator=(static_buffer&& o) noexcept      = delete;
+    static_buffer(static_buffer&& o) noexcept                 = default;
+    static_buffer& operator=(static_buffer&& o) noexcept      = default;
 
     T& operator[](std::integral auto position) noexcept
     {
@@ -794,7 +823,7 @@ public:
 
     const T& operator[](std::integral auto position) const noexcept
     {
-        return *(static_cast<T*>(m_buffer.data()) + position);
+        return *(static_cast<const T*>(m_buffer.data()) + position);
     }
 
     size_type capacity() const noexcept { return Size; }
@@ -811,7 +840,6 @@ class dynamic_buffer
 {
 public:
     static_assert(Size > 0);
-
     static_assert(std::is_default_constructible_v<T>,
                   "T must be default-constructible for dynamic_buffer");
 
@@ -825,9 +853,24 @@ public:
     }
 
     dynamic_buffer(const dynamic_buffer& o) noexcept            = delete;
-    dynamic_buffer(dynamic_buffer&& o) noexcept                 = delete;
     dynamic_buffer& operator=(const dynamic_buffer& o) noexcept = delete;
-    dynamic_buffer& operator=(dynamic_buffer&& o) noexcept      = delete;
+
+    dynamic_buffer(dynamic_buffer&& o) noexcept
+      : m_buffer(std::exchange(o.m_buffer, nullptr))
+    {}
+
+    dynamic_buffer& operator=(dynamic_buffer&& o) noexcept
+    {
+        if (this == &o)
+            return *this;
+
+        if (m_buffer)
+            A::deallocate(m_buffer, Size * sizeof(T));
+
+        m_buffer = std::exchange(o.m_buffer, nullptr);
+
+        return *this;
+    }
 
     ~dynamic_buffer() noexcept
     {
@@ -887,9 +930,50 @@ public:
         }
     }
 
-    circular_buffer_base(const circular_buffer_base&) noexcept = delete;
-    circular_buffer_base& operator=(const circular_buffer_base&) noexcept =
-      delete;
+    constexpr circular_buffer_base(const circular_buffer_base& other) noexcept
+    {
+        copy_from(other);
+    }
+
+    constexpr circular_buffer_base& operator=(
+      const circular_buffer_base& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+
+        clear();
+        copy_from(other);
+        return *this;
+    }
+
+    constexpr circular_buffer_base(circular_buffer_base&& other) noexcept
+      : m_buffer(std::move(other.m_buffer))
+      , m_head(other.m_head.load(std::memory_order_relaxed))
+      , m_tail(other.m_tail.load(std::memory_order_relaxed))
+    {
+        other.m_head.store(0, std::memory_order_relaxed);
+        other.m_tail.store(0, std::memory_order_relaxed);
+    }
+
+    constexpr circular_buffer_base& operator=(
+      circular_buffer_base&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+
+        clear();
+
+        m_buffer = std::move(other.m_buffer);
+        m_head.store(other.m_head.load(std::memory_order_relaxed),
+                     std::memory_order_relaxed);
+        m_tail.store(other.m_tail.load(std::memory_order_relaxed),
+                     std::memory_order_relaxed);
+
+        other.m_head.store(0, std::memory_order_relaxed);
+        other.m_tail.store(0, std::memory_order_relaxed);
+
+        return *this;
+    }
 
     bool push(const T& value) noexcept
     {
@@ -899,6 +983,33 @@ public:
             return false;
 
         std::construct_at(&m_buffer[head], value);
+        m_head.store(next_head, std::memory_order_release);
+
+        return true;
+    }
+
+    bool push(T&& value) noexcept
+    {
+        int head      = m_head.load(std::memory_order_relaxed);
+        int next_head = next(head);
+        if (next_head == m_tail.load(std::memory_order_acquire))
+            return false;
+        std::construct_at(&m_buffer[head], std::move(value));
+        m_head.store(next_head, std::memory_order_release);
+        return true;
+    }
+
+    template<typename Fn>
+        requires std::invocable<Fn, T&>
+    bool push(Fn&& fn) noexcept
+    {
+        int head      = m_head.load(std::memory_order_relaxed);
+        int next_head = next(head);
+        if (next_head == m_tail.load(std::memory_order_acquire))
+            return false;
+
+        std::construct_at(&m_buffer[head]);
+        std::invoke(std::forward<Fn>(fn), m_buffer[head]);
         m_head.store(next_head, std::memory_order_release);
 
         return true;
@@ -923,6 +1034,16 @@ public:
         return true;
     }
 
+    template<typename Fn>
+    void for_each(Fn&& fn) const noexcept
+    {
+        int tail = m_tail.load(std::memory_order_relaxed);
+        int head = m_head.load(std::memory_order_acquire);
+
+        for (int i = tail; i != head; i = next(i))
+            fn(m_buffer[i]);
+    }
+
     bool empty() const noexcept
     {
         int tail = m_tail.load(std::memory_order_relaxed);
@@ -932,15 +1053,41 @@ public:
         return false;
     }
 
-    constexpr auto capacity() noexcept { return m_buffer.capacity(); }
+    constexpr auto capacity() const noexcept { return m_buffer.capacity(); }
+
+    size_type size() const noexcept
+    {
+        int tail = m_tail.load(std::memory_order_relaxed);
+        int head = m_head.load(std::memory_order_acquire);
+        return static_cast<size_type>((head - tail + capacity()) % capacity());
+    }
+
+    void clear() noexcept
+    {
+        if constexpr (std::is_trivially_destructible_v<T>) {
+            m_tail.store(m_head.load(std::memory_order_relaxed),
+                         std::memory_order_relaxed);
+        } else {
+            int tail = m_tail.load(std::memory_order_relaxed);
+            int head = m_head.load(std::memory_order_relaxed);
+            for (int i = tail; i != head; i = next(i))
+                std::destroy_at(&m_buffer[i]);
+            m_tail.store(head, std::memory_order_relaxed);
+        }
+    }
 
 private:
-    constexpr auto next(int current) noexcept -> int
+    constexpr auto next(int current) const noexcept -> int
     {
         return (current + 1) % capacity();
     }
 
-private:
+    void copy_from(const circular_buffer_base& other) noexcept
+    {
+        other.for_each(
+          [this](const T& value) { [[maybe_unused]] bool ok = push(value); });
+    }
+
     underlying_memory_type m_buffer;
     std::atomic_int        m_head;
     std::atomic_int        m_tail;
@@ -968,10 +1115,71 @@ using static_circular_buffer = circular_buffer_base<T, static_buffer<T, Size>>;
 template<typename T, int Size>
 using circular_buffer = circular_buffer_base<T, dynamic_buffer<T, Size>>;
 
-/**
- * Atomic-only triple buffer: readers never lock, writers use a short lock.
- */
+/* * * * * *
+ *
+ * shared-buffer
+ *
+ * * * * * */
+
+/// Default policy: full copy. Valid for any T, including those modified in
+/// place (not only growing).
 template<typename T>
+struct copy_merge_policy {
+    static void merge(T& dst, const T& src) noexcept { dst = src; }
+
+    static void reset(T& dst) noexcept { dst = T{}; }
+};
+
+/** Policy for containers with monotonic growth via addition only (never
+ * editing/deleting existing elements). `dst` is guaranteed to be a prefix of
+ * `src` by the construction of shared_buffer (a slot that may not be a prefix
+ * of the active one, after write_only() or reset(), is flagged and fully
+ * copied by the next write()) -- only the missing delta is copied.
+ *
+ * WARNING: `fn` given to write() must only append (push_back/emplace_back...).
+ * Use write_only() for any other modification. */
+template<typename T>
+struct append_only_merge_policy {
+    static void merge(T& dst, const T& src) noexcept
+    {
+        debug::ensure(dst.size() <= src.size() &&
+                      "append_only_merge_policy requires dst to be a prefix of "
+                      "src -- write() callbacks must only append");
+
+        dst.insert(dst.end(),
+                   src.begin() + static_cast<std::ptrdiff_t>(dst.size()),
+                   src.end());
+    }
+
+    static void reset(T& dst) noexcept { dst.clear(); }
+};
+
+/**
+ * Triple buffer. Readers never lock and never wait for a writer; writers are
+ * serialized by a mutex and only wait for readers that still pin an old slot.
+ *
+ * Protocol
+ * --------
+ * - Slots: one `active` slot (the latest published state, read-only) and two
+ *   others. A writer modifies a non-active slot that no reader pins, then
+ *   publishes it by switching `m_active`.
+ * - A reader pins a slot (counter) and re-checks that it is still the active
+ *   one before touching it (see pin_guard). The pin/check and the
+ *   publish/check pairs are a Dekker handshake: all the operations on
+ *   `m_active` and on the pin counters are seq_cst.
+ * - With N simultaneous readers, at most N slots are pinned: with a single
+ *   reader the writer never waits.
+ *
+ * Rules
+ * -----
+ * - Do not call write(), write_only() or reset() from inside a write(),
+ *   write_only() callback (non-recursive mutex).
+ * - Callbacks must be short: a pinned slot cannot be reused by the writer.
+ * - write_only() callbacks receive a stale slot: they must fully overwrite it.
+ * - Versions are strictly increasing, including across reset().
+ * - read()/write() return their callback result by value (decayed).
+ */
+template<typename T, typename MergePolicy = copy_merge_policy<T>>
 class shared_buffer
 {
     static_assert(std::is_default_constructible_v<T>,
@@ -984,278 +1192,293 @@ class shared_buffer
     static_assert(std::is_copy_assignable_v<T> || std::is_move_assignable_v<T>,
                   "T must be copy- or move-assignable");
 
-public:
-    shared_buffer() noexcept
-    {
-        m_active.store(0, std::memory_order_relaxed);
-        m_staging = 1;
-        m_spare   = 2;
-    }
-
     template<typename... Args>
+    static constexpr bool
+      is_self_v = (sizeof...(Args) == 1) and
+                  (std::is_same_v<std::remove_cvref_t<Args>, shared_buffer> and
+                   ...);
+
+public:
+    using value_type = T;
+
+    shared_buffer() noexcept = default;
+
+    /// Builds the initial state with T{ args... } (brace initialization).
+    /// Never selected for a shared_buffer argument (copy constructor).
+    template<typename... Args>
+        requires(sizeof...(Args) > 0 and not is_self_v<Args...>)
     explicit shared_buffer(Args&&... args) noexcept
       : m_buffers{ T{ std::forward<Args>(args)... }, T(), T() }
-    {
-        m_active.store(0, std::memory_order_relaxed);
-        m_staging = 1;
-        m_spare   = 2;
-    }
+    {}
 
+    /// Copies a consistent snapshot of the latest published state (and its
+    /// version). Safe while `other` is read and written concurrently.
     shared_buffer(const shared_buffer& other) noexcept
-      : m_buffers{ T(other.m_buffers[0]),
-                   T(other.m_buffers[1]),
-                   T(other.m_buffers[2]) }
-      , m_versions{ u64(other.m_versions[0]),
-                    u64(other.m_versions[1]),
-                    u64(other.m_versions[2]) }
     {
-        m_active.store(0, std::memory_order_relaxed);
-        m_staging = 1;
-        m_spare   = 2;
+        other.read([this](const T& value, u64 version) noexcept {
+            m_buffers[0] = value;
+            m_versions[0].store(version, std::memory_order_relaxed);
+        });
     }
 
-    shared_buffer(shared_buffer&& other) noexcept
-      : m_buffers{ T(other.m_buffers[0]),
-                   T(other.m_buffers[1]),
-                   T(other.m_buffers[2]) }
-      , m_versions{ u64(other.m_versions[0]),
-                    u64(other.m_versions[1]),
-                    u64(other.m_versions[2]) }
-    {
-        m_active.store(0, std::memory_order_relaxed);
-        m_staging = 1;
-        m_spare   = 2;
-    }
+    shared_buffer& operator=(const shared_buffer&) = delete;
 
     /**
-     * Writer: copy-from-active, update staging, then publish. Avoids slots
-     * currently pinned by readers.
+     * Writer: merges the staging slot from the active one via MergePolicy
+     * (full copy by default, delta only for append-only T), runs `fn(T&,
+     * args...)` on it, then publishes it.
      */
     template<typename Fn, typename... Args>
     auto write(Fn&& fn, Args&&... args) noexcept
-      -> decltype(std::invoke(std::forward<Fn>(fn),
-                              std::declval<T&>(),
-                              std::forward<Args>(args)...))
+      -> std::decay_t<std::invoke_result_t<Fn, T&, Args...>>
     {
-        std::lock_guard<std::mutex> wlock(m_writer);
+        std::lock_guard lock{ m_writer };
 
-        const auto a = m_active.load(std::memory_order_acquire);
-
+        const std::size_t a = m_active.load(std::memory_order_relaxed);
         const std::size_t s = pick_staging_slot(a);
         debug::ensure(s != a);
 
-        m_buffers[s] = m_buffers[a];
+        if (std::exchange(m_stale[s], false))
+            m_buffers[s] = m_buffers[a];
+        else
+            MergePolicy::merge(m_buffers[s], m_buffers[a]);
+
         m_versions[s].store(m_versions[a].load(std::memory_order_relaxed),
                             std::memory_order_relaxed);
 
-        if constexpr (std::is_void_v<decltype(std::invoke(
-                        std::forward<Fn>(fn),
-                        m_buffers[s],
-                        std::forward<Args>(args)...))>) {
-            std::invoke(
-              std::forward<Fn>(fn), m_buffers[s], std::forward<Args>(args)...);
-            m_versions[s].fetch_add(1, std::memory_order_relaxed);
-
-            m_active.store(s, std::memory_order_release);
-
-            const auto old_active = a;
-            const auto old_spare  = m_spare;
-            m_spare               = old_active;
-            m_staging             = old_spare;
-        } else {
-            auto result = std::invoke(
-              std::forward<Fn>(fn), m_buffers[s], std::forward<Args>(args)...);
-            m_versions[s].fetch_add(1, std::memory_order_relaxed);
-
-            m_active.store(s, std::memory_order_release);
-
-            const auto old_active = a;
-            const auto old_spare  = m_spare;
-            m_spare               = old_active;
-            m_staging             = old_spare;
-
-            return result;
-        }
+        return run_and_publish(a, s, std::forward<Fn>(fn),
+                               std::forward<Args>(args)...);
     }
 
     /**
-     * Writer: overwrite staging without copying from active.
+     * Writer: runs `fn(T&, args...)` on the staging slot without merging, and
+     * publishes it. `fn` receives an OLD content and must fully overwrite it.
+     * Safe with every MergePolicy: the other slots are flagged so that the
+     * next write() fully copies them.
      */
     template<typename Fn, typename... Args>
     auto write_only(Fn&& fn, Args&&... args) noexcept
-      -> decltype(std::invoke(std::forward<Fn>(fn),
-                              std::declval<T&>(),
-                              std::forward<Args>(args)...))
+      -> std::decay_t<std::invoke_result_t<Fn, T&, Args...>>
     {
-        std::lock_guard<std::mutex> wlock(m_writer);
+        std::lock_guard lock{ m_writer };
 
-        const auto a = m_active.load(std::memory_order_acquire);
-
+        const std::size_t a = m_active.load(std::memory_order_relaxed);
         const std::size_t s = pick_staging_slot(a);
         debug::ensure(s != a);
 
-        if constexpr (std::is_void_v<decltype(std::invoke(
-                        std::forward<Fn>(fn),
-                        m_buffers[s],
-                        std::forward<Args>(args)...))>) {
-            std::invoke(
-              std::forward<Fn>(fn), m_buffers[s], std::forward<Args>(args)...);
-            m_versions[s].fetch_add(1, std::memory_order_relaxed);
+        m_versions[s].store(m_versions[a].load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+        m_stale[s] = false;
 
-            m_active.store(s, std::memory_order_release);
-
-            const auto old_active = a;
-            const auto old_spare  = m_spare;
-            m_spare               = old_active;
-            m_staging             = old_spare;
+        if constexpr (std::is_void_v<std::invoke_result_t<Fn, T&, Args...>>) {
+            run_and_publish(a, s, std::forward<Fn>(fn),
+                            std::forward<Args>(args)...);
+            mark_others_stale(s);
         } else {
-            auto result = std::invoke(
-              std::forward<Fn>(fn), m_buffers[s], std::forward<Args>(args)...);
-            m_versions[s].fetch_add(1, std::memory_order_relaxed);
-
-            m_active.store(s, std::memory_order_release);
-
-            const auto old_active = a;
-            const auto old_spare  = m_spare;
-            m_spare               = old_active;
-            m_staging             = old_spare;
-
+            auto result = run_and_publish(a, s, std::forward<Fn>(fn),
+                                          std::forward<Args>(args)...);
+            mark_others_stale(s);
             return result;
         }
     }
 
+    /// Publishes an empty state (MergePolicy::reset) as a new version. Safe
+    /// while readers are active: no slot a reader may touch is modified.
+    void reset() noexcept
+    {
+        std::lock_guard lock{ m_writer };
+
+        const std::size_t a = m_active.load(std::memory_order_relaxed);
+        const std::size_t s = pick_staging_slot(a);
+        debug::ensure(s != a);
+
+        MergePolicy::reset(m_buffers[s]);
+        m_versions[s].store(m_versions[a].load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
+        m_stale[s] = false;
+        publish(a, s);
+
+        // Release the memory of the other slots when no reader pins them
+        // (a reader cannot pin them any more: they are not active). Otherwise
+        // flag them: the next write() fully copies them.
+        for (std::size_t i = 0; i < 3; ++i) {
+            if (i == s)
+                continue;
+
+            if (m_pins[i].value.load(std::memory_order_seq_cst) == 0) {
+                MergePolicy::reset(m_buffers[i]);
+                m_stale[i] = false;
+            } else {
+                m_stale[i] = true;
+            }
+        }
+    }
+
     /**
-     * Reader: lock-free, no copy, with pinning to prevent writer reuse of the
-     * slot.
+     * Reader: lock-free, no copy, `fn(const T&, u64 version, args...)` runs on
+     * a consistent snapshot pinned for the duration of the call.
      */
     template<typename Fn, typename... Args>
     auto read(Fn&& fn, Args&&... args) const noexcept
-      -> decltype(std::invoke(std::forward<Fn>(fn),
-                              std::declval<const T&>(),
-                              std::declval<std::uint64_t>(),
-                              std::forward<Args>(args)...))
+      -> std::decay_t<std::invoke_result_t<Fn, const T&, u64, Args...>>
     {
-        const auto idx = m_active.load(std::memory_order_acquire);
+        const pin_guard pin{ *this };
 
-        m_reader_counts[idx].fetch_add(1, std::memory_order_acquire);
-
-        const auto ver = m_versions[idx].load(std::memory_order_acquire);
-
-        if constexpr (std::is_void_v<decltype(std::invoke(
-                        std::forward<Fn>(fn),
-                        m_buffers[idx],
-                        ver,
-                        std::forward<Args>(args)...))>) {
-            std::invoke(std::forward<Fn>(fn),
-                        m_buffers[idx],
-                        ver,
-                        std::forward<Args>(args)...);
-
-            m_reader_counts[idx].fetch_sub(1, std::memory_order_release);
-        } else {
-            auto result = std::invoke(std::forward<Fn>(fn),
-                                      m_buffers[idx],
-                                      ver,
-                                      std::forward<Args>(args)...);
-
-            m_reader_counts[idx].fetch_sub(1, std::memory_order_release);
-
-            return result;
-        }
+        return std::invoke(std::forward<Fn>(fn), m_buffers[pin.index()],
+                           pin.version(), std::forward<Args>(args)...);
     }
 
     /**
-     * Try-read: guarantees the same active index before and after the callback.
-     * Still pinned to avoid reuse while reading.
+     * Like read(), and also tells whether the snapshot is still the latest
+     * published version once `fn` has returned. The callback has run on a
+     * consistent snapshot in any case.
+     * @return bool (void callback) or std::pair<bool, result>.
      */
     template<typename Fn, typename... Args>
     auto try_read(Fn&& fn, Args&&... args) const noexcept
     {
-        using return_type = decltype(std::invoke(std::forward<Fn>(fn),
-                                                 std::declval<const T&>(),
-                                                 std::declval<std::uint64_t>(),
-                                                 std::forward<Args>(args)...));
+        using result_type = std::invoke_result_t<Fn, const T&, u64, Args...>;
 
-        const auto idx1 = m_active.load(std::memory_order_acquire);
-        m_reader_counts[idx1].fetch_add(1, std::memory_order_acquire);
+        const pin_guard pin{ *this };
 
-        const auto ver1 = m_versions[idx1].load(std::memory_order_acquire);
+        if constexpr (std::is_void_v<result_type>) {
+            std::invoke(std::forward<Fn>(fn), m_buffers[pin.index()],
+                        pin.version(), std::forward<Args>(args)...);
 
-        if constexpr (std::is_void_v<return_type>) {
-            std::invoke(std::forward<Fn>(fn),
-                        m_buffers[idx1],
-                        ver1,
-                        std::forward<Args>(args)...);
-
-            m_reader_counts[idx1].fetch_sub(1, std::memory_order_release);
-
-            const auto idx2 = m_active.load(std::memory_order_acquire);
-            return idx1 == idx2;
+            return is_current(pin.version());
         } else {
-            auto result = std::invoke(std::forward<Fn>(fn),
-                                      m_buffers[idx1],
-                                      ver1,
-                                      std::forward<Args>(args)...);
+            std::decay_t<result_type> result = std::invoke(
+              std::forward<Fn>(fn), m_buffers[pin.index()], pin.version(),
+              std::forward<Args>(args)...);
 
-            m_reader_counts[idx1].fetch_sub(1, std::memory_order_release);
-
-            const auto idx2 = m_active.load(std::memory_order_acquire);
-            return std::make_pair(idx1 == idx2, std::move(result));
+            return std::pair<bool, std::decay_t<result_type>>{
+                is_current(pin.version()), std::move(result)
+            };
         }
     }
 
 private:
-    /**
-     * Pick a staging slot that is not active and not currently read..
-     */
+    struct alignas(64) pin_counter {
+        std::atomic<unsigned> value{ 0 };
+    };
+
+    /// Pins the active slot. The slot is re-checked after the increment: a
+    /// writer may have published and reused the slot between the load of
+    /// m_active and the increment. Once the check passes, the writer sees the
+    /// pin (seq_cst) and never touches the slot.
+    class pin_guard
+    {
+    public:
+        explicit pin_guard(const shared_buffer& b) noexcept
+          : m_owner(b)
+        {
+            for (;;) {
+                const std::size_t i = b.m_active.load(
+                  std::memory_order_seq_cst);
+
+                b.m_pins[i].value.fetch_add(1, std::memory_order_seq_cst);
+
+                if (b.m_active.load(std::memory_order_seq_cst) == i) {
+                    m_index   = i;
+                    m_version = b.m_versions[i].load(std::memory_order_acquire);
+                    return;
+                }
+
+                b.m_pins[i].value.fetch_sub(1, std::memory_order_release);
+            }
+        }
+
+        pin_guard(const pin_guard&)            = delete;
+        pin_guard& operator=(const pin_guard&) = delete;
+
+        ~pin_guard()
+        {
+            m_owner.m_pins[m_index].value.fetch_sub(1,
+                                                    std::memory_order_release);
+        }
+
+        std::size_t index() const noexcept { return m_index; }
+        u64         version() const noexcept { return m_version; }
+
+    private:
+        const shared_buffer& m_owner;
+        std::size_t          m_index   = 0;
+        u64                  m_version = 0;
+    };
+
+    bool is_current(u64 version) const noexcept
+    {
+        const std::size_t i = m_active.load(std::memory_order_seq_cst);
+        return m_versions[i].load(std::memory_order_acquire) == version;
+    }
+
+    /// A slot that is not active and not pinned. The spare slot (the previous
+    /// active one, hence the closest to the latest state) is preferred. Waits
+    /// for whichever of the two slots is released first.
     std::size_t pick_staging_slot(std::size_t a) noexcept
     {
-        auto is_free = [&](std::size_t i) {
-            return i != a &&
-                   m_reader_counts[i].load(std::memory_order_acquire) == 0;
+        const std::size_t other = 0 + 1 + 2 - a - m_spare;
+
+        auto is_free = [this](std::size_t i) noexcept {
+            return m_pins[i].value.load(std::memory_order_seq_cst) == 0;
         };
 
-        // Prefer current spare if free
-        if (is_free(m_spare))
-            return m_spare;
+        for (;;) {
+            if (is_free(m_spare))
+                return m_spare;
 
-        // Otherwise, pick the remaining index (0+1+2 - a - spare_)
-        const std::size_t other = 0 + 1 + 2 - a - m_spare;
-        if (is_free(other))
-            return other;
+            if (is_free(other))
+                return other;
 
-        // Both non-active slots are being read: wait very briefly
-        // (with one writer and ~10 readers, this is rare and short)
-        while (m_reader_counts[m_spare].load(std::memory_order_acquire) != 0) {
-            // Yield to let readers complete quickly
             std::this_thread::yield();
         }
-        return m_spare;
+    }
+
+    void publish(std::size_t a, std::size_t s) noexcept
+    {
+        m_versions[s].fetch_add(1, std::memory_order_relaxed);
+        m_active.store(s, std::memory_order_seq_cst);
+        m_spare = a;
+    }
+
+    template<typename Fn, typename... Args>
+    auto run_and_publish(std::size_t a,
+                         std::size_t s,
+                         Fn&&        fn,
+                         Args&&... args) noexcept
+      -> std::decay_t<std::invoke_result_t<Fn, T&, Args...>>
+    {
+        if constexpr (std::is_void_v<std::invoke_result_t<Fn, T&, Args...>>) {
+            std::invoke(std::forward<Fn>(fn), m_buffers[s],
+                        std::forward<Args>(args)...);
+            publish(a, s);
+        } else {
+            std::decay_t<std::invoke_result_t<Fn, T&, Args...>>
+              result = std::invoke(std::forward<Fn>(fn), m_buffers[s],
+                                   std::forward<Args>(args)...);
+            publish(a, s);
+            return result;
+        }
+    }
+
+    void mark_others_stale(std::size_t active) noexcept
+    {
+        for (std::size_t i = 0; i < 3; ++i)
+            if (i != active)
+                m_stale[i] = true;
     }
 
 private:
-    mutable std::mutex m_writer; /**< Writer-side mutex */
+    mutable std::mutex                 m_writer;
+    std::array<T, 3>                   m_buffers{};
+    std::array<std::atomic<u64>, 3>    m_versions{};
+    mutable std::array<pin_counter, 3> m_pins{};
 
-    std::array<T, 3> m_buffers{};
+    alignas(64) std::atomic<std::size_t> m_active{ 0 };
 
-    std::array<std::atomic<std::uint64_t>, 3> m_versions{
-        { std::atomic<std::uint64_t>{ 0 },
-          std::atomic<std::uint64_t>{ 0 },
-          std::atomic<std::uint64_t>{ 0 } }
-    };
-
-    mutable std::array<std::atomic<unsigned>, 3> m_reader_counts{
-        { std::atomic<unsigned>{ 0 },
-          std::atomic<unsigned>{ 0 },
-          std::atomic<unsigned>{ 0 } }
-    };
-
-    /** Atomic index of the active buffer */
-    std::atomic<std::size_t> m_active{ 0 };
-
-    /** Non-atomic writer-managed indices (single writer under mutex) */
-    std::size_t m_staging{ 1 };
-    std::size_t m_spare{ 2 };
+    // Only accessed with m_writer held.
+    std::size_t         m_spare = 2;
+    std::array<bool, 3> m_stale{};
 };
 
 /**
@@ -1316,6 +1539,26 @@ public:
         return operator[](g_get_index(id));
     }
 
+    constexpr T& operator()(std::integral auto position) noexcept
+    {
+        return *(reinterpret_cast<T*>(m_buffer) + position);
+    }
+
+    constexpr const T& operator()(std::integral auto position) const noexcept
+    {
+        return *(reinterpret_cast<const T*>(m_buffer) + position);
+    }
+
+    constexpr T& operator()(identifier auto id) noexcept
+    {
+        return operator()(g_get_index(id));
+    }
+
+    constexpr const T& operator()(identifier auto id) const noexcept
+    {
+        return operator()(g_get_index(id));
+    }
+
     constexpr void swap(buffer_view& o) noexcept
     {
         std::swap(m_buffer, o.m_buffer);
@@ -1352,9 +1595,9 @@ template<typename T, typename Identifier, typename A, class... Ts>
 class data_vector_array;
 
 /**
-   @brief A vector like class with dynamic allocation.
-
-   @tparam T Any type (trivial or not).
+ * @brief A vector like class with dynamic allocation.
+ *
+ * @tparam T Any type (trivial or not).
  */
 template<typename T, typename A = allocator<new_delete_memory_resource>>
 class vector
@@ -1431,6 +1674,11 @@ public:
     void swap_pop_back(std::integral auto i) noexcept;
     void swap_pop_back(const_iterator pos) noexcept;
 
+    template<std::input_iterator It>
+    iterator insert(const_iterator pos, It first, It last) noexcept;
+    iterator insert(const_iterator pos, const T& value) noexcept;
+    iterator insert(const_iterator pos, T&& value) noexcept;
+
     template<typename Pred>
     size_type erase_if(Pred pred) noexcept;
     iterator  erase(const_iterator pos) noexcept;
@@ -1447,9 +1695,12 @@ public:
     std::optional<size_type> index_of(const T* ptr) const noexcept;
     bool is_iterator_valid(const_iterator it) const noexcept;
 
-    reference       operator[](size_type i) noexcept { return m_data[i]; }
-    const_reference operator[](size_type i) const noexcept { return m_data[i]; }
-    reference       operator[](identifier auto id) noexcept
+    reference operator[](std::integral auto i) noexcept { return m_data[i]; }
+    const_reference operator[](std::integral auto i) const noexcept
+    {
+        return m_data[i];
+    }
+    reference operator[](identifier auto id) noexcept
     {
         return m_data[get_index(id)];
     }
@@ -1517,19 +1768,128 @@ constexpr bool is_valid(Identifier id) noexcept
     return get_key(id) > 0;
 }
 
-/**
-   An optimized array to store unique identifier.
+/*
 
-   A container to handle only identifier.
-   - linear memory/iteration
-   - O(1) alloc/free
-   - stable indices
-   - weak references
-   - zero overhead dereferences
+Table<ID, Value>
 
-   @tparam Identifier A enum class identifier to store identifier unsigned
-   number.
 */
+
+//! Function object for performing comparisons. The main template
+//! invokes operator< on type T. If T is an enumeration, a cast
+//! to the @c std::underlying_type_t<T> is used before the
+//! comparison.
+template<class T>
+struct table_less {
+    constexpr auto operator()(const T& lhs, const T& rhs) const noexcept -> bool
+    {
+        if constexpr (std::is_enum_v<T>) {
+            using type = std::underlying_type_t<T>;
+
+            return std::less<type>{}(static_cast<type>(lhs),
+                                     static_cast<type>(rhs));
+        } else {
+            return std::less{}(lhs, rhs);
+        }
+    }
+};
+
+//! @brief A helper container to store Identifier -> T relation.
+//! @tparam Identifier Any integer or enum type.
+//! @tparam T Any type (trivial or not).
+template<typename Identifier,
+         typename T,
+         class Compare = irt::table_less<Identifier>,
+         typename A    = allocator<new_delete_memory_resource>>
+class table
+{
+public:
+    struct value_type {
+        value_type() noexcept = default;
+        value_type(Identifier id, const T& value) noexcept;
+
+        template<typename U>
+            requires(std::is_constructible_v<Identifier, U>)
+        value_type(U id_, const T& value_) noexcept
+          : id(id_)
+          , value(value_)
+        {}
+
+        Identifier id;
+        T          value;
+    };
+
+    struct value_type_compare {
+        constexpr auto operator()(const auto& left, const auto& right) noexcept
+          -> bool
+        {
+            if constexpr (std::is_same_v<std::decay_t<decltype(left)>,
+                                         value_type>) {
+                if constexpr (std::is_same_v<std::decay_t<decltype(right)>,
+                                             value_type>)
+                    return identifier_compare{}(left.id, right.id);
+                else
+                    return identifier_compare{}(left.id, right);
+            } else {
+                if constexpr (std::is_same_v<std::decay_t<decltype(right)>,
+                                             value_type>)
+                    return identifier_compare{}(left, right.id);
+                else
+                    return identifier_compare{}(left, right);
+            }
+        }
+    };
+
+    using container_type     = vector<value_type, A>;
+    using size_type          = typename container_type::size_type;
+    using index_type         = std::make_signed_t<size_type>;
+    using iterator           = typename container_type::iterator;
+    using const_iterator     = typename container_type::const_iterator;
+    using reference          = typename container_type::reference;
+    using const_reference    = typename container_type::const_reference;
+    using identifier_compare = Compare;
+
+    container_type data;
+
+    constexpr table() noexcept = default;
+    constexpr table(std::integral auto size, const reserve_tag_t) noexcept;
+    constexpr ~table() noexcept = default;
+
+    constexpr void     set(Identifier id, const T& value) noexcept;
+    constexpr T*       get(Identifier id) noexcept;
+    constexpr const T* get(Identifier id) const noexcept;
+
+    template<typename U>
+    constexpr T* get(U id) noexcept;
+
+    template<typename U>
+    constexpr const T* get(U id) const noexcept;
+
+    constexpr void erase(Identifier id) noexcept;
+    constexpr void sort() noexcept;
+
+    constexpr size_type  size() const noexcept;
+    constexpr index_type ssize() const noexcept;
+};
+
+/*
+
+ID Array
+
+*/
+
+/**
+ * An optimized array to store unique identifier.
+ *
+ * A container to handle only identifier.
+ * - linear memory/iteration
+ * - O(1) alloc/free
+ * - stable indices
+ * - weak references
+ * - zero overhead dereferences
+ *
+ * @tparam Identifier A enum class identifier to store identifier unsigned
+ * number.
+ */
 template<typename Identifier,
          typename A = allocator<new_delete_memory_resource>>
     requires(is_identifier_type<Identifier>)
@@ -1544,10 +1904,10 @@ class id_array
       std::uint32_t,
       std::uint64_t>;
 
-    using index_type =
-      std::conditional_t<std::is_same_v<std::uint32_t, underlying_id_type>,
-                         std::uint16_t,
-                         std::uint32_t>;
+    using index_type = std::conditional_t<
+      std::is_same_v<std::uint32_t, underlying_id_type>,
+      std::uint16_t,
+      std::uint32_t>;
 
 public:
     using size_type       = index_type;
@@ -1654,12 +2014,12 @@ public:
     struct iterator_base {
         using iterator_concept = std::bidirectional_iterator_tag;
         using difference_type  = std::ptrdiff_t;
-        using element_type =
-          std::conditional_t<is_const, const value_type, value_type>;
-        using pointer   = element_type*;
-        using reference = element_type;
-        using container_type =
-          std::conditional_t<is_const, const this_container, this_container>;
+        using element_type     = std::
+          conditional_t<is_const, const value_type, value_type>;
+        using pointer        = element_type*;
+        using reference      = element_type;
+        using container_type = std::
+          conditional_t<is_const, const this_container, this_container>;
 
         iterator_base() noexcept = default;
 
@@ -1716,37 +2076,16 @@ public:
 
         iterator_base operator--(int) noexcept
         {
-            const auto old_id = id;
-
-            if (auto index = get_index(id); index) {
-                do {
-                    --index;
-                    if (is_valid(self->m_items[index])) {
-                        id = self->m_items[index];
-                        return iterator_base{ .self = self, .id = old_id };
-                    }
-                } while (index);
-            }
-
-            id = identifier_type{};
-            return iterator_base{ .self = self, .id = old_id };
+            iterator_base tmp = *this;
+            --(*this);
+            return tmp;
         }
 
         iterator_base operator++(int) noexcept
         {
-            const auto old_id = id;
-            auto       index  = get_index(id);
-            ++index;
-
-            for (; index < self->max_used; ++index) {
-                if (is_valid(self->m_items[index])) {
-                    id = self->m_items[index];
-                    return iterator_base{ .self = self, .id = old_id };
-                }
-            }
-
-            id = identifier_type{};
-            return iterator_base{ .self = self, .id = old_id };
+            iterator_base tmp = *this;
+            ++(*this);
+            return tmp;
         }
 
         auto operator<=>(const iterator_base&) const noexcept = default;
@@ -1767,48 +2106,48 @@ public:
 };
 
 /**
-   An optimized SOA structure to store unique identifier and mutiples
-   vector.
-
-   A container to handle only identifier.
-   - linear memory/iteration
-   - O(1) alloc/free
-   - stable indices
-   - weak references
-   - zero overhead dereferences
-
-   @code
-   struct pos3d {
-       float x, y, z;
-   };
-
-   struct color {
-       std::uint32_t rgba;
-   };
-
-   using name = irt::small_string<15>;
-
-   enum class ex1_id : uint32_t;
-
-   irt::id_data_array<ex1_id,
-        irt::allocator<new_delete_memory_resource>, pos3d, color, name>
-     d;
-   d.reserve(1024);
-   expect(ge(d.capacity(), 1024u));
-   expect(fatal(d.can_alloc(1)));
-
-   const auto id =
-     d.alloc([](const auto id, auto& p, auto& c, auto& n) noexcept
-   {
-       p = pos3d(1.f, 2.f, 3.f);
-       c = color{ 123u };
-       n = "HelloWorld!";
-   });
-   @endcode
-
-   @tparam Identifier A enum class identifier to store identifier unsigned
-   number.
-*/
+ * An optimized SOA structure to store unique identifier and mutiples
+ * vector.
+ *
+ * A container to handle only identifier.
+ * - linear memory/iteration
+ * - O(1) alloc/free
+ * - stable indices
+ * - weak references
+ * - zero overhead dereferences
+ *
+ * @code
+ * struct pos3d {
+ *    float x, y, z;
+ * };
+ *
+ * struct color {
+ *    std::uint32_t rgba;
+ * };
+ *
+ * using name = irt::small_string<15>;
+ *
+ * enum class ex1_id : uint32_t;
+ *
+ * irt::id_data_array<ex1_id,
+ *     irt::allocator<new_delete_memory_resource>, pos3d, color, name>
+ *  d;
+ * d.reserve(1024);
+ * expect(ge(d.capacity(), 1024u));
+ * expect(fatal(d.can_alloc(1)));
+ *
+ * const auto id =
+ *  d.alloc([](const auto id, auto& p, auto& c, auto& n) noexcept
+ * {
+ *    p = pos3d(1.f, 2.f, 3.f);
+ *    c = color{ 123u };
+ *    n = "HelloWorld!";
+ * });
+ * @endcode
+ *
+ * @tparam Identifier A enum class identifier to store identifier unsigned
+ * number.
+ */
 template<typename T,
          typename Identifier,
          typename A = allocator<new_delete_memory_resource>,
@@ -1819,29 +2158,30 @@ class id_data_array
                   "Identifier must be a enumeration: enum class id : "
                   "std::uint32_t or std::uint64_t;");
 
+public:
     using underlying_id_type = std::conditional_t<
       std::is_same_v<std::uint32_t, std::underlying_type_t<Identifier>>,
       std::uint32_t,
       std::uint64_t>;
 
-    using index_type =
-      std::conditional_t<std::is_same_v<std::uint32_t, underlying_id_type>,
-                         std::uint16_t,
-                         std::uint32_t>;
+    using index_type = std::conditional_t<
+      std::is_same_v<std::uint32_t, underlying_id_type>,
+      std::uint16_t,
+      std::uint32_t>;
 
     using identifier_type = Identifier;
     using value_type      = T;
     using allocator_type  = A;
 
-    using identifier_container_type =
-      std::conditional_t<std::is_void_v<T>,
-                         id_array<Identifier, A>,
-                         data_array<T, Identifier, A>>;
+    using identifier_container_type = std::conditional_t<
+      std::is_void_v<T>,
+      id_array<Identifier, A>,
+      data_array<T, Identifier, A>>;
 
+private:
     identifier_container_type      m_ids;
     std::tuple<buffer_view<Ts>...> m_col;
 
-private:
     template<typename Function, std::size_t... Is>
     void do_call_fn(Function&&            fn,
                     const identifier_type id,
@@ -1950,8 +2290,8 @@ private:
                               const auto  len,
                               std::index_sequence<Is...>) noexcept
     {
-        (do_copy_buffer_view(
-           std::get<Is>(other_m_col), std::get<Is>(m_col), len),
+        (do_copy_buffer_view(std::get<Is>(other_m_col), std::get<Is>(m_col),
+                             len),
          ...);
     }
 
@@ -1970,8 +2310,8 @@ private:
                                             const auto  len,
                                             std::index_sequence<Is...>) noexcept
     {
-        (do_uninitialised_copy_buffer_view(
-           std::get<Is>(other_m_col), std::get<Is>(m_col), len),
+        (do_uninitialised_copy_buffer_view(std::get<Is>(other_m_col),
+                                           std::get<Is>(m_col), len),
          ...);
     }
 
@@ -1991,18 +2331,18 @@ private:
                                std::integral auto req,
                                buffer_view<SubT>& buffer) noexcept
     {
-        auto* ptr =
-          reinterpret_cast<std::byte*>(A::allocate(sizeof(SubT) * req));
+        auto* ptr = reinterpret_cast<std::byte*>(
+          A::allocate(sizeof(SubT) * req));
         auto* new_ptr = reinterpret_cast<SubT*>(ptr);
 
         if (buffer.get()) {
-            if constexpr (std::is_trivially_copy_constructible_v<T>) {
-                std::uninitialized_copy_n(buffer.get(), old, new_ptr);
-            } else if constexpr (std::is_trivially_move_constructible_v<T>) {
+            if constexpr (std::is_nothrow_move_constructible_v<SubT>) {
                 std::uninitialized_move_n(buffer.get(), old, new_ptr);
             } else {
                 std::uninitialized_copy_n(buffer.get(), old, new_ptr);
             }
+
+            std::destroy_n(buffer.get(), old);
             A::deallocate(buffer.get(), sizeof(SubT) * old);
             buffer.reset(nullptr);
         }
@@ -2021,9 +2361,9 @@ private:
     }
 
 public:
-    using iterator       = id_array<identifier_type, A>::iterator;
-    using const_iterator = id_array<identifier_type, A>::const_iterator;
-    using size_type      = id_array<identifier_type, A>::size_type;
+    using iterator       = typename identifier_container_type::iterator;
+    using const_iterator = typename identifier_container_type::const_iterator;
+    using size_type      = typename identifier_container_type::size_type;
 
     id_data_array() noexcept = default;
     explicit id_data_array(std::integral auto capacity) noexcept;
@@ -2065,68 +2405,55 @@ public:
      * @endexample */
     void free(const identifier_type id) noexcept;
 
-    /** Get the underlying @c vector in @c tuple using an index. (read
-     * @c std::get). */
-    template<std::size_t Index>
-    auto& get() noexcept;
+    // identifiers access
+
+    /** Get constant access to the underlying @c data_array or @c id_array */
+    const identifier_container_type& get_ids() const noexcept { return m_ids; }
+
+    // subtype buffer access
 
     /** Get the underlying @c vector in @c tuple using a type (read @c
      * std::get). */
     template<typename Type>
-    auto& get() noexcept;
-
-    /** Get the underlying object at position @c id @c vector in @c
-     * tuple using an index. (read @c std::get). */
-    template<std::size_t Index>
-    auto& get(const identifier_type id) noexcept;
-
-    /** Get the underlying object at position @c id in @c vector in @c
-     * tuple using a type (read @c std::get). */
-    template<typename Type>
-    auto& get(const identifier_type id) noexcept;
-
-    /** Get the underlying @c vector in @c tuple using an index. (read
-     * @c std::get). */
-    template<std::size_t Index>
-    auto& get() const noexcept;
+    buffer_view<Type>& get() noexcept;
 
     /** Get the underlying @c vector in @c tuple using a type (read @c
      * std::get). */
     template<typename Type>
-    auto& get() const noexcept;
+    const buffer_view<Type>& get() const noexcept;
 
-    /** Get the underlying object at position @c id @c vector in @c
-     * tuple using an index. (read @c std::get). */
-    template<std::size_t Index>
-    auto& get(const identifier_type id) const noexcept;
+    // Subtype element access
 
     /** Get the underlying object at position @c id in @c vector in @c
      * tuple using a type (read @c std::get). */
     template<typename Type>
-    auto& get(const identifier_type id) const noexcept;
+    const Type& get(const identifier_type id) const noexcept;
+
+    /** Get the underlying object at position @c id in @c vector in @c
+     * tuple using a type (read @c std::get). */
+    template<typename Type>
+    Type& get(const identifier_type id) noexcept;
 
     template<typename Type>
     identifier_type get_id(const Type& t) const noexcept;
 
-    /** Get the underlying object at position @c id @c vector in @c
-     * tuple using an index. (read @c std::get). */
-    template<std::size_t Index>
-    auto* try_to_get(const identifier_type id) const noexcept;
+    /** Get the underlying object at position @c id in @c vector in @c
+     * tuple using a type (read @c std::get). */
+    template<typename Type>
+    const Type* try_to_get(const identifier_type id) const noexcept;
 
     /** Get the underlying object at position @c id in @c vector in @c
      * tuple using a type (read @c std::get). */
     template<typename Type>
-    auto* try_to_get(const identifier_type id) const noexcept;
-
-    /** Get the underlying object at position @c id @c vector in @c
-     * tuple using an index. (read @c std::get). */
-    template<std::size_t Index>
-    auto* try_to_get(const identifier_type id) noexcept;
+    Type* try_to_get(const identifier_type id) noexcept;
 
     /** Get the underlying object at position @c id in @c vector in @c
      * tuple using a type (read @c std::get). */
-    template<typename Type>
-    auto* try_to_get(const identifier_type id) noexcept;
+    const T* try_to_get(const identifier_type id) const noexcept;
+
+    /** Get the underlying object at position @c id in @c vector in @c
+     * tuple using a type (read @c std::get). */
+    T* try_to_get(const identifier_type id) noexcept;
 
     //! Call the @c fn function if @c id is valid.
     //!
@@ -2177,9 +2504,10 @@ public:
     constexpr const_iterator end() const noexcept;
 
     void clear() noexcept;
+    void destroy() noexcept;
     bool reserve(std::integral auto len) noexcept;
     template<int Num, int Denum = 1>
-    bool grow(size_type count = 1) noexcept;
+    bool grow(std::integral auto count = 1) noexcept;
 
     bool     exists(const identifier_type id) const noexcept;
     bool     can_alloc(std::integral auto nb = 1) const noexcept;
@@ -2225,10 +2553,10 @@ public:
       std::uint32_t,
       std::uint64_t>;
 
-    using index_type =
-      std::conditional_t<std::is_same_v<std::uint32_t, underlying_id_type>,
-                         std::uint16_t,
-                         std::uint32_t>;
+    using index_type = std::conditional_t<
+      std::is_same_v<std::uint32_t, underlying_id_type>,
+      std::uint16_t,
+      std::uint32_t>;
 
     using size_type       = index_type;
     using identifier_type = Identifier;
@@ -2385,6 +2713,9 @@ public:
     //! @return @c T
     const T& get(Identifier id) const noexcept;
 
+    //! @brief Checks if a `id` exists in the underlying array.
+    bool exists(Identifier id) const noexcept;
+
     //! @brief Get a T from an ID.
     //!
     //! @details Validates ID, then returns item, returns null if
@@ -2437,12 +2768,12 @@ public:
     struct iterator_base {
         using iterator_concept = std::forward_iterator_tag;
         using difference_type  = std::ptrdiff_t;
-        using element_type =
-          std::conditional_t<is_const, const value_type, value_type>;
-        using pointer   = element_type*;
-        using reference = element_type&;
-        using container_type =
-          std::conditional_t<is_const, const this_container, this_container>;
+        using element_type     = std::
+          conditional_t<is_const, const value_type, value_type>;
+        using pointer        = element_type*;
+        using reference      = element_type&;
+        using container_type = std::
+          conditional_t<is_const, const this_container, this_container>;
 
         iterator_base() noexcept = default;
 
@@ -2474,12 +2805,9 @@ public:
 
         iterator_base operator++(int) noexcept
         {
-            auto    old_id  = id;
-            pointer ptr     = self->try_to_get(id);
-            bool    success = self->next(ptr);
-            id              = success ? self->get_id(*ptr) : identifier_type{};
-
-            return iterator_base{ .self = self, .id = old_id };
+            iterator_base tmp = *this;
+            ++(*this);
+            return tmp;
         }
 
         auto operator<=>(const iterator_base&) const noexcept = default;
@@ -2560,8 +2888,8 @@ public:
         using value_type        = std::conditional_t<is_const, const T, T>;
         using pointer           = value_type*;
         using reference         = value_type&;
-        using container_type =
-          std::conditional_t<is_const, const this_container, this_container>;
+        using container_type    = std::
+          conditional_t<is_const, const this_container, this_container>;
 
         friend ring_buffer;
 
@@ -2678,18 +3006,28 @@ private:
 };
 
 //! @brief A small_string without heap allocation.
+//!
+//! This class must fit within the size provided in template.
+//! @example
+//! using sm32 = small_string<32>;
+//! static_assert(sizeof(sm32) == 32);
+//! @endexample
 template<std::size_t length = 8>
 class small_string
 {
 public:
-    static_assert(length >= 2);
+    static_assert(length >= 3);
 
-    using size_type  = small_storage_size_t<length>;
-    using index_type = std::make_signed_t<size_type>;
+    using size_type = small_storage_size_t<length - 1>;
 
 private:
-    char      m_buffer[length];
-    size_type m_size;
+    static inline constexpr std::size_t buffer_size = length -
+                                                      sizeof(size_type);
+
+    char      m_buffer[buffer_size]{};
+    size_type m_size{};
+
+    static_assert(std::in_range<size_type>(buffer_size - 1));
 
 public:
     using iterator        = char*;
@@ -2697,58 +3035,69 @@ public:
     using reference       = char&;
     using const_reference = const char&;
 
-    constexpr small_string() noexcept;
-    constexpr small_string(const small_string& str) noexcept;
-    constexpr small_string(small_string&& str) noexcept;
+    constexpr small_string() noexcept                               = default;
+    constexpr small_string(const small_string&) noexcept            = default;
+    constexpr small_string(small_string&&) noexcept                 = default;
+    constexpr small_string& operator=(const small_string&) noexcept = default;
+    constexpr small_string& operator=(small_string&&) noexcept      = default;
+
     constexpr small_string(const char* str) noexcept;
     constexpr small_string(const std::string_view str) noexcept;
 
-    constexpr small_string& operator=(const small_string& str) noexcept;
-    constexpr small_string& operator=(small_string&& str) noexcept;
     constexpr small_string& operator=(const char* str) noexcept;
     constexpr small_string& operator=(const std::string_view str) noexcept;
 
     constexpr void push_back(const char c) noexcept;
     constexpr void assign(const std::string_view str) noexcept;
+    constexpr void append(const std::string_view str) noexcept;
     constexpr void clear() noexcept;
     constexpr void resize(std::integral auto size) noexcept;
-    constexpr bool empty() const noexcept;
 
-    constexpr size_type  size() const noexcept;
-    constexpr index_type ssize() const noexcept;
-    constexpr index_type capacity() const noexcept;
+    constexpr bool empty() const noexcept;
+    constexpr bool can_append(const std::string_view str) const noexcept;
+    constexpr bool can_assign(const std::string_view str) const noexcept;
+
+    constexpr std::size_t        size() const noexcept;
+    constexpr std::ptrdiff_t     ssize() const noexcept;
+    static constexpr std::size_t capacity() noexcept;
 
     constexpr reference       operator[](std::integral auto index) noexcept;
     constexpr const_reference operator[](
       std::integral auto index) const noexcept;
 
-    constexpr std::string_view   sv() const noexcept;
-    constexpr std::u8string_view u8sv() const noexcept;
-    constexpr const char*        c_str() const noexcept;
-    constexpr char*              data() noexcept;
-    constexpr const char*        data() const noexcept;
+    constexpr std::string_view sv() const noexcept;
+    constexpr const char*      c_str() const noexcept;
+    constexpr char*            data() noexcept;
+    constexpr const char*      data() const noexcept;
 
     constexpr iterator       begin() noexcept;
     constexpr iterator       end() noexcept;
     constexpr const_iterator begin() const noexcept;
     constexpr const_iterator end() const noexcept;
 
-    constexpr auto operator<=>(const small_string& rhs) const noexcept;
-    constexpr auto operator<=>(std::string_view rhs) const noexcept;
-    constexpr auto operator<=>(const char* rhs) const noexcept;
+    constexpr char front() const noexcept;
+    constexpr char back() const noexcept;
+
+    template<typename Operation>
+    constexpr void resize_and_overwrite(std::size_t count,
+                                        Operation&& op) noexcept;
+
+    constexpr std::strong_ordering operator<=>(
+      const small_string& rhs) const noexcept;
+    constexpr std::strong_ordering operator<=>(
+      std::string_view rhs) const noexcept;
+    constexpr std::strong_ordering operator<=>(const char* rhs) const noexcept;
 };
 
-template<std::size_t length>
-constexpr auto operator<=>(std::string_view            lhs,
-                           const small_string<length>& rhs) noexcept;
+static_assert(sizeof(small_string<32>) == 32);
+static_assert(std::is_trivially_copyable_v<small_string<32>>);
 
-template<std::size_t length>
-constexpr auto operator<=>(const char*                 lhs,
-                           const small_string<length>& rhs) noexcept;
-
-template<std::size_t length>
-constexpr bool operator==(const small_string<length>&,
-                          const small_string<length>&) noexcept;
+template<std::size_t N>
+constexpr bool operator==(const small_string<N>& lhs,
+                          const small_string<N>& rhs) noexcept
+{
+    return lhs.sv() == rhs.sv();
+}
 
 template<std::size_t N>
 constexpr bool operator==(const small_string<N>& lhs,
@@ -2758,22 +3107,9 @@ constexpr bool operator==(const small_string<N>& lhs,
 }
 
 template<std::size_t N>
-constexpr bool operator==(std::string_view       lhs,
-                          const small_string<N>& rhs) noexcept
-{
-    return lhs == rhs.sv();
-}
-
-template<std::size_t N>
 constexpr bool operator==(const small_string<N>& lhs, const char* rhs) noexcept
 {
     return lhs.sv() == std::string_view{ rhs ? rhs : "" };
-}
-
-template<std::size_t N>
-constexpr bool operator==(const char* lhs, const small_string<N>& rhs) noexcept
-{
-    return std::string_view{ lhs ? lhs : "" } == rhs.sv();
 }
 
 //! @brief A vector like class but without dynamic allocation.
@@ -2897,21 +3233,21 @@ auto operator<=>(const vector<T, A>&       lhs,
                  const small_vector<T, N>& rhs) noexcept;
 
 /**
-   A ring-buffer based on a fixed size container. m_head point to
-   the first element can be dequeue while m_tail point to the first
-   constructible element in the ring.
-
-       --+----+----+----+----+----+--
-         |    |    |    |    |    |
-         |    |    |    |    |    |
-         |    |    |    |    |    |
-       --+----+----+----+----+----+--
-         head                tail
-
-         ----->              ----->
-         dequeue()           enqueue()
-
-   @tparam T Any type (trivial or not).
+ * A ring-buffer based on a fixed size container. m_head point to
+ * the first element can be dequeue while m_tail point to the first
+ * constructible element in the ring.
+ *
+ *    --+----+----+----+----+----+--
+ *      |    |    |    |    |    |
+ *      |    |    |    |    |    |
+ *      |    |    |    |    |    |
+ *    --+----+----+----+----+----+--
+ *      head                tail
+ *
+ *      ----->              ----->
+ *      dequeue()           enqueue()
+ *
+ * @tparam T Any type (trivial or not).
  */
 template<typename T, int length>
 class small_ring_buffer
@@ -2950,8 +3286,8 @@ public:
         using value_type        = std::conditional_t<is_const, const T, T>;
         using pointer           = value_type*;
         using reference         = value_type&;
-        using container_type =
-          std::conditional_t<is_const, const this_container, this_container>;
+        using container_type    = std::
+          conditional_t<is_const, const this_container, this_container>;
 
         friend small_ring_buffer;
 
@@ -3073,9 +3409,15 @@ public:
     using underlying_type = typename std::make_unsigned_t<
       typename std::underlying_type_t<value_type>>;
 
-    constexpr static inline std::size_t max_bits =
-      std::numeric_limits<underlying_type>::digits;
+    constexpr static inline std::size_t
+      max_bits = std::numeric_limits<underlying_type>::digits;
 
+private:
+    constexpr explicit bitflags(std::bitset<max_bits> bits) noexcept
+      : m_bits(bits)
+    {}
+
+public:
     constexpr bitflags() noexcept = default;
     explicit constexpr bitflags(unsigned long long val) noexcept;
 
@@ -3098,7 +3440,7 @@ public:
 
     constexpr std::size_t size() const noexcept;
     constexpr std::size_t count() const noexcept;
-    std::size_t           to_unsigned() const noexcept;
+    unsigned long long    to_unsigned() const noexcept;
 
     /** Sets the bits to the result of binary AND on corresponding pairs of bits
      * of *this and other. */
@@ -3137,7 +3479,7 @@ public:
       const bitflags<EnumT>& lhs,
       const bitflags<EnumT>& rhs) noexcept
     {
-        return lhs.m_bits & rhs.m_bits;
+        return bitflags<EnumT>(lhs.m_bits & rhs.m_bits);
     }
 
     /** Returns a bitflags<EnumT> containing the result of binary OR on
@@ -3146,7 +3488,7 @@ public:
       const bitflags<EnumT>& lhs,
       const bitflags<EnumT>& rhs) noexcept
     {
-        return lhs.m_bits | rhs.m_bits;
+        return bitflags<EnumT>(lhs.m_bits | rhs.m_bits);
     }
 
     /** Returns a bitflags<EnumT> containing the result of binary XOR on
@@ -3155,7 +3497,21 @@ public:
       const bitflags<EnumT>& lhs,
       const bitflags<EnumT>& rhs) noexcept
     {
-        return lhs.m_bits ^ rhs.m_bits;
+        return bitflags<EnumT>(lhs.m_bits ^ rhs.m_bits);
+    }
+
+    /** Returns true if lhs and rhs have exactly the same bits set. */
+    constexpr friend bool operator==(const bitflags<EnumT>& lhs,
+                                     const bitflags<EnumT>& rhs) noexcept
+    {
+        return lhs.m_bits == rhs.m_bits;
+    }
+
+    /** Returns true if lhs and rhs differ by at least one bit. */
+    constexpr friend bool operator!=(const bitflags<EnumT>& lhs,
+                                     const bitflags<EnumT>& rhs) noexcept
+    {
+        return lhs.m_bits != rhs.m_bits;
     }
 
 private:
@@ -3185,8 +3541,8 @@ public:
     using reference       = T&;
     using const_reference = const T&;
 
-    constexpr static inline index_type active =
-      std::numeric_limits<index_type>::max();
+    constexpr static inline index_type
+      active = std::numeric_limits<index_type>::max();
     constexpr static inline index_type free_list_end = active - 1;
     constexpr static inline index_type max_reserve   = active - 2;
 
@@ -3262,10 +3618,10 @@ class data_vector_array
       std::uint32_t,
       std::uint64_t>;
 
-    using index_type =
-      std::conditional_t<std::is_same_v<std::uint32_t, underlying_id_type>,
-                         std::uint16_t,
-                         std::uint32_t>;
+    using index_type = std::conditional_t<
+      std::is_same_v<std::uint32_t, underlying_id_type>,
+      std::uint16_t,
+      std::uint32_t>;
 
     using size_type       = index_type;
     using identifier_type = Identifier;
@@ -3293,8 +3649,8 @@ class data_vector_array
     using data_array_type = data_array<data_type, identifier_type, A>;
     using tuple_type      = std::tuple<pool<Ts, index_type, A>...>;
 
-    constexpr static inline index_type none =
-      std::numeric_limits<index_type>::max();
+    constexpr static inline index_type
+      none = std::numeric_limits<index_type>::max();
 
     data_array_type m_ids;
     tuple_type      m_col;
@@ -3835,7 +4191,7 @@ template<typename Identifier, typename A>
 constexpr typename id_array<Identifier, A>::const_iterator
 id_array<Identifier, A>::begin() const noexcept
 {
-    for (index_type index = 0; m_max_used; ++index)
+    for (index_type index = 0; index < m_max_used; ++index)
         if (is_valid(m_items[index]))
             return const_iterator(this, m_items[index]);
 
@@ -3909,7 +4265,9 @@ id_data_array<T, Identifier, A, Ts...>::id_data_array(
   id_data_array&& other) noexcept
   : m_ids(std::move(other.m_ids))
   , m_col(std::move(other.m_col))
-{}
+{
+    do_reset_buffer_views(other.m_col, std::index_sequence_for<Ts...>());
+}
 
 template<typename T, typename Identifier, typename A, class... Ts>
 auto id_data_array<T, Identifier, A, Ts...>::operator=(
@@ -3925,8 +4283,8 @@ auto id_data_array<T, Identifier, A, Ts...>::operator=(
         return *this;
     }
 
-    if (capacity() < other.capacity()) { // nullptr or too small we delete.
-        if (capacity() > 0) {            // not nullptr we delete
+    if (capacity() != other.capacity()) { // mismatch: delete and realloc.
+        if (capacity() > 0) {             // not nullptr we delete
             do_destroy_buffer_views(m_ids.capacity(),
                                     std::index_sequence_for<Ts...>());
             m_ids.destroy();
@@ -3935,12 +4293,12 @@ auto id_data_array<T, Identifier, A, Ts...>::operator=(
         m_ids = other.m_ids;
         do_alloc_buffer_views(other.capacity(),
                               std::index_sequence_for<Ts...>());
-        do_uninitialised_copy_buffer_views(
-          other.m_col, other.capacity(), std::index_sequence_for<Ts...>());
+        do_uninitialised_copy_buffer_views(other.m_col, other.capacity(),
+                                           std::index_sequence_for<Ts...>());
     } else { // no need to destroy and realloc buffers.
         m_ids = other.m_ids;
-        do_copy_buffer_views(
-          other.m_col, other.capacity(), std::index_sequence_for<Ts...>());
+        do_copy_buffer_views(other.m_col, other.capacity(),
+                             std::index_sequence_for<Ts...>());
     }
 
     return *this;
@@ -4007,33 +4365,25 @@ void id_data_array<T, Identifier, A, Ts...>::free(
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto& id_data_array<T, Identifier, A, Ts...>::get() noexcept
-{
-    return std::get<Index>(m_col);
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
 template<typename Type>
-auto& id_data_array<T, Identifier, A, Ts...>::get() noexcept
+auto id_data_array<T, Identifier, A, Ts...>::get() noexcept
+  -> buffer_view<Type>&
 {
     return std::get<buffer_view<Type>>(m_col);
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto& id_data_array<T, Identifier, A, Ts...>::get(
-  const identifier_type id) noexcept
+template<typename Type>
+auto id_data_array<T, Identifier, A, Ts...>::get() const noexcept
+  -> const buffer_view<Type>&
 {
-    debug::ensure(m_ids.exists(id));
-
-    return std::get<Index>(m_col)[get_index(id)];
+    return std::get<buffer_view<Type>>(m_col);
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
 template<typename Type>
-auto& id_data_array<T, Identifier, A, Ts...>::get(
-  const identifier_type id) noexcept
+auto id_data_array<T, Identifier, A, Ts...>::get(
+  const identifier_type id) noexcept -> Type&
 {
     debug::ensure(m_ids.exists(id));
 
@@ -4041,33 +4391,9 @@ auto& id_data_array<T, Identifier, A, Ts...>::get(
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto& id_data_array<T, Identifier, A, Ts...>::get() const noexcept
-{
-    return std::get<Index>(m_col);
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
 template<typename Type>
-auto& id_data_array<T, Identifier, A, Ts...>::get() const noexcept
-{
-    return std::get<buffer_view<Type>>(m_col);
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto& id_data_array<T, Identifier, A, Ts...>::get(
-  const identifier_type id) const noexcept
-{
-    debug::ensure(m_ids.exists(id));
-
-    return std::get<Index>(m_col)[get_index(id)];
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
-template<typename Type>
-auto& id_data_array<T, Identifier, A, Ts...>::get(
-  const identifier_type id) const noexcept
+auto id_data_array<T, Identifier, A, Ts...>::get(
+  const identifier_type id) const noexcept -> const Type&
 {
     debug::ensure(m_ids.exists(id));
 
@@ -4079,31 +4405,25 @@ template<typename Type>
 typename id_data_array<T, Identifier, A, Ts...>::identifier_type
 id_data_array<T, Identifier, A, Ts...>::get_id(const Type& t) const noexcept
 {
-    const auto* ptr   = &t;
-    const auto* start = std::get<buffer_view<Type>>(m_col).get();
-    const auto* last  = start + m_ids.size();
+    if constexpr (std::is_void_v<T>) {
+        const auto* ptr   = &t;
+        const auto* start = std::get<buffer_view<Type>>(m_col).get();
+        const auto* last  = start + m_ids.size();
 
-    fatal::ensure(start <= ptr and ptr < last);
+        fatal::ensure(start <= ptr and ptr < last);
 
-    const auto pos = ptr - start;
+        const auto pos = ptr - start;
 
-    return m_ids.get_from_index(pos);
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto* id_data_array<T, Identifier, A, Ts...>::try_to_get(
-  const identifier_type id) const noexcept
-{
-    return m_ids.exists(id)
-             ? std::addressof(std::get<Index>(m_col)[get_index(id)])
-             : nullptr;
+        return m_ids.get_from_index(pos);
+    } else {
+        return m_ids.get_id(t);
+    }
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
 template<typename Type>
-auto* id_data_array<T, Identifier, A, Ts...>::try_to_get(
-  const identifier_type id) const noexcept
+auto id_data_array<T, Identifier, A, Ts...>::try_to_get(
+  const identifier_type id) const noexcept -> const Type*
 {
     return m_ids.exists(id)
              ? std::addressof(std::get<buffer_view<Type>>(m_col)[get_index(id)])
@@ -4111,23 +4431,27 @@ auto* id_data_array<T, Identifier, A, Ts...>::try_to_get(
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
-template<std::size_t Index>
-auto* id_data_array<T, Identifier, A, Ts...>::try_to_get(
-  const identifier_type id) noexcept
-{
-    return m_ids.exists(id)
-             ? std::addressof(std::get<Index>(m_col)[get_index(id)])
-             : nullptr;
-}
-
-template<typename T, typename Identifier, typename A, class... Ts>
 template<typename Type>
-auto* id_data_array<T, Identifier, A, Ts...>::try_to_get(
-  const identifier_type id) noexcept
+auto id_data_array<T, Identifier, A, Ts...>::try_to_get(
+  const identifier_type id) noexcept -> Type*
 {
     return m_ids.exists(id)
              ? std::addressof(std::get<buffer_view<Type>>(m_col)[get_index(id)])
              : nullptr;
+}
+
+template<typename T, typename Identifier, typename A, class... Ts>
+auto id_data_array<T, Identifier, A, Ts...>::try_to_get(
+  const identifier_type id) const noexcept -> const T*
+{
+    return m_ids.try_to_get(id);
+}
+
+template<typename T, typename Identifier, typename A, class... Ts>
+auto id_data_array<T, Identifier, A, Ts...>::try_to_get(
+  const identifier_type id) noexcept -> T*
+{
+    return m_ids.try_to_get(id);
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
@@ -4137,8 +4461,7 @@ void id_data_array<T, Identifier, A, Ts...>::if_exists_do(
   Function&&            fn) noexcept
 {
     if (m_ids.exists(id))
-        std::invoke(std::forward<Function>(fn),
-                    id,
+        std::invoke(std::forward<Function>(fn), id,
                     std::get<buffer_view<Type>>(m_col)[get_index(id)]);
 }
 
@@ -4147,8 +4470,7 @@ template<typename Type, typename Function>
 void id_data_array<T, Identifier, A, Ts...>::for_each(Function&& fn) noexcept
 {
     for (const auto id : m_ids)
-        std::invoke(std::forward<Function>(fn),
-                    id,
+        std::invoke(std::forward<Function>(fn), id,
                     std::get<buffer_view<Type>>(m_col)[get_index(id)]);
 }
 
@@ -4157,8 +4479,8 @@ template<typename Function>
 void id_data_array<T, Identifier, A, Ts...>::for_each(Function&& fn) noexcept
 {
     for (const auto id : m_ids)
-        do_call_fn(
-          std::forward<Function>(fn), id, std::index_sequence_for<Ts...>());
+        do_call_fn(std::forward<Function>(fn), id,
+                   std::index_sequence_for<Ts...>());
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
@@ -4167,8 +4489,7 @@ void id_data_array<T, Identifier, A, Ts...>::for_each(
   Function&& fn) const noexcept
 {
     for (const auto id : m_ids)
-        std::invoke(std::forward<Function>(fn),
-                    id,
+        std::invoke(std::forward<Function>(fn), id,
                     std::get<buffer_view<Type>>(m_col)[get_index(id)]);
 }
 
@@ -4178,8 +4499,8 @@ void id_data_array<T, Identifier, A, Ts...>::for_each(
   Function&& fn) const noexcept
 {
     for (const auto id : m_ids)
-        do_call_fn(
-          std::forward<Function>(fn), id, std::index_sequence_for<Ts...>());
+        do_call_fn(std::forward<Function>(fn), id,
+                   std::index_sequence_for<Ts...>());
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
@@ -4234,27 +4555,41 @@ void id_data_array<T, Identifier, A, Ts...>::clear() noexcept
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
+void id_data_array<T, Identifier, A, Ts...>::destroy() noexcept
+{
+    if (capacity() > 0)
+        do_destroy_buffer_views(capacity(), std::index_sequence_for<Ts...>());
+
+    m_ids.destroy();
+}
+
+template<typename T, typename Identifier, typename A, class... Ts>
 bool id_data_array<T, Identifier, A, Ts...>::reserve(
   std::integral auto len) noexcept
 {
-    if (std::cmp_less(capacity(), len))
-        if (do_resize_buffer_views(
-              capacity(), len, std::index_sequence_for<Ts...>()))
-            return m_ids.reserve(len);
+    if (std::cmp_less(capacity(), len)) {
+        const auto old = capacity();
 
-    return false;
+        if (not m_ids.reserve(len))
+            return false;
+
+        return do_resize_buffer_views(old, len,
+                                      std::index_sequence_for<Ts...>());
+    }
+
+    return true;
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
 template<int Num, int Denum>
-bool id_data_array<T, Identifier, A, Ts...>::grow(size_type count) noexcept
+bool id_data_array<T, Identifier, A, Ts...>::grow(
+  std::integral auto count) noexcept
 {
     static_assert(Num > 0 and Denum > 0 and Num > Denum);
 
-    const auto required  = m_ids.capacity() + count;
-    const auto ratio_cap = (m_ids.capacity() == 0)
-            ? size_type{ 8 }
-            : (m_ids.capacity() * Num / Denum);
+    const auto cap       = static_cast<int>(m_ids.capacity());
+    const auto required  = cap + static_cast<int>(count);
+    const auto ratio_cap = (cap == 0) ? 8 : (cap * Num / Denum);
 
     return reserve(std::max(required, ratio_cap));
 }
@@ -4285,7 +4620,7 @@ template<typename T, typename Identifier, typename A, class... Ts>
 bool id_data_array<T, Identifier, A, Ts...>::can_alloc(
   std::integral auto nb) noexcept
 {
-    return m_ids.can_alloc(nb) or grow<2, 1>();
+    return m_ids.can_alloc(nb) or grow<2, 1>(nb);
 }
 
 template<typename T, typename Identifier, typename A, class... Ts>
@@ -4348,8 +4683,8 @@ constexpr data_array<T, Identifier, A>::data_array(
   const data_array& other) noexcept
 {
     if (other.m_capacity > 0) {
-        m_items =
-          reinterpret_cast<item*>(A::allocate(sizeof(item) * other.m_capacity));
+        m_items = reinterpret_cast<item*>(
+          A::allocate(sizeof(item) * other.m_capacity));
         m_capacity = other.m_capacity;
 
         if constexpr (std::is_trivially_copyable_v<T>) {
@@ -4477,8 +4812,8 @@ bool data_array<T, Identifier, A>::reserve(std::integral auto capacity) noexcept
     if (std::cmp_less_equal(capacity, 0))
         capacity = 8;
 
-    item* new_buffer =
-      reinterpret_cast<item*>(A::allocate(sizeof(item) * capacity));
+    item* new_buffer = reinterpret_cast<item*>(
+      A::allocate(sizeof(item) * capacity));
     if (new_buffer == nullptr)
         return false;
 
@@ -4492,10 +4827,10 @@ bool data_array<T, Identifier, A>::reserve(std::integral auto capacity) noexcept
                 std::construct_at(&new_buffer[i].item,
                                   std::move(m_items[i].item));
                 new_buffer[i].id = m_items[i].id;
+                std::destroy_at(&m_items[i].item);
             } else {
                 std::uninitialized_copy_n(
-                  reinterpret_cast<std::byte*>(&m_items[i]),
-                  sizeof(item),
+                  reinterpret_cast<std::byte*>(&m_items[i]), sizeof(item),
                   reinterpret_cast<std::byte*>(&new_buffer[i]));
             }
         }
@@ -4504,10 +4839,10 @@ bool data_array<T, Identifier, A>::reserve(std::integral auto capacity) noexcept
             if (is_valid(m_items[i].id)) {
                 std::construct_at(&new_buffer[i].item, m_items[i].item);
                 new_buffer[i].id = m_items[i].id;
+                std::destroy_at(&m_items[i].item);
             } else {
                 std::uninitialized_copy_n(
-                  reinterpret_cast<std::byte*>(&m_items[i]),
-                  sizeof(item),
+                  reinterpret_cast<std::byte*>(&m_items[i]), sizeof(item),
                   reinterpret_cast<std::byte*>(&new_buffer[i]));
             }
         }
@@ -4694,6 +5029,20 @@ const T& data_array<T, Identifier, A>::get(Identifier id) const noexcept
                   m_items[get_index(id)].id == id);
 
     return m_items[get_index(id)].item;
+}
+
+template<typename T, typename Identifier, typename A>
+bool data_array<T, Identifier, A>::exists(Identifier id) const noexcept
+{
+    if (get_key(id)) {
+        const auto index = get_index(id);
+
+        if (std::cmp_greater_equal(index, 0) &&
+            std::cmp_less(index, m_max_used) && m_items[index].id == id)
+            return true;
+    }
+
+    return false;
 }
 
 template<typename T, typename Identifier, typename A>
@@ -5004,15 +5353,20 @@ vector<T, A>& vector<T, A>::operator=(const vector& other) noexcept
 {
     if (this != &other) {
         clear();
-        if (reserve(other.m_size)) {
-            if constexpr (std::is_trivially_copyable_v<T>) {
-                std::memcpy(m_data, other.m_data, other.m_size * sizeof(T));
-            } else {
-                std::uninitialized_copy_n(other.m_data, other.m_size, m_data);
+
+        if (other.m_size > 0) {
+            if (reserve(other.m_size)) {
+                if constexpr (std::is_trivially_copyable_v<T>) {
+                    std::memcpy(m_data, other.m_data, other.m_size * sizeof(T));
+                } else {
+                    std::uninitialized_copy_n(other.m_data, other.m_size,
+                                              m_data);
+                }
+                m_size = other.m_size;
             }
-            m_size = other.m_size;
         }
     }
+
     return *this;
 }
 
@@ -5046,8 +5400,8 @@ bool vector<T, A>::operator==(const vector& other) const noexcept
 template<typename T, typename A>
 auto vector<T, A>::operator<=>(const vector& other) const noexcept
 {
-    return std::lexicographical_compare_three_way(
-      begin(), end(), other.begin(), other.end());
+    return std::lexicographical_compare_three_way(begin(), end(), other.begin(),
+                                                  other.end());
 }
 
 template<typename T, typename A>
@@ -5095,8 +5449,8 @@ template<typename T, typename A>
 template<std::input_iterator It>
 void vector<T, A>::assign(It first, It last) noexcept
 {
-    const size_type new_size =
-      static_cast<size_type>(std::distance(first, last));
+    const size_type new_size = static_cast<size_type>(
+      std::distance(first, last));
 
     if (new_size > m_capacity) {
         destroy();
@@ -5214,6 +5568,7 @@ T* vector<T, A>::push_back(const T& value) noexcept
 {
     return emplace_back(value);
 }
+
 template<typename T, typename A>
 T* vector<T, A>::push_back(T&& value) noexcept
 {
@@ -5265,6 +5620,76 @@ void vector<T, A>::swap_pop_back(const_iterator pos) noexcept
 }
 
 template<typename T, typename A>
+template<std::input_iterator It>
+typename vector<T, A>::iterator vector<T, A>::insert(const_iterator pos,
+                                                     It             first,
+                                                     It last) noexcept
+{
+    const size_type index = static_cast<size_type>(
+      std::distance(cbegin(), pos));
+    const size_type count = static_cast<size_type>(std::distance(first, last));
+
+    if (count == 0)
+        return m_data + index;
+
+    if (m_size + count > m_capacity && !grow<2, 1>(count))
+        return nullptr;
+
+    T* target = m_data + index;
+
+    if (index == m_size) {
+        if constexpr (std::is_trivially_copyable_v<T> &&
+                      std::contiguous_iterator<It>) {
+            std::memcpy(target, &(*first), count * sizeof(T));
+        } else {
+            std::uninitialized_copy(first, last, target);
+        }
+        m_size += count;
+
+        return target;
+    }
+
+    const size_type tail = m_size - index;
+
+    if constexpr (std::is_trivially_copyable_v<T> &&
+                  std::contiguous_iterator<It>) {
+        std::memmove(target + count, target, tail * sizeof(T));
+        std::memcpy(target, &(*first), count * sizeof(T));
+    } else {
+        T* old_end = m_data + m_size;
+
+        if (count >= tail) {
+            std::uninitialized_move(target, old_end, target + count);
+            std::destroy(target, old_end);
+            std::uninitialized_copy(first, last, target);
+        } else {
+            std::uninitialized_move(old_end - count, old_end, old_end);
+            std::move_backward(target, old_end - count, old_end);
+            std::destroy(target, target + count);
+            std::uninitialized_copy(first, last, target);
+        }
+    }
+
+    m_size += count;
+
+    return target;
+}
+
+template<typename T, typename A>
+typename vector<T, A>::iterator vector<T, A>::insert(const_iterator pos,
+                                                     const T& value) noexcept
+{
+    return emplace(pos, value);
+}
+
+template<typename T, typename A>
+typename vector<T, A>::iterator vector<T, A>::insert(const_iterator pos,
+                                                     T&& value) noexcept
+{
+    return emplace(pos, std::move(value));
+}
+
+template<typename T, typename A>
 template<typename... Args>
 typename vector<T, A>::iterator vector<T, A>::emplace(const_iterator pos,
                                                       Args&&... args) noexcept
@@ -5302,8 +5727,8 @@ typename vector<T, A>::size_type vector<T, A>::erase_if(Pred pred) noexcept
 {
     auto it_to_remove = std::remove_if(begin(), end(), pred);
 
-    size_type removed_count =
-      static_cast<size_type>(std::distance(it_to_remove, end()));
+    size_type removed_count = static_cast<size_type>(
+      std::distance(it_to_remove, end()));
 
     erase(it_to_remove, end());
 
@@ -5321,8 +5746,8 @@ typename vector<T, A>::iterator vector<T, A>::erase(const_iterator pos) noexcept
     }
 
     if constexpr (std::is_trivially_copyable_v<T>) {
-        size_type num_to_move =
-          static_cast<size_type>(std::distance(p + 1, end()));
+        size_type num_to_move = static_cast<size_type>(
+          std::distance(p + 1, end()));
         std::memmove(p, p + 1, num_to_move * sizeof(T));
     } else {
         std::move(p + 1, end(), p);
@@ -5458,8 +5883,8 @@ bool small_vector<T, N>::resize(std::integral auto n,
     if (target_size < m_size) {
         std::destroy(data_ptr() + target_size, data_ptr() + m_size);
     } else if (target_size > m_size) {
-        std::uninitialized_fill(
-          data_ptr() + m_size, data_ptr() + target_size, value);
+        std::uninitialized_fill(data_ptr() + m_size, data_ptr() + target_size,
+                                value);
     }
 
     m_size = target_size;
@@ -5474,8 +5899,8 @@ small_vector<T, N>& small_vector<T, N>::operator=(small_vector&& other) noexcept
         if constexpr (std::is_trivially_copyable_v<T>) {
             std::memcpy(m_storage, other.m_storage, other.m_size * sizeof(T));
         } else {
-            std::uninitialized_move_n(
-              other.data_ptr(), other.m_size, data_ptr());
+            std::uninitialized_move_n(other.data_ptr(), other.m_size,
+                                      data_ptr());
         }
         m_size = other.m_size;
         other.clear();
@@ -5514,6 +5939,9 @@ void small_vector<T, N>::pop_back() noexcept
 template<typename T, std::size_t N>
 void small_vector<T, N>::swap_pop_back(std::integral auto i) noexcept
 {
+    if (std::cmp_greater_equal(i, m_size))
+        return;
+
     if (std::cmp_less(i, m_size - 1)) {
         if constexpr (std::is_trivially_copyable_v<T>) {
             data_ptr()[i] = data_ptr()[m_size - 1];
@@ -5555,8 +5983,8 @@ typename small_vector<T, N>::iterator small_vector<T, N>::emplace(
         } else {
             std::construct_at(data_ptr() + m_size,
                               std::move(data_ptr()[m_size - 1]));
-            std::move_backward(
-              target, data_ptr() + m_size - 1, data_ptr() + m_size);
+            std::move_backward(target, data_ptr() + m_size - 1,
+                               data_ptr() + m_size);
             std::destroy_at(target);
         }
     }
@@ -5604,9 +6032,9 @@ template<typename Pred>
 typename small_vector<T, N>::size_type small_vector<T, N>::erase_if(
   Pred pred) noexcept
 {
-    auto      it_to_remove = std::remove_if(begin(), end(), pred);
-    size_type removed_count =
-      static_cast<size_type>(std::distance(it_to_remove, end()));
+    auto      it_to_remove  = std::remove_if(begin(), end(), pred);
+    size_type removed_count = static_cast<size_type>(
+      std::distance(it_to_remove, end()));
     erase(it_to_remove, end());
     return removed_count;
 }
@@ -5665,64 +6093,106 @@ bool small_vector<T, N>::operator==(const small_vector& other) const noexcept
 template<typename T, std::size_t N>
 auto small_vector<T, N>::operator<=>(const small_vector& other) const noexcept
 {
-    return std::lexicographical_compare_three_way(
-      begin(), end(), other.begin(), other.end());
+    return std::lexicographical_compare_three_way(begin(), end(), other.begin(),
+                                                  other.end());
+}
+
+// template<typename Identifier, typename T, class Compare, typename A>
+// class table
+
+template<typename Identifier, typename T, class Compare, typename A>
+table<Identifier, T, Compare, A>::value_type::value_type(
+  Identifier id_,
+  const T&   value_) noexcept
+  : id(id_)
+  , value(value_)
+{}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr table<Identifier, T, Compare, A>::table(
+  std::integral auto  size,
+  const reserve_tag_t tag) noexcept
+  : data{ size, tag }
+{}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr void table<Identifier, T, Compare, A>::set(const Identifier id,
+                                                     const T& value) noexcept
+{
+    if (auto* value_found = get(id); value_found) {
+        *value_found = value;
+    } else {
+        data.emplace_back(id, value);
+        sort();
+    }
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr T* table<Identifier, T, Compare, A>::get(Identifier id) noexcept
+{
+    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
+    return it == data.end() ? nullptr : &it->value;
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr const T* table<Identifier, T, Compare, A>::get(
+  Identifier id) const noexcept
+{
+    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
+
+    return it == data.end() ? nullptr : &it->value;
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+template<typename U>
+constexpr T* table<Identifier, T, Compare, A>::get(U id) noexcept
+{
+    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
+
+    return it == data.end() ? nullptr : &it->value;
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+template<typename U>
+constexpr const T* table<Identifier, T, Compare, A>::get(U id) const noexcept
+{
+    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
+
+    return it == data.end() ? nullptr : &it->value;
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr void table<Identifier, T, Compare, A>::erase(Identifier id) noexcept
+{
+    auto it = binary_find(data.begin(), data.end(), id, value_type_compare{});
+
+    if (it != data.end())
+        data.erase(it);
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr void table<Identifier, T, Compare, A>::sort() noexcept
+{
+    if (data.size() > 1)
+        std::sort(data.begin(), data.end(), value_type_compare{});
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr table<Identifier, T, Compare, A>::size_type
+table<Identifier, T, Compare, A>::size() const noexcept
+{
+    return data.size();
+}
+
+template<typename Identifier, typename T, class Compare, typename A>
+constexpr table<Identifier, T, Compare, A>::index_type
+table<Identifier, T, Compare, A>::ssize() const noexcept
+{
+    return static_cast<index_type>(data.size());
 }
 
 // template<size_t length = 8>
 // class small_string
-
-template<std::size_t length>
-inline constexpr small_string<length>::small_string() noexcept
-{
-    clear();
-}
-
-template<std::size_t length>
-inline constexpr small_string<length>::small_string(
-  const small_string<length>& str) noexcept
-{
-    std::copy_n(str.m_buffer, str.m_size, m_buffer);
-    m_buffer[str.m_size] = '\0';
-    m_size               = str.m_size;
-}
-
-template<std::size_t length>
-inline constexpr small_string<length>::small_string(
-  small_string<length>&& str) noexcept
-{
-    std::copy_n(str.m_buffer, str.m_size, m_buffer);
-    m_buffer[str.m_size] = '\0';
-    m_size               = str.m_size;
-    str.clear();
-}
-
-template<std::size_t length>
-inline constexpr small_string<length>& small_string<length>::operator=(
-  const small_string<length>& str) noexcept
-{
-    if (&str != this) {
-        std::copy_n(str.m_buffer, str.m_size, m_buffer);
-        m_buffer[str.m_size] = '\0';
-        m_size               = str.m_size;
-    }
-
-    return *this;
-}
-
-template<std::size_t length>
-inline constexpr small_string<length>& small_string<length>::operator=(
-  small_string<length>&& str) noexcept
-{
-    if (&str != this) {
-        std::copy_n(str.m_buffer, str.m_size, m_buffer);
-        m_buffer[str.m_size] = '\0';
-        m_size               = str.m_size;
-        str.clear();
-    }
-
-    return *this;
-}
 
 template<std::size_t length>
 inline constexpr small_string<length>& small_string<length>::operator=(
@@ -5756,16 +6226,16 @@ inline constexpr small_string<length>::small_string(
 }
 
 template<std::size_t length>
-constexpr void small_string<length>::resize(std::integral auto size) noexcept
+constexpr void small_string<length>::resize(std::integral auto n) noexcept
 {
-    if (size < 0) {
-        m_size = 0;
-    } else if (std::cmp_greater_equal(size, length - 1)) {
-        m_size = length - 1;
-    } else {
-        m_size = static_cast<size_type>(size);
-    }
+    const auto new_size = std::cmp_less(n, 0)
+                            ? std::size_t{ 0 }
+                            : std::min(static_cast<std::size_t>(n), capacity());
 
+    if (new_size > m_size)
+        std::fill(m_buffer + m_size, m_buffer + new_size, '\0');
+
+    m_size           = static_cast<size_type>(new_size);
     m_buffer[m_size] = '\0';
 }
 
@@ -5776,22 +6246,35 @@ inline constexpr bool small_string<length>::empty() const noexcept
 }
 
 template<std::size_t length>
-inline constexpr auto small_string<length>::size() const noexcept -> size_type
+inline constexpr auto small_string<length>::size() const noexcept -> std::size_t
 {
     return m_size;
 }
 
 template<std::size_t length>
-inline constexpr auto small_string<length>::ssize() const noexcept -> index_type
+constexpr std::ptrdiff_t small_string<length>::ssize() const noexcept
 {
-    return m_size;
+    return static_cast<std::ptrdiff_t>(m_size);
 }
 
 template<std::size_t length>
-inline constexpr auto small_string<length>::capacity() const noexcept
-  -> index_type
+inline constexpr bool small_string<length>::can_append(
+  const std::string_view str) const noexcept
 {
-    return length - 1;
+    return str.size() <= capacity() - size();
+}
+
+template<std::size_t length>
+inline constexpr bool small_string<length>::can_assign(
+  const std::string_view str) const noexcept
+{
+    return str.size() <= capacity();
+}
+
+template<std::size_t length>
+inline constexpr auto small_string<length>::capacity() noexcept -> std::size_t
+{
+    return buffer_size - 1;
 }
 
 template<std::size_t length>
@@ -5807,11 +6290,19 @@ template<std::size_t length>
 inline constexpr void small_string<length>::assign(
   const std::string_view str) noexcept
 {
-    m_size = std::cmp_less(str.size(), length - 1)
-               ? static_cast<size_type>(str.size())
-               : static_cast<size_type>(length - 1);
+    m_size = static_cast<size_type>(std::min(str.size(), capacity()));
+    std::copy_n(str.data(), m_size, m_buffer);
+    m_buffer[m_size] = '\0';
+}
 
-    std::copy_n(str.data(), m_size, &m_buffer[0]);
+template<std::size_t length>
+inline constexpr void small_string<length>::append(
+  const std::string_view str) noexcept
+{
+    const auto to_copy = std::min(str.size(), capacity() - size());
+
+    std::copy_n(str.data(), to_copy, m_buffer + m_size);
+    m_size           = static_cast<size_type>(m_size + to_copy);
     m_buffer[m_size] = '\0';
 }
 
@@ -5819,12 +6310,6 @@ template<std::size_t length>
 inline constexpr std::string_view small_string<length>::sv() const noexcept
 {
     return { &m_buffer[0], m_size };
-}
-
-template<std::size_t length>
-inline constexpr std::u8string_view small_string<length>::u8sv() const noexcept
-{
-    return { reinterpret_cast<const char8_t*>(&m_buffer[0]), m_size };
 }
 
 template<std::size_t length>
@@ -5838,7 +6323,7 @@ template<std::size_t length>
 inline constexpr typename small_string<length>::reference
 small_string<length>::operator[](std::integral auto index) noexcept
 {
-    debug::ensure(index >= 0);
+    debug::ensure(std::cmp_greater_equal(index, 0));
     debug::ensure(std::cmp_less(index, m_size));
 
     return m_buffer[index];
@@ -5848,7 +6333,7 @@ template<std::size_t length>
 inline constexpr typename small_string<length>::const_reference
 small_string<length>::operator[](std::integral auto index) const noexcept
 {
-    debug::ensure(index >= 0);
+    debug::ensure(std::cmp_greater_equal(index, 0));
     debug::ensure(std::cmp_less(index, m_size));
 
     return m_buffer[index];
@@ -5896,48 +6381,58 @@ template<std::size_t length>
 inline constexpr typename small_string<length>::const_iterator
 small_string<length>::end() const noexcept
 {
+
     return m_buffer + m_size;
 }
 
 template<std::size_t length>
-constexpr auto small_string<length>::operator<=>(
+constexpr char small_string<length>::front() const noexcept
+{
+    debug::ensure(not empty());
+    return m_buffer[0];
+}
+
+template<std::size_t length>
+constexpr char small_string<length>::back() const noexcept
+{
+    debug::ensure(not empty());
+    return m_buffer[m_size - 1];
+}
+
+template<std::size_t length>
+constexpr std::strong_ordering small_string<length>::operator<=>(
   const small_string& rhs) const noexcept
 {
     return sv() <=> rhs.sv();
 }
 
 template<std::size_t length>
-constexpr auto small_string<length>::operator<=>(
+constexpr std::strong_ordering small_string<length>::operator<=>(
   std::string_view rhs) const noexcept
 {
     return sv() <=> rhs;
 }
 
 template<std::size_t length>
-constexpr auto small_string<length>::operator<=>(const char* rhs) const noexcept
+constexpr std::strong_ordering small_string<length>::operator<=>(
+  const char* rhs) const noexcept
 {
     return sv() <=> std::string_view{ rhs ? rhs : "" };
 }
 
 template<std::size_t length>
-constexpr auto operator<=>(std::string_view            lhs,
-                           const small_string<length>& rhs) noexcept
+template<typename Operation>
+constexpr void small_string<length>::resize_and_overwrite(
+  std::size_t count,
+  Operation&& op) noexcept
 {
-    return lhs <=> rhs.sv();
-}
+    count = std::min(count, capacity());
 
-template<std::size_t length>
-constexpr auto operator<=>(const char*                 lhs,
-                           const small_string<length>& rhs) noexcept
-{
-    return std::string_view{ lhs ? lhs : "" } <=> rhs.sv();
-}
+    const std::size_t new_size = std::forward<Operation>(op)(m_buffer, count);
+    debug::ensure(new_size <= count);
 
-template<std::size_t length>
-constexpr bool operator==(const small_string<length>& lhs,
-                          const small_string<length>& rhs) noexcept
-{
-    return lhs.sv() == rhs.sv();
+    m_size           = static_cast<size_type>(new_size);
+    m_buffer[m_size] = '\0';
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -6117,16 +6612,20 @@ constexpr ring_buffer<T, A>::ring_buffer(const ring_buffer& rhs) noexcept
         clear();
 
         if (m_capacity != rhs.m_capacity) {
-            auto* ptr =
-              reinterpret_cast<T*>(A::allocate(sizeof(T) * rhs.m_capacity));
-            if (ptr) {
-                if (buffer)
-                    A::deallocate(buffer, sizeof(T) * m_capacity);
-
-                if (rhs.m_capacity) {
+            if (rhs.m_capacity > 0) {
+                auto* ptr = reinterpret_cast<T*>(
+                  A::allocate(sizeof(T) * rhs.m_capacity));
+                if (ptr) {
+                    if (buffer)
+                        A::deallocate(buffer, sizeof(T) * m_capacity);
                     buffer     = ptr;
                     m_capacity = rhs.m_capacity;
                 }
+            } else {
+                if (buffer)
+                    A::deallocate(buffer, sizeof(T) * m_capacity);
+                buffer     = nullptr;
+                m_capacity = 0;
             }
         }
 
@@ -6143,16 +6642,20 @@ constexpr ring_buffer<T, A>& ring_buffer<T, A>::operator=(
         clear();
 
         if (m_capacity != rhs.m_capacity) {
-            auto* ptr =
-              reinterpret_cast<T*>(A::allocate(sizeof(T) * rhs.m_capacity));
-            if (ptr) {
-                if (buffer)
-                    A::deallocate(buffer, sizeof(T) * m_capacity);
-
-                if (rhs.m_capacity > 0) {
+            if (rhs.m_capacity > 0) {
+                auto* ptr = reinterpret_cast<T*>(
+                  A::allocate(sizeof(T) * rhs.m_capacity));
+                if (ptr) {
+                    if (buffer)
+                        A::deallocate(buffer, sizeof(T) * m_capacity);
                     buffer     = ptr;
                     m_capacity = rhs.m_capacity;
                 }
+            } else {
+                if (buffer)
+                    A::deallocate(buffer, sizeof(T) * m_capacity);
+                buffer     = nullptr;
+                m_capacity = 0;
             }
         }
 
@@ -6371,8 +6874,7 @@ constexpr void ring_buffer<T, A>::erase_before(iterator this_it) noexcept
     if (this_it == head())
         return;
 
-    auto it = head();
-    while (it != head())
+    while (this_it != head())
         pop_head();
 }
 
@@ -6592,7 +7094,7 @@ constexpr int ring_buffer<T, A>::ssize() const noexcept
 template<class T, typename A>
 constexpr int ring_buffer<T, A>::available() const noexcept
 {
-    return capacity() - size();
+    return capacity() - size() - 1;
 }
 
 template<class T, typename A>
@@ -6811,8 +7313,7 @@ constexpr void small_ring_buffer<T, length>::erase_before(
     if (this_it == head())
         return;
 
-    auto it = head();
-    while (it != head())
+    while (this_it != head())
         pop_head();
 }
 
@@ -7021,7 +7522,7 @@ constexpr int small_ring_buffer<T, length>::ssize() const noexcept
 template<class T, int length>
 constexpr int small_ring_buffer<T, length>::available() const noexcept
 {
-    return capacity() - size();
+    return capacity() - size() - 1;
 }
 
 template<class T, int length>
@@ -7281,7 +7782,7 @@ constexpr std::size_t bitflags<EnumT>::count() const noexcept
 }
 
 template<typename EnumT>
-std::size_t bitflags<EnumT>::to_unsigned() const noexcept
+unsigned long long bitflags<EnumT>::to_unsigned() const noexcept
 {
     return m_bits.to_ullong();
 }
@@ -7293,12 +7794,12 @@ constexpr bool bitflags<EnumT>::operator[](value_type e) const noexcept
 }
 
 /**
-   Equal vector operator.
+Equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are equal, otherwise @c false.
+*/
 template<typename T>
 constexpr bool operator==(const vector<T>& lhs, const vector<T>& rhs) noexcept
 {
@@ -7307,12 +7808,12 @@ constexpr bool operator==(const vector<T>& lhs, const vector<T>& rhs) noexcept
 }
 
 /**
-   Equal vector operator.
+Equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are equal, otherwise @c false.
+*/
 template<typename T, int Length>
 constexpr bool operator==(const vector<T>&               lhs,
                           const small_vector<T, Length>& rhs) noexcept
@@ -7322,12 +7823,12 @@ constexpr bool operator==(const vector<T>&               lhs,
 }
 
 /**
-   Equal vector operator.
+Equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are equal, otherwise @c false.
+*/
 template<typename T, int Length>
 constexpr bool operator==(const small_vector<T, Length>& lhs,
                           const vector<T>&               rhs) noexcept
@@ -7337,12 +7838,12 @@ constexpr bool operator==(const small_vector<T, Length>& lhs,
 }
 
 /**
-   Equal vector operator.
+Equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are equal, otherwise @c false.
+*/
 template<typename T, int LengthLhs, int LengthRhs>
 constexpr bool operator==(const small_vector<T, LengthLhs>& lhs,
                           const small_vector<T, LengthRhs>& rhs) noexcept
@@ -7352,12 +7853,12 @@ constexpr bool operator==(const small_vector<T, LengthLhs>& lhs,
 }
 
 /**
-   Not equal vector operator.
+Not equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are not equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are not equal, otherwise @c false.
+*/
 template<typename T>
 constexpr bool operator!=(const vector<T>& lhs, const vector<T>& rhs) noexcept
 {
@@ -7365,12 +7866,12 @@ constexpr bool operator!=(const vector<T>& lhs, const vector<T>& rhs) noexcept
 }
 
 /**
-   Not equal vector operator.
+Not equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are not equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are not equal, otherwise @c false.
+*/
 template<typename T, int Length>
 constexpr bool operator!=(const vector<T>&               lhs,
                           const small_vector<T, Length>& rhs) noexcept
@@ -7379,12 +7880,12 @@ constexpr bool operator!=(const vector<T>&               lhs,
 }
 
 /**
-   Not equal vector operator.
+Not equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are not equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are not equal, otherwise @c false.
+*/
 template<typename T, int Length>
 constexpr bool operator!=(const small_vector<T, Length>& lhs,
                           const vector<T>&               rhs) noexcept
@@ -7393,12 +7894,12 @@ constexpr bool operator!=(const small_vector<T, Length>& lhs,
 }
 
 /**
-   Not equal vector operator.
+Not equal vector operator.
 
-   @param lhs Reference to the first vector.
-   @param rhs Reference to the second vector.
-   @return @c true if the arrays are not equal, otherwise @c false.
- */
+@param lhs Reference to the first vector.
+@param rhs Reference to the second vector.
+@return @c true if the arrays are not equal, otherwise @c false.
+*/
 template<typename T, int LengthLhs, int LengthRhs>
 constexpr bool operator!=(const small_vector<T, LengthLhs>& lhs,
                           const small_vector<T, LengthRhs>& rhs) noexcept
@@ -7426,8 +7927,8 @@ constexpr pool<T, IndexType, A>::pool(std::integral auto reserve) noexcept
     debug::ensure(std::cmp_less(reserve, max_reserve));
 
     if (std::cmp_greater(reserve, 0) and std::cmp_less(reserve, max_reserve)) {
-        if (auto* new_data =
-              reinterpret_cast<item*>(A::allocate(sizeof(item) * reserve))) {
+        if (auto* new_data = reinterpret_cast<item*>(
+              A::allocate(sizeof(item) * reserve))) {
             m_buffer   = new_data;
             m_capacity = static_cast<index_type>(reserve);
         }
@@ -7441,8 +7942,8 @@ constexpr pool<T, IndexType, A>::pool(const pool& other) noexcept
         if (auto* new_data = reinterpret_cast<item*>(
               A::allocate(sizeof(item) * other.m_capacity))) {
             m_buffer = new_data;
-            std::uninitialized_copy_n(
-              other.m_buffer, other.m_max_used, m_buffer);
+            std::uninitialized_copy_n(other.m_buffer, other.m_max_used,
+                                      m_buffer);
 
             m_max_used  = other.m_max_used;
             m_max_size  = other.m_max_size;
@@ -7476,8 +7977,8 @@ constexpr pool<T, IndexType, A>& pool<T, IndexType, A>::operator=(
             if (auto* new_data = reinterpret_cast<item*>(
                   A::allocate(sizeof(item) * other.m_capacity))) {
                 m_buffer = new_data;
-                std::uninitialized_copy_n(
-                  other.m_buffer, other.m_max_used, m_buffer);
+                std::uninitialized_copy_n(other.m_buffer, other.m_max_used,
+                                          m_buffer);
 
                 m_max_used  = other.m_max_used;
                 m_max_size  = other.m_max_size;
@@ -7628,8 +8129,8 @@ constexpr bool pool<T, IndexType, A>::reserve(
     if (std::cmp_less_equal(reserve, m_capacity))
         return true;
 
-    if (item* new_data =
-          reinterpret_cast<item*>(A::allocate(sizeof(item) * reserve))) {
+    if (item* new_data = reinterpret_cast<item*>(
+          A::allocate(sizeof(item) * reserve))) {
 
         if constexpr (std::is_move_constructible_v<T>) {
             std::uninitialized_move_n(m_buffer, m_max_used, new_data);
@@ -7684,8 +8185,8 @@ constexpr bool pool<T, IndexType, A>::grow(size_type count) noexcept
     const auto ratio_cap = (m_capacity == 0) ? 8 : (m_capacity * 2);
     const auto min_req   = std::max(required, ratio_cap);
 
-    if (item* new_data =
-          reinterpret_cast<item*>(A::allocate(sizeof(item) * min_req))) {
+    if (item* new_data = reinterpret_cast<item*>(
+          A::allocate(sizeof(item) * min_req))) {
 
         if constexpr (std::is_move_constructible_v<T>) {
             std::uninitialized_move_n(m_buffer, m_max_used, new_data);
@@ -7771,8 +8272,8 @@ template<typename Type>
 auto data_vector_array<T, Identifier, A, Ts...>::get_pos(
   const identifier_type id) const noexcept -> index_type
 {
-    constexpr const auto tuple_idx =
-      get_tuple_index<tuple_type, pool<Type, index_type, A>>();
+    constexpr const auto
+      tuple_idx = get_tuple_index<tuple_type, pool<Type, index_type, A>>();
 
     if constexpr (std::is_void_v<T>)
         return m_ids.get(id)[tuple_idx];
@@ -7785,8 +8286,8 @@ template<typename Type>
 auto data_vector_array<T, Identifier, A, Ts...>::get_pos_ref(
   const identifier_type id) noexcept -> index_type&
 {
-    constexpr const auto tuple_idx =
-      get_tuple_index<tuple_type, pool<Type, index_type, A>>();
+    constexpr const auto
+      tuple_idx = get_tuple_index<tuple_type, pool<Type, index_type, A>>();
 
     if constexpr (std::is_void_v<T>)
         return m_ids.get(id)[tuple_idx];
@@ -7841,8 +8342,8 @@ void data_vector_array<T, Identifier, A, Ts...>::free(
   const identifier_type id) noexcept
 {
     if (m_ids.exists(id)) {
-        const auto e =
-          std::tuple_size_v<std::tuple<pool<Ts, index_type, A>...>>;
+        const auto
+          e = std::tuple_size_v<std::tuple<pool<Ts, index_type, A>...>>;
 
         for (sz i = 0; i < e; ++i)
             if (m_ids[i] != 0xffffffff)
@@ -7904,8 +8405,8 @@ auto& data_vector_array<T, Identifier, A, Ts...>::alloc(
     auto pos = get_pos<Type>(id);
 
     if (pos == none) {
-        get_pos_ref<Type>(id) =
-          std::get<pool<Type, index_type, A>>(m_col).alloc();
+        get_pos_ref<Type>(
+          id) = std::get<pool<Type, index_type, A>>(m_col).alloc();
 
         pos = get_pos_ref<Type>(id);
     }
@@ -7922,10 +8423,9 @@ auto& data_vector_array<T, Identifier, A, Ts...>::alloc(
     auto pos = get_pos<Type>(id);
 
     if (pos == none) {
-        get_pos_ref<Type>(id) =
-          std::get<pool<Type, index_type, A>>(m_col).alloc(
-            std::forward<Args>(args)...);
-        pos = get_pos_ref<Type>(id);
+        get_pos_ref<Type>(id) = std::get<pool<Type, index_type, A>>(m_col)
+                                  .alloc(std::forward<Args>(args)...);
+        pos                   = get_pos_ref<Type>(id);
     } else {
         std::destroy_at(
           std::addressof(std::get<pool<Type, index_type, A>>(m_col)[pos]));
@@ -7977,9 +8477,10 @@ bool data_vector_array<T, Identifier, A, Ts...>::grow(size_type count) noexcept
 {
     static_assert(Num > 0 and Denum > 0 and Num > Denum);
 
-    const auto required = m_ids.capacity() + count;
-    const auto ratio_cap =
-            (m_ids.capacity() == 0) ? 8 : (m_ids.capacity() * Num / Denum);
+    const auto required  = m_ids.capacity() + count;
+    const auto ratio_cap = (m_ids.capacity() == 0)
+                             ? 8
+                             : (m_ids.capacity() * Num / Denum);
     return reserve(std::max(required, ratio_cap));
 }
 
@@ -8041,8 +8542,8 @@ template<typename T, std::size_t N, typename A>
 auto operator<=>(const small_vector<T, N>& lhs,
                  const vector<T, A>&       rhs) noexcept
 {
-    return std::lexicographical_compare_three_way(
-                lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(),
+                                                  rhs.begin(), rhs.end());
 }
 
 template<typename T, typename A, std::size_t N>
@@ -8057,8 +8558,8 @@ template<typename T, typename A, std::size_t N>
 auto operator<=>(const vector<T, A>&       lhs,
                  const small_vector<T, N>& rhs) noexcept
 {
-    return std::lexicographical_compare_three_way(
-                lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+    return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(),
+                                                  rhs.begin(), rhs.end());
 }
 
 } // namespace irt

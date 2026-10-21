@@ -429,7 +429,7 @@ void hierarchical_state_machine::state_action::set_setport(variable v1) noexcept
     debug::ensure(is_port(v1));
 
     if (is_port(v1))
-        do_affect(hsm_t::action_type::set, v1);
+        *this = do_affect(hsm_t::action_type::set, v1);
 }
 
 void hierarchical_state_machine::state_action::set_unsetport(
@@ -438,7 +438,7 @@ void hierarchical_state_machine::state_action::set_unsetport(
     debug::ensure(is_port(v1));
 
     if (is_port(v1))
-        do_affect(hsm_t::action_type::unset, v1);
+        *this = do_affect(hsm_t::action_type::unset, v1);
 }
 
 void hierarchical_state_machine::state_action::set_affect(variable v1,
@@ -753,8 +753,8 @@ std::pair<std::bitset<4>, std::bitset<4>>
 hierarchical_state_machine::condition_action::get_bitset() const noexcept
 {
     return std::make_pair<std::bitset<4>, std::bitset<4>>(
-      std::bitset<4>(constant.u >> 4 & 0b111),
-      std::bitset<4>(constant.u & 0b111));
+      std::bitset<4>(constant.u >> 4 & 0b1111),
+      std::bitset<4>(constant.u & 0b1111));
 }
 
 void hierarchical_state_machine::condition_action::set_timer() noexcept
@@ -836,80 +836,80 @@ void hierarchical_state_machine::condition_action::set_greater(
   variable v1,
   variable v2) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, v2);
+    *this = do_affect(hsm_t::condition_type::greater, v1, v2);
 }
 
 void hierarchical_state_machine::condition_action::set_greater(variable v1,
                                                                i32 i) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, i);
+    *this = do_affect(hsm_t::condition_type::greater, v1, i);
 }
 
 void hierarchical_state_machine::condition_action::set_greater(variable v1,
                                                                float f) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, f);
+    *this = do_affect(hsm_t::condition_type::greater, v1, f);
 }
 
 void hierarchical_state_machine::condition_action::set_greater_equal(
   variable v1,
   variable v2) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, v2);
+    *this = do_affect(hsm_t::condition_type::greater_equal, v1, v2);
 }
 
 void hierarchical_state_machine::condition_action::set_greater_equal(
   variable v1,
   i32      i) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, i);
+    *this = do_affect(hsm_t::condition_type::greater_equal, v1, i);
 }
 
 void hierarchical_state_machine::condition_action::set_greater_equal(
   variable v1,
   float    f) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, f);
+    *this = do_affect(hsm_t::condition_type::greater_equal, v1, f);
 }
 
 void hierarchical_state_machine::condition_action::set_less(
   variable v1,
   variable v2) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, v2);
+    *this = do_affect(hsm_t::condition_type::less, v1, v2);
 }
 
 void hierarchical_state_machine::condition_action::set_less(variable v1,
                                                             i32      i) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, i);
+    *this = do_affect(hsm_t::condition_type::less, v1, i);
 }
 
 void hierarchical_state_machine::condition_action::set_less(variable v1,
                                                             float    f) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::equal_to, v1, f);
+    *this = do_affect(hsm_t::condition_type::less, v1, f);
 }
 
 void hierarchical_state_machine::condition_action::set_less_equal(
   variable v1,
   variable v2) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, v2);
+    *this = do_affect(hsm_t::condition_type::less_equal, v1, v2);
 }
 
 void hierarchical_state_machine::condition_action::set_less_equal(
   variable v1,
   i32      i) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, i);
+    *this = do_affect(hsm_t::condition_type::less_equal, v1, i);
 }
 
 void hierarchical_state_machine::condition_action::set_less_equal(
   variable v1,
   float    f) noexcept
 {
-    *this = do_affect(hsm_t::condition_type::not_equal_to, v1, f);
+    *this = do_affect(hsm_t::condition_type::less_equal, v1, f);
 }
 
 void hierarchical_state_machine::condition_action::clear() noexcept
@@ -921,7 +921,7 @@ status hierarchical_state_machine::start(execution&       exec,
                                          external_source& srcs) noexcept
 {
     if (states.empty() or top_state == invalid_state_id)
-        return new_error(simulation_errc::hsm_top_state_error);
+        return make_error(simulation_errc::hsm_top_state_error);
 
     exec.current_state = top_state;
     exec.next_state    = invalid_state_id;
@@ -976,7 +976,7 @@ status hierarchical_state_machine::on_enter_sub_state(
   external_source& srcs) noexcept
 {
     if (exec.next_state == invalid_state_id)
-        return new_error(simulation_errc::hsm_next_state_error);
+        return make_error(simulation_errc::hsm_next_state_error);
 
     small_vector<state_id, max_number_of_state> entry_path;
     for (state_id sid = exec.next_state; sid != exec.current_state;) {
@@ -986,7 +986,7 @@ status hierarchical_state_machine::on_enter_sub_state(
         sid = state.super_id;
 
         if (sid == invalid_state_id)
-            return new_error(simulation_errc::hsm_next_state_error);
+            return make_error(simulation_errc::hsm_next_state_error);
     }
 
     while (!entry_path.empty()) {
@@ -1047,7 +1047,7 @@ status hierarchical_state_machine::set_state(state_id id,
 {
     if (super_id == invalid_state_id) {
         if (top_state != invalid_state_id and top_state != id)
-            return new_error(simulation_errc::hsm_top_state_error);
+            return make_error(simulation_errc::hsm_top_state_error);
         top_state = id;
     }
 
@@ -1056,7 +1056,7 @@ status hierarchical_state_machine::set_state(state_id id,
 
     if (!((super_id == invalid_state_id ||
            states[super_id].sub_id != invalid_state_id)))
-        return new_error(simulation_errc::hsm_top_state_error);
+        return make_error(simulation_errc::hsm_top_state_error);
 
     return success();
 }
@@ -1191,14 +1191,16 @@ void hierarchical_state_machine::affect_action(const state_action& action,
 
     case action_type::set: {
         debug::ensure(1 <= ordinal(action.var1) and ordinal(action.var1) <= 4);
-        const u8 port = ordinal(action.var1) - 1u;
-        e.values |= static_cast<u8>(1u << port);
+        // @c execution::values stores the port bits in big endian order:
+        // bit 3 is @c variable::port_0 and bit 0 is @c variable::port_3.
+        const u8 bit = 4u - ordinal(action.var1);
+        e.values |= static_cast<u8>(1u << bit);
     } break;
 
     case action_type::unset: {
         debug::ensure(1 <= ordinal(action.var1) and ordinal(action.var1) <= 4);
-        const u8 port = ordinal(action.var1) - 1u;
-        e.values &= static_cast<u8>(~(1u << port));
+        const u8 bit = 4u - ordinal(action.var1);
+        e.values &= static_cast<u8>(~(1u << bit));
     } break;
 
     case action_type::reset:
@@ -1255,8 +1257,8 @@ void hierarchical_state_machine::affect_action(const state_action& action,
         case variable::hsm_constant_5:
         case variable::hsm_constant_6:
         case variable::hsm_constant_7:
-            e.push_message(constants[ordinal(action.var2)] -
-                             ordinal(variable::hsm_constant_0),
+            e.push_message(constants[ordinal(action.var2) -
+                                     ordinal(variable::hsm_constant_0)],
                            port);
             break;
         default:

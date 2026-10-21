@@ -306,36 +306,34 @@ void graph_editor::draw_graph(const graph&          g,
         if (d.nodes.empty())
             return;
 
-        obs.values.read([&](const auto& v, const auto /*version*/) noexcept {
-            if (d.nodes.size() != v.size())
-                return;
+        const auto span = obs.get_values();
 
-            for (const auto id : g.nodes) {
-                const auto i      = get_index(id);
-                const auto area   = g.node_areas[i];
-                const auto [x, y] = d.nodes[i];
+        if (span.empty())
+            return;
 
-                const ImVec2 p_min(origin.x + (x * zoom),
-                                   origin.y + (y * zoom));
+        for (const auto id : g.nodes) {
+            const auto i      = get_index(id);
+            const auto area   = g.node_areas[i];
+            const auto [x, y] = d.nodes[i];
 
-                const ImVec2 p_max(origin.x + ((x + area) * zoom),
-                                   origin.y + ((y + area) * zoom));
+            const ImVec2 p_min(origin.x + (x * zoom), origin.y + (y * zoom));
 
-                debug::ensure(i < v.size());
+            const ImVec2 p_max(origin.x + ((x + area) * zoom),
+                               origin.y + ((y + area) * zoom));
 
-                const auto m = static_cast<double>(obs.scale_min);
-                const auto M = static_cast<double>(obs.scale_max);
-                const auto d = std::abs(m) + std::abs(M);
-                const auto o = v[i] + m;
-                const auto t = o / d;
-                debug::ensure(0.0 <= t and t <= 1.0);
+            debug::ensure(i < span.size());
 
-                draw_list->AddRectFilled(p_min,
-                                         p_max,
-                                         ImPlot::SampleColormapU32(
-                                           static_cast<float>(t), IMPLOT_AUTO));
-            }
-        });
+            const auto m = static_cast<double>(obs.scale_min);
+            const auto M = static_cast<double>(obs.scale_max);
+            const auto d = std::abs(m) + std::abs(M);
+            const auto o = span[i] + m;
+            const auto t = std::clamp(o / d, 0.0, 1.0);
+
+            draw_list->AddRectFilled(
+              p_min,
+              p_max,
+              ImPlot::SampleColormapU32(static_cast<float>(t), IMPLOT_AUTO));
+        }
 
         for (const auto id : g.edges) {
             const auto& [from, to] = g.edges_nodes[id];
@@ -758,6 +756,8 @@ auto graph_editor::show(const char*     name,
                        : show_result_type::request_to_close;
     }
 
+    obs.update(ed.pj);
+
     return app.mod.ids.read(
       [&](const auto& ids, auto) noexcept -> graph_editor::show_result_type {
           debug::ensure(ids.exists(tn.id));
@@ -860,8 +860,8 @@ void graph_editor::show(application&    app,
             return;
 
         const auto& graph     = ids.graph_components.get(compo.id.graph_id).g;
-        const auto canvas_p0 = ImGui::GetCursorScreenPos();
-        canvas_sz            = ImGui::GetContentRegionAvail();
+        const auto  canvas_p0 = ImGui::GetCursorScreenPos();
+        canvas_sz             = ImGui::GetContentRegionAvail();
 
         if (canvas_sz.x < 50.0f)
             canvas_sz.x = 50.0f;
@@ -917,6 +917,8 @@ void graph_editor::show(application&    app,
         ImGui::EndChild();
         return;
     }
+
+    obs.update(ed.pj);
 
     app.mod.ids.read([&](const auto& ids, auto) noexcept {
         debug::ensure(ids.exists(tn.id));

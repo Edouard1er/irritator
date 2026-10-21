@@ -6,6 +6,7 @@
 #define ORG_VLEPROJECT_IRRITATOR_APP_INTERNAL_2020
 
 #include <irritator/core.hpp>
+#include <irritator/ext.hpp>
 #include <irritator/format.hpp>
 #include <irritator/io.hpp>
 
@@ -126,14 +127,21 @@ bool InputSmallString(const char*                label,
                       ImGuiInputTextCallback     callback  = nullptr,
                       void*                      user_data = nullptr)
 {
-    const bool ret = ImGui::InputText(label,
-                                      string.begin(),
-                                      static_cast<size_t>(string.capacity()),
-                                      flags,
-                                      callback,
-                                      user_data);
+    irt::small_string<Length> internal = string;
 
-    string.resize(static_cast<int>(std::strlen(string.begin())));
+    const auto ret = ImGui::InputText(label, internal.begin(),
+                                      static_cast<size_t>(internal.capacity()),
+                                      flags, callback, user_data);
+
+    if (ret) {
+        const auto internal_length = std::strlen(internal.c_str());
+
+        string.resize_and_overwrite(internal_length,
+                                    [&](char* buf, std::size_t n) noexcept {
+                                        std::strncpy(buf, internal.c_str(), n);
+                                        return n;
+                                    });
+    }
 
     return ret;
 }
@@ -143,19 +151,97 @@ bool InputFilteredString(const char*                label,
                          irt::small_string<Length>& string,
                          ImGuiInputTextFlags        flags = 0)
 {
+    irt::small_string<Length> internal = string;
+
     flags |= ImGuiInputTextFlags_CallbackCharFilter |
              ImGuiInputTextFlags_EnterReturnsTrue;
 
-    const bool ret = ImGui::InputText(label,
-                                      string.begin(),
-                                      static_cast<size_t>(string.capacity()),
-                                      flags,
-                                      irt::portable_filename_dirname_callback,
-                                      nullptr);
+    const auto ret = ImGui::InputText(
+      label, internal.begin(), static_cast<size_t>(internal.capacity()), flags,
+      irt::portable_filename_dirname_callback, nullptr);
 
-    string.resize(static_cast<int>(std::strlen(string.begin())));
+    if (ret) {
+        const auto internal_length = std::strlen(internal.c_str());
+
+        string.resize_and_overwrite(internal_length,
+                                    [&](char* buf, std::size_t n) noexcept {
+                                        std::strncpy(buf, internal.c_str(), n);
+                                        return n;
+                                    });
+    }
 
     return ret;
+}
+
+inline bool InputFilename(const char*         label,
+                          irt::file_path_str& filename,
+                          irt::file_type      type) noexcept
+{
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackCharFilter |
+                                ImGuiInputTextFlags_EnterReturnsTrue;
+
+    constexpr auto capacity = irt::file_path_str::capacity();
+    auto           buffer   = irt::small_string<capacity>{};
+
+    if (not ImGui::InputText(label, buffer.data(), buffer.capacity(), flags,
+                             irt::portable_filename_dirname_callback, nullptr))
+        return false;
+
+    const auto buffer_len = std::strlen(buffer.c_str());
+    if (buffer_len == 0 or buffer_len > irt::file_path_str::capacity())
+        return false;
+
+    irt::path internal(std::string_view{ std::data(buffer), buffer_len });
+
+    internal.resize_and_overwrite(buffer_len,
+                                  [&](char* buf, std::size_t n) noexcept {
+                                      std::strncpy(buf, buffer.c_str(), n);
+                                      return n;
+                                  });
+
+    const auto ext = internal.has_extension();
+    if (ext != type)
+        internal.replace_extension(type);
+
+    if (internal.size() > filename.capacity())
+        return false;
+
+    filename = internal.sv();
+
+    return true;
+}
+
+inline bool InputDirname(const char*              label,
+                         irt::directory_path_str& dirname) noexcept
+{
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_CallbackCharFilter |
+                                ImGuiInputTextFlags_EnterReturnsTrue;
+
+    constexpr auto capacity = irt::directory_path_str::capacity();
+    auto           buffer   = irt::small_string<capacity>{};
+
+    if (not ImGui::InputText(label, buffer.data(), buffer.capacity(), flags,
+                             irt::portable_filename_dirname_callback, nullptr))
+        return false;
+
+    const auto buffer_len = std::strlen(buffer.c_str());
+    if (buffer_len == 0 or buffer_len > irt::directory_path_str::capacity())
+        return false;
+
+    irt::path internal(std::string_view{ std::data(buffer), buffer_len });
+
+    internal.resize_and_overwrite(buffer_len,
+                                  [&](char* buf, std::size_t n) noexcept {
+                                      std::strncpy(buf, buffer.c_str(), n);
+                                      return n;
+                                  });
+
+    if (internal.size() > dirname.capacity())
+        return false;
+
+    dirname = internal.sv();
+
+    return true;
 }
 
 template<std::size_t Length>
@@ -166,18 +252,19 @@ bool InputSmallStringMultiline(const char*                label,
                                ImGuiInputTextCallback     callback  = nullptr,
                                void*                      user_data = nullptr)
 {
-    const bool ret =
-      ImGui::InputTextMultiline(label,
-                                string.begin(),
-                                static_cast<size_t>(string.capacity()),
-                                size,
-                                flags,
-                                callback,
-                                user_data);
+    auto buffer = string;
 
-    string.resize(static_cast<int>(std::strlen(string.begin())));
+    if (not ImGui::InputTextMultiline(label, buffer.data(), buffer.capacity(),
+                                      size, flags, callback, user_data))
+        return false;
 
-    return ret;
+    string.resize_and_overwrite(std::strlen(buffer.c_str()),
+                                [&](char* buf, std::size_t n) noexcept {
+                                    std::strncpy(buf, buffer.c_str(), n);
+                                    return n;
+                                });
+
+    return true;
 }
 
 template<typename... Args>
@@ -185,31 +272,18 @@ inline void TextFormat(fmt::format_string<Args...> fmt_str,
                        Args&&... args) noexcept
 {
     thread_local ::irt::small_string<255> buffer;
-
-    auto result = fmt::vformat_to_n(buffer.data(),
-                                    static_cast<std::size_t>(buffer.capacity()),
-                                    fmt_str,
-                                    fmt::make_format_args(args...));
-
-    buffer.resize(static_cast<typename ::irt::small_string<255>::index_type>(
-      std::min<std::size_t>(result.size, buffer.capacity())));
+    format(buffer, fmt_str, std::forward<Args>(args)...);
 
     ImGui::TextUnformatted(buffer.c_str());
 }
 
 template<typename... Args>
 void TextFormatDisabled(fmt::format_string<Args...> fmt_str,
-                        const Args&... args) noexcept
+                        Args&&... args) noexcept
 {
     thread_local ::irt::small_string<255> buffer;
 
-    auto result = fmt::vformat_to_n(buffer.data(),
-                                    static_cast<std::size_t>(buffer.capacity()),
-                                    fmt_str,
-                                    fmt::make_format_args(args...));
-
-    buffer.resize(static_cast<typename ::irt::small_string<255>::index_type>(
-      std::min<std::size_t>(result.size, buffer.capacity())));
+    format(buffer, fmt_str, std::forward<Args>(args)...);
 
     ImGui::PushStyleColor(ImGuiCol_Text,
                           ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
@@ -224,13 +298,7 @@ inline void LabelFormat(const char*                 label,
 {
     thread_local ::irt::small_string<255> buffer;
 
-    auto result = fmt::vformat_to_n(buffer.data(),
-                                    static_cast<std::size_t>(buffer.capacity()),
-                                    fmt_str,
-                                    fmt::make_format_args(args...));
-
-    buffer.resize(static_cast<typename ::irt::small_string<255>::index_type>(
-      std::min<std::size_t>(result.size, buffer.capacity())));
+    format(buffer, fmt_str, std::forward<Args>(args)...);
 
     ImGui::LabelText(label, "%s", buffer.c_str());
 }
@@ -322,6 +390,34 @@ inline auto ComputeButtonSize(int button_number) noexcept -> ImVec2
       (content_width - (nb_space * item_spacing)) / static_cast<float>(button);
 
     return ImVec2(button_width, 0.f);
+}
+
+inline auto InputFraction(const char* label, irt::fraction* f) noexcept
+{
+    int vec[2] = { f->numerator(), f->denominator() };
+
+    if (ImGui::InputInt2(label, &vec[0])) {
+        if (vec[0] > 0 and vec[1] > 0) {
+            *f = irt::fraction{ vec[0], vec[1] };
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline auto DragFraction(const char* label, irt::fraction* f) noexcept
+{
+    int vec[2] = { f->numerator(), f->denominator() };
+
+    if (ImGui::DragScalarN(label, ImGuiDataType_S32, &vec[0], 2)) {
+        if (vec[0] > 0 and vec[1] > 0) {
+            *f = irt::fraction{ vec[0], vec[1] };
+            return true;
+        }
+    }
+
+    return false;
 }
 
 } // namespace ImGui

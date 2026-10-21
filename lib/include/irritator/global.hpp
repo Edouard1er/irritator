@@ -5,10 +5,8 @@
 #ifndef ORG_VLEPROJECT_IRRITATOR_GLOBAL_HPP
 #define ORG_VLEPROJECT_IRRITATOR_GLOBAL_HPP
 
-#include <irritator/container.hpp>
-#include <irritator/error.hpp>
+#include <irritator/core.hpp>
 
-#include <filesystem>
 #include <span>
 
 namespace irt {
@@ -38,18 +36,6 @@ enum class style_color : u8 {
     COUNT,
 };
 
-//! Enumeration class used everywhere in irritator to produce log data.
-enum class log_level : u8 {
-    emergency,
-    alert,
-    critical,
-    error,
-    warning,
-    notice,
-    info,
-    debug
-};
-
 struct theme_colors {
     using color_type = std::array<float, 4>;
 
@@ -76,11 +62,15 @@ struct theme_colors {
 };
 
 struct recorded_paths {
-    id_array<recorded_path_id> ids;
+    using name_str = small_string<63>;
 
-    vector<small_string<256 * 16 - 2>> paths;
-    vector<small_string<31>>           names;
-    vector<int>                        priorities;
+    id_data_array<void,
+                  recorded_path_id,
+                  allocator<new_delete_memory_resource>,
+                  path,
+                  name_str,
+                  i8>
+      recs;
 
     vector<recorded_path_id> sort_by_priorities() const noexcept;
 };
@@ -89,142 +79,9 @@ struct variables {
     shared_buffer<recorded_paths> rec_paths;
     shared_buffer<theme_colors>   colors;
 
-    std::atomic<int>       theme    = 0;
-    std::atomic<log_level> loglevel = log_level::info;
-};
-
-/**
- * @brief A thread safe log handler. A log entry is have a @a log_level, a
- * tittle, a description and a creation time since epoch.
- *
- * Two containers are used, a @a id_data_array to stores data and a @a
- * ring_buffer to build a circular buffer to keep order of creation.
- *
- * Several thread can read the containers at the same time but, the registration
- * of new entries is done with a unique thread at a time.
- */
-class journal_handler
-{
-public:
-    using reserve_constraint = constrained_value<u16, 4u, UINT16_MAX>;
-
-    using title = small_string<127>;
-    using descr = small_string<1022>;
-
-    /**
-     * @brief Reserve memory for both @a ring_buffer and @a id_data_array for 32
-     * entries.
-     */
-    journal_handler() noexcept;
-
-    explicit journal_handler(reserve_constraint len) noexcept;
-
-    /**
-     * @brief Wait lock and give access to log and ring data then clear the
-     * structure
-     * @tparam Function Any callable.
-     * @tparam ...Args Any type to argument of @a Function.
-     * @param fn The callable.
-     * @param ...args The argument of the @a Function or nothing.
-     */
-    template<typename Function, typename... Args>
-    void flush(Function&& fn, Args&&... args) noexcept
-    {
-        m_logs.write([&](auto& buffer) {
-            std::invoke(std::forward<Function>(fn),
-                        buffer.ring,
-                        buffer.ids,
-                        buffer.titles,
-                        buffer.descriptions,
-                        std::forward<Args>(args)...);
-            buffer.ring.clear();
-            buffer.ids.clear();
-        });
-    }
-
-    template<typename Function, typename... Args>
-    auto read(Function&& fn, Args&&... args) const noexcept
-      -> decltype(std::invoke(
-        std::forward<Function>(fn),
-        std::declval<ring_buffer<u16>&>(),
-        std::declval<pool<std::pair<u64, log_level>, u16>&>(),
-        std::declval<vector<title>&>(),
-        std::declval<vector<descr>&>(),
-        std::forward<Args>(args)...))
-    {
-        if constexpr (std::is_void_v<decltype(std::invoke(
-                        std::forward<Function>(fn),
-                        std::declval<ring_buffer<u16>&>(),
-                        std::declval<pool<std::pair<u64, log_level>, u16>&>(),
-                        std::declval<vector<title>&>(),
-                        std::declval<vector<descr>&>(),
-                        std::forward<Args>(args)...))>) {
-            m_logs.read([&](const auto& buffer, const auto /*version*/) {
-                std::invoke(std::forward<Function>(fn),
-                            buffer.ring,
-                            buffer.ids,
-                            buffer.titles,
-                            buffer.descriptions,
-                            std::forward<Args>(args)...);
-            });
-        } else {
-            return m_logs.read([&](const auto& buffer, const auto /*version*/) {
-                return std::invoke(std::forward<Function>(fn),
-                                   buffer.ring,
-                                   buffer.ids,
-                                   buffer.titles,
-                                   buffer.descriptions,
-                                   std::forward<Args>(args)...);
-            });
-        }
-    }
-
-    template<typename Function, typename... Args>
-    void push(log_level level, Function&& fn, Args&&... args) noexcept
-    {
-        m_logs.write([&](auto& buffer) {
-            if (not buffer.ids.can_alloc(1)) {
-                const auto id = buffer.ring.tail();
-                buffer.ids.free(*id);
-                buffer.ring.pop_tail();
-            }
-
-            const auto id =
-              buffer.ids.alloc(get_tick_count_in_milliseconds(), level);
-            buffer.titles[id].clear();
-            buffer.descriptions[id].clear();
-
-            std::invoke(std::forward<Function>(fn),
-                        buffer.titles[id],
-                        buffer.descriptions[id],
-                        std::forward<Args>(args)...);
-
-            buffer.ring.push_head(id);
-        });
-    }
-
-    /** Delete from @c m_logs all message with a creation time since epoch
-     * greater than @a duration. */
-    void cleanup_expired(const u64 duration) noexcept;
-
-    void clear() noexcept;
-
-    unsigned capacity() const noexcept;
-    unsigned size() const noexcept;
-    int      ssize() const noexcept;
-
-    static u64 get_tick_count_in_milliseconds() noexcept;
-    static u64 get_elapsed_time(const u64 from) noexcept;
-
-private:
-    struct data {
-        ring_buffer<u16>                     ring;
-        pool<std::pair<u64, log_level>, u16> ids;
-        vector<title>                        titles;
-        vector<descr>                        descriptions;
-    };
-
-    shared_buffer<data> m_logs;
+    std::atomic<i64>       text_file_viewer_max_file_size = 1024 * 1024;
+    std::atomic<int>       theme                          = 0;
+    std::atomic<log_level> loglevel                       = log_level::info;
 };
 
 class config_manager
@@ -237,7 +94,7 @@ public:
     /** Build a @a variables object from the file @a config_path. If it
        fail, the default object from static data is build. Priority is given
        to @a config_path data. */
-    explicit config_manager(const std::string& config_path) noexcept;
+    explicit config_manager(const path& config_path) noexcept;
 
     config_manager(config_manager&&) noexcept            = delete;
     config_manager& operator=(config_manager&&) noexcept = delete;
@@ -253,7 +110,7 @@ private:
      * std::string into small_string or vector<char> with cold memory
      * allocator.
      */
-    const std::string m_path;
+    const path m_path;
 };
 
 /** Retrieves the path of the file @a "irritator.ini" from the directoy @a
@@ -263,7 +120,7 @@ private:
  * current directory.
  *  - Win32: Use the local application data directory.
  */
-std::string get_config_home(bool log = false) noexcept;
+path get_config_home(bool log = false) noexcept;
 
 /** Retrives the home directory of the current user:
  * - unix/linux : Get the user home directory from the @a $HOME environment
@@ -272,15 +129,15 @@ std::string get_config_home(bool log = false) noexcept;
  * - win32: Use the @a SHGetKnownFolderPath to retrieves the path of the
  * user directory otherwise use the current directory.
  */
-expected<std::filesystem::path> get_home_directory() noexcept;
+expected<path> get_home_directory() noexcept;
 
 /** Retrieves the path of the application binary (the gui, the CLI or unit
  * test) running this code if it exists. */
-expected<std::filesystem::path> get_executable_directory() noexcept;
+expected<path> get_executable_directory() noexcept;
 
 /** Retrieves the path `get_executable_directory/irritator-0.1/components`
  * if it exists. */
-expected<std::filesystem::path> get_system_component_dir() noexcept;
+expected<path> get_system_component_dir() noexcept;
 
 /** Retrieves the path
  * `CMAKE_INSTALL_FULL_DATAROOTDIR/irritator-0.1/components` if it exists.
@@ -289,13 +146,13 @@ expected<std::filesystem::path> get_system_component_dir() noexcept;
  * directory but, we can use also the executable path to determine the
  * install directory.
  */
-expected<std::filesystem::path> get_system_prefix_component_dir() noexcept;
+expected<path> get_system_prefix_component_dir() noexcept;
 
 /** Retrieves the path `$HOME/irritator-0.1/components` if it exists. */
-expected<std::filesystem::path> get_default_user_component_dir() noexcept;
+expected<path> get_default_user_component_dir() noexcept;
 
 /** Retrieves the path `$HOME/irritator-0.1/settings.ini` if it exists. */
-expected<std::filesystem::path> get_settings_filename() noexcept;
+expected<path> get_settings_filename() noexcept;
 
 } // namespace irt
 

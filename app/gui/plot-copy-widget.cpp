@@ -10,25 +10,32 @@ namespace irt {
 
 static void plot(const plot_copy& p) noexcept
 {
-    if (p.linear_outputs.ssize() <= 0)
+    if (p.linear_outputs.empty())
         return;
 
     switch (p.plot_type) {
-    case simulation_plot_type::plotlines:
-        ImPlot::PlotLineG(
-          p.name.c_str(),
-          ring_buffer_getter,
-          const_cast<void*>(reinterpret_cast<const void*>(&p.linear_outputs)),
-          p.linear_outputs.ssize());
-        break;
+    case simulation_plot_type::plotlines: {
+        ImPlotSpec spec;
+        spec.LineWeight = 1.f;
+        spec.MarkerSize = 6.f;
+        spec.Stride     = sizeof(resampled_sample);
 
-    case simulation_plot_type::plotscatters:
-        ImPlot::PlotScatterG(
-          p.name.c_str(),
-          ring_buffer_getter,
-          const_cast<void*>(reinterpret_cast<const void*>(&p.linear_outputs)),
-          p.linear_outputs.ssize());
-        break;
+        ImPlot::PlotLine(p.name.c_str(), &p.linear_outputs[0].t,
+                         &p.linear_outputs[0].value,
+                         static_cast<int>(p.linear_outputs.size()), spec);
+
+    } break;
+
+    case simulation_plot_type::plotscatters: {
+        ImPlotSpec spec;
+        spec.LineWeight = 1.f;
+        spec.MarkerSize = 6.f;
+        spec.Stride     = sizeof(resampled_sample);
+
+        ImPlot::PlotScatter(p.name.c_str(), &p.linear_outputs[0].t,
+                            &p.linear_outputs[0].value,
+                            static_cast<int>(p.linear_outputs.size()), spec);
+    } break;
 
     default:
         break;
@@ -42,16 +49,12 @@ void plot_copy_widget::show(const char* name) noexcept
     ImGui::PushID(this);
 
     if (ImPlot::BeginPlot(name, ImVec2(-1, -1))) {
-        ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 1.f);
-        ImPlot::PushStyleVar(ImPlotStyleVar_MarkerSize, 1.f);
-
         ImPlot::SetupAxes(
           nullptr, nullptr, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
 
         for_each_data(app.copy_obs,
                       [&](auto& plot_copy) noexcept { plot(plot_copy); });
 
-        ImPlot::PopStyleVar(2);
         ImPlot::EndPlot();
     }
 

@@ -20,79 +20,78 @@ void plot_observation_widget::show(project& pj) noexcept
         format(name, "{}##{}", v_obs.name.sv(), idx);
 
         if (ImPlot::BeginPlot(name.c_str(), ImVec2(-1, -1))) {
-            ImPlot::PushStyleVar(ImPlotStyleVar_LineWeight, 1.f);
-            ImPlot::PushStyleVar(ImPlotStyleVar_MarkerSize, 1.f);
+            ImPlotSpec spec;
+            spec.LineWeight = 1.f;
+            spec.MarkerSize = 6.f;
+            spec.Stride     = sizeof(resampled_sample);
 
             ImPlot::SetupLegend(ImPlotLocation_NorthWest);
             ImPlot::SetupAxisLimits(
               ImAxis_X1, pj.sim.limits.begin(), pj.sim.limits.end());
             ImPlot::SetupFinish();
 
-            v_obs.for_each([&](const auto id) noexcept {
-                const auto idx    = get_index(id);
-                const auto obs_id = v_obs.get_obs_ids()[idx];
+            for (const auto id : v_obs.subs) {
+                const auto opt = v_obs.subs.template get<plot_type_options>(id);
+                const auto obs_id = v_obs.subs.template get<observer_id>(id);
                 auto*      obs    = pj.sim.observers.try_to_get(obs_id);
 
-                obs->linearized_buffer.read(
-                  [&](auto& lbuf, const auto /*version*/) noexcept {
-                      switch (v_obs.get_options()[idx]) {
-                      case variable_observer::type_options::line:
-                          ImPlot::PlotLineG(
-                            name.c_str(),
-                            ring_buffer_getter,
-                            const_cast<void*>(
-                              reinterpret_cast<const void*>(&lbuf)),
-                            lbuf.ssize());
+                if (not obs)
+                    continue;
+
+                obs->read_history(
+                  [&](const auto& h, const auto /*version*/) noexcept {
+                      switch (opt) {
+                      case plot_type_options::line:
+                          ImPlot::PlotLine(name.c_str(), &h[0].t, &h[0].value,
+                                           static_cast<int>(h.size()), spec);
                           break;
 
-                      case variable_observer::type_options::dash:
-                          ImPlot::PlotScatterG(
-                            name.c_str(),
-                            ring_buffer_getter,
-                            const_cast<void*>(
-                              reinterpret_cast<const void*>(&lbuf)),
-                            lbuf.ssize());
+                      case plot_type_options::dash:
+                          ImPlot::PlotScatter(name.c_str(), &h[0].t,
+                                              &h[0].value,
+                                              static_cast<int>(h.size()), spec);
                           break;
 
                       default:
                           unreachable();
                       }
                   });
-            });
+            }
 
-            ImPlot::PopStyleVar(2);
             ImPlot::EndPlot();
         }
     }
 }
 
-static void show_discrete_plot_line(
-  const variable_observer::type_options options,
-  const name_str&                       name,
-  const observer&                       obs) noexcept
+static void show_discrete_plot_line(const plot_type_options options,
+                                    const char*             name,
+                                    const observer&         obs) noexcept
 {
     switch (options) {
-    case variable_observer::type_options::line:
-        obs.linearized_buffer.read(
+    case plot_type_options::line:
+        obs.read_history(
           [](const auto& lbuf, const auto /*version*/, const auto& name) {
-              ImPlot::PlotStairsG(
-                name.c_str(),
-                ring_buffer_getter,
-                const_cast<void*>(reinterpret_cast<const void*>(&lbuf)),
-                lbuf.ssize());
+              ImPlotSpec spec;
+              spec.LineWeight = 1.f;
+              spec.MarkerSize = 6.f;
+              spec.Stride     = sizeof(resampled_sample);
+
+              ImPlot::PlotStairs(name, &lbuf[0].t, &lbuf[0].value,
+                                 static_cast<int>(lbuf.size()), spec);
           },
           name);
         break;
 
-    case variable_observer::type_options::dash:
-        obs.linearized_buffer.read(
+    case plot_type_options::dash:
+        obs.read_history(
           [](const auto& lbuf, const auto /*version*/, const auto& name) {
-              ImPlot::PlotBarsG(
-                name.c_str(),
-                ring_buffer_getter,
-                const_cast<void*>(reinterpret_cast<const void*>(&lbuf)),
-                lbuf.ssize(),
-                1.5);
+              ImPlotSpec spec;
+              spec.LineWeight = 1.f;
+              spec.MarkerSize = 6.f;
+              spec.Stride     = sizeof(resampled_sample);
+
+              ImPlot::PlotBars(name, &lbuf[0].t, &lbuf[0].value,
+                               static_cast<int>(lbuf.ssize()), 1.5, spec);
           },
           name);
         break;
@@ -102,58 +101,50 @@ static void show_discrete_plot_line(
     }
 }
 
-inline static auto local_ring_buffer_getter(int idx, void* data) noexcept
-  -> ImPlotPoint
+static void show_continuous_plot_line(const plot_type_options options,
+                                      const char*             name,
+                                      const observer&         obs) noexcept
 {
-    const auto* lbuf   = reinterpret_cast<ring_buffer<observation>*>(data);
-    const auto  index  = lbuf->index_from_begin(idx);
-    const auto& values = (*lbuf)[index];
+    obs.read_history([&](const auto& lbuf, const auto /*version*/) noexcept {
+        switch (options) {
+        case plot_type_options::line: {
+            ImPlotSpec spec;
+            spec.LineWeight = 1.f;
+            spec.MarkerSize = 6.f;
+            spec.Stride     = sizeof(resampled_sample);
 
-    return ImPlotPoint(values.x, values.y);
-};
+            ImPlot::PlotLine(name, &lbuf[0].t, &lbuf[0].value,
+                             static_cast<int>(lbuf.size()), spec);
 
-static void show_continuous_plot_line(
-  const variable_observer::type_options options,
-  const name_str&                       name,
-  const observer&                       obs) noexcept
-{
-    obs.linearized_buffer.try_read(
-      [&](const auto& lbuf, const auto /*version*/) noexcept {
-          switch (options) {
-          case variable_observer::type_options::line:
-              ImPlot::PlotLineG(
-                name.c_str(),
-                local_ring_buffer_getter,
-                const_cast<void*>(reinterpret_cast<const void*>(&lbuf)),
-                lbuf.ssize());
-              break;
+        } break;
 
-          case variable_observer::type_options::dash:
-              ImPlot::PlotScatterG(
-                name.c_str(),
-                local_ring_buffer_getter,
-                const_cast<void*>(reinterpret_cast<const void*>(&lbuf)),
-                lbuf.ssize());
-              break;
+        case plot_type_options::dash: {
+            ImPlotSpec spec;
+            spec.LineWeight = 1.f;
+            spec.MarkerSize = 6.f;
+            spec.Stride     = sizeof(resampled_sample);
 
-          default:
-              break;
-          }
-      });
+            ImPlot::PlotScatter(name, &lbuf[0].t, &lbuf[0].value,
+                                static_cast<int>(lbuf.size()), spec);
+
+        } break;
+
+        default:
+            break;
+        }
+    });
 }
 
-void plot_observation_widget::show_plot_line(
-  const observer&                       obs,
-  const variable_observer::type_options options,
-  const name_str&                       name) noexcept
+void plot_observation_widget::show_plot_line(const observer&         obs,
+                                             const plot_type_options options,
+                                             const char* name) noexcept
 {
     ImGui::PushID(&obs);
 
-    if (obs.type == interpolate_type::none) {
+    if (options == plot_type_options::dash)
         show_discrete_plot_line(options, name, obs);
-    } else {
+    else
         show_continuous_plot_line(options, name, obs);
-    }
 
     ImGui::PopID();
 }

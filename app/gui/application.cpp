@@ -33,7 +33,7 @@ void file_selector::combobox_reg(const file_access& fs) noexcept
 
         const registred_path* list = nullptr;
         while (fs.registred_paths.next(list)) {
-            if (list->status == registred_path::state::error)
+            if (list->flags[fs_flag::access_error])
                 continue;
 
             ImGui::PushID(list);
@@ -51,56 +51,56 @@ void file_selector::combobox_reg(const file_access& fs) noexcept
     }
 }
 
-dir_path_id get_dir_id(atomic_request_buffer<dir_path_id>& dir_ptr,
-                       const dir_path_id                   other_id) noexcept
+dir_path_id get_dir_id(std::atomic<dir_path_id>& dir_ptr,
+                       const dir_path_id         other_id) noexcept
 {
-    if (const auto dir_opt = dir_ptr.try_take(); dir_opt.has_value())
-        return *dir_opt;
-    else
-        return other_id;
+    return is_defined(dir_ptr.load()) ? dir_ptr.load() : other_id;
 }
 
-static void new_file_task(application&                         app,
-                          dir_path_id                          dir_id,
-                          file_path::file_type                 type,
-                          std::unique_ptr<directory_path_str>  filename,
-                          atomic_request_buffer<file_path_id>& file_b) noexcept
+static void new_file_task(application&                        app,
+                          dir_path_id                         dir_id,
+                          file_type                           type,
+                          std::unique_ptr<directory_path_str> filename,
+                          std::atomic<file_path_id>&          file_b) noexcept
 {
     app.add_gui_task(
       [&app, dir_id, name = std::move(filename), type, &file_b]() {
           app.mod.files.write([&](auto& fs) {
               auto file_id = fs.alloc_file(dir_id, name->sv(), type);
               if (is_undefined(file_id)) {
-                  app.jn.push(log_level::error, [&](auto& t, auto& /*m*/) {
-                      t = "Fail to allocate a new directory";
+                  log(log_level::error, [&](auto& m) {
+                      format(m,
+                             "irritator: fail to allocate a new file (max: {})",
+                             fs.file_paths.size());
                   });
               } else {
-                  file_b.fulfill(file_id);
+                  file_b = file_id;
               }
           });
       });
 }
 
-static void new_directory_task(
-  application&                        app,
-  registred_path_id                   reg_id,
-  std::unique_ptr<directory_path_str> dirname,
-  atomic_request_buffer<dir_path_id>& dir_b) noexcept
+static void new_directory_task(application&                        app,
+                               registred_path_id                   reg_id,
+                               std::unique_ptr<directory_path_str> dirname,
+                               std::atomic<dir_path_id>& dir_b) noexcept
 {
     app.add_gui_task([&app, reg_id, name = std::move(dirname), &dir_b]() {
         app.mod.files.write([&](auto& fs) {
             auto dir_id = fs.alloc_dir(reg_id, name->sv());
             if (is_undefined(dir_id)) {
-                app.jn.push(log_level::error, [&](auto& t, auto& /*m*/) {
-                    t = "Fail to allocate a new directory";
+                log(log_level::error, [&](auto& m) {
+                    format(
+                      m,
+                      "irritator: fail to allocate a new directory (max: {})",
+                      fs.dir_paths.size());
                 });
             } else {
                 if (not fs.create_directories(dir_id)) {
-                    app.jn.push(log_level::error, [&](auto& t, auto& m) {
-                        t = "Fail to create a new directory";
-                        format(m,
-                               "Fail to open and create directory {}",
-                               name->sv());
+                    log(log_level::error, [&](auto& m) {
+                        format(
+                          m, "irritator: fail to open and create directory {}",
+                          name->sv());
                     });
 
                     fs.dir_paths.free(dir_id);
@@ -108,7 +108,7 @@ static void new_directory_task(
                 }
             }
 
-            dir_b.fulfill(dir_id);
+            dir_b = dir_id;
         });
     });
 }
@@ -147,7 +147,7 @@ void file_selector::combobox_dir(application&       app,
     }
 
     if (is_undefined(dir_id_)) {
-        if (ImGui::InputFilteredString("New directory", buffer)) {
+        if (ImGui::InputDirname("New directory", buffer)) {
             const auto already_exist = [&]() {
                 for (const auto d_id : r.children)
                     if (const auto* dir = fs.dir_paths.try_to_get(d_id))
@@ -158,13 +158,9 @@ void file_selector::combobox_dir(application&       app,
             }();
 
             if (not already_exist) {
-                if (new_dir_.should_request()) {
-                    new_directory_task(
-                      app,
-                      reg_id_,
-                      std::make_unique<directory_path_str>(buffer),
-                      new_dir_);
-                }
+                new_directory_task(app, reg_id_,
+                                   std::make_unique<directory_path_str>(buffer),
+                                   new_dir_);
             }
         }
     }
@@ -201,18 +197,15 @@ void file_selector::combobox_dir_ro(const file_access& fs) noexcept
     }
 }
 
-file_path_id get_file_id(atomic_request_buffer<file_path_id>& file_ptr,
-                         const file_path_id                   other_id) noexcept
+file_path_id get_file_id(std::atomic<file_path_id>& file_ptr,
+                         const file_path_id         other_id) noexcept
 {
-    if (const auto file_opt = file_ptr.try_take(); file_opt.has_value())
-        return *file_opt;
-    else
-        return other_id;
+    return is_defined(file_ptr.load()) ? file_ptr.load() : other_id;
 }
 
-void file_selector::combobox_file(application&               app,
-                                  const file_access&         fs,
-                                  const file_path::file_type type) noexcept
+void file_selector::combobox_file(application&       app,
+                                  const file_access& fs,
+                                  const file_type    type) noexcept
 {
     debug::ensure(fs.registred_paths.try_to_get(reg_id_) != nullptr);
     debug::ensure(fs.dir_paths.try_to_get(dir_id_) != nullptr);
@@ -242,23 +235,15 @@ void file_selector::combobox_file(application&               app,
     }
 
     if (is_undefined(file_id_)) {
-        if (ImGui::InputFilteredString("New file", buffer)) {
-            if (not has_extension(buffer.sv(), type))
-                add_extension(buffer, type);
-
-            if (new_file_.should_request()) {
-                new_file_task(app,
-                              dir_id_,
-                              type,
-                              std::make_unique<file_path_str>(buffer),
-                              new_file_);
-            }
+        if (ImGui::InputFilename("New file", buffer, type)) {
+            new_file_task(app, dir_id_, type,
+                          std::make_unique<file_path_str>(buffer), new_file_);
         }
     }
 }
 
-void file_selector::combobox_file_ro(const file_access&         fs,
-                                     const file_path::file_type type) noexcept
+void file_selector::combobox_file_ro(const file_access& fs,
+                                     const file_type    type) noexcept
 {
     debug::ensure(fs.registred_paths.try_to_get(reg_id_) != nullptr);
     debug::ensure(fs.dir_paths.try_to_get(dir_id_) != nullptr);
@@ -286,9 +271,9 @@ void file_selector::combobox_file_ro(const file_access&         fs,
     }
 }
 
-auto file_selector::combobox(application&               app,
-                             const file_access&         fs,
-                             const file_path::file_type type,
+auto file_selector::combobox(application&       app,
+                             const file_access& fs,
+                             const file_type    type,
                              const flags flags) noexcept -> combo_box_result
 {
     auto save  = false;
@@ -333,8 +318,8 @@ auto file_selector::combobox(application&               app,
                              .save    = save };
 }
 
-auto file_selector::combobox_ro(const file_access&         fs,
-                                const file_path::file_type type,
+auto file_selector::combobox_ro(const file_access& fs,
+                                const file_type    type,
                                 const flags flags) noexcept -> combo_box_result
 {
     auto save  = false;
@@ -403,8 +388,7 @@ void simulation_to_cpp::show(const project_editor& ed) noexcept
 {
     ImGui::SeparatorText("C++");
 
-    static const char* names[] = { "models and connections",
-                                   "and final tests",
+    static const char* names[] = { "models and connections", "and final tests",
                                    "and tests in progress" };
 
     debug::ensure(options <= 2u);
@@ -424,10 +408,7 @@ void simulation_to_cpp::show(const project_editor& ed) noexcept
 
         app.add_gui_task([&]() {
             const auto ret = write_test_simulation(
-              stdout,
-              ed.pj.name.sv(),
-              ed.pj.sim,
-              ed.pj.sim.limits.begin(),
+              stdout, ed.pj.name.sv(), ed.pj.sim, ed.pj.sim.limits.begin(),
               ed.pj.sim.limits.end(),
               enum_cast<write_test_simulation_options>(options));
 
@@ -479,12 +460,12 @@ void simulation_to_cpp::show(const project_editor& ed) noexcept
     }
 }
 
-application::application(journal_handler& jn_) noexcept
+application::application(log_history& jn_) noexcept
   : task_mgr{ 4, 1 }
   , config(get_config_home(true))
-  , mod{ jn_ }
   , jn{ jn_ }
   , pjs(16)
+  , file_viewers{ 16 }
   , grids{ 16 }
   , graphs{ 16 }
   , generics{ 16 }
@@ -492,32 +473,30 @@ application::application(journal_handler& jn_) noexcept
   , sims{ 16 }
   , graph_eds{ 16 }
   , copy_obs{ 16 }
-  , m_journal_timestep{ journal_handler::get_tick_count_in_milliseconds() }
 {
     settings_wnd.apply_style(config.vars.theme.load());
 
     task_mgr.start();
+    journal_scope j;
 
-    jn.push(log_level::info, [&](auto& t, auto& m) noexcept {
-        t = "irritator initialized";
+    log(log_level::info, [&](auto& m) noexcept {
         format(m,
                "Starting with {} ordered list {} unordered list and {} "
                "threads\n",
-               task_mgr.ordered_size(),
-               task_mgr.unordered_size(),
+               task_mgr.ordered_size(), task_mgr.unordered_size(),
                task_mgr.ordered_size() + task_mgr.unordered_size());
     });
 }
 
 application::~application() noexcept
 {
-    jn.push(log_level::info,
-            [](auto&, auto& msg) { msg = "Task manager shutdown\n"; });
+    using namespace std::literals;
+
+    log(log_level::info, "Task manager shutdown\n"sv);
 
     task_mgr.shutdown();
 
-    jn.push(log_level::info,
-            [](auto&, auto& msg) { msg = "Application shutdown\n"; });
+    log(log_level::info, "Application shutdown\n"sv);
 }
 
 unordered_task_list& application::get_unordered_task_list() noexcept
@@ -525,136 +504,144 @@ unordered_task_list& application::get_unordered_task_list() noexcept
     return task_mgr.unordered(0);
 }
 
-project_id application::alloc_project_window() noexcept
+void application::try_set_component_as_project(const file_access& /*files*/,
+                                               const component_access& ids,
+                                               const component_id id) noexcept
 {
-    if (not pjs.can_alloc(1)) {
-        jn.push(log_level::error, [&](auto& title, auto& msg) noexcept {
-            title = "Fail to allocate another project";
-            format(msg,
-                   "There is {} projects opened. Close one before.",
-                   pjs.size());
-        });
+    if (debug::check(ids.exists(id))) {
+        add_gui_task([this, id]() {
+            if (new_project_req.try_request()) {
+                mod.ids.read([&](const auto& ids, auto) noexcept {
+                    mod.files.read([&](const auto& fs, auto) noexcept {
+                        auto pj = std::make_unique<project>();
 
-        return undefined<project_id>();
+                        if (const auto ret = pj->set(ids, fs, id);
+                            ret.has_error()) {
+                            log(log_level::error, [&](auto& m) {
+                                format(m, "project: error during import ({}))",
+                                       ret.error());
+                            });
+
+                            return;
+                        }
+
+                        new_project_req.fulfill(std::move(pj));
+                    });
+                });
+            }
+        });
     }
-
-    name_str temp;
-    format(temp, "project-{}", pjs.next_key());
-
-    auto& pj = pjs.alloc(temp.sv());
-
-    return pjs.get_id(pj);
 }
 
-project_id application::open_project_window(const file_path_id file_id) noexcept
+void application::try_open_project_window(const file_access& /*files*/,
+                                          const component_access& /*ids*/,
+                                          const file_path_id file_id) noexcept
 {
-    if (not pjs.can_alloc(1))
+    const auto pj_ed_id = [this, file_id]() noexcept -> project_id {
+        for (const auto& pj_ed : pjs)
+            if (pj_ed.pj.project_file == file_id)
+                return pjs.get_id(pj_ed);
+
         return undefined<project_id>();
+    }();
 
-    const auto pj_id = alloc_project_window();
-    if (is_undefined(pj_id))
-        return undefined<project_id>();
+    // We found a project already open for this file, we set the focus on this
+    // opened project_editor.
+    if (is_defined(pj_ed_id)) {
+        auto& pj_ed = pjs.get(pj_ed_id);
+        ImGui::SetWindowFocus(pj_ed.title.c_str());
 
-    return mod.files.write([&](auto& fs) {
-        auto* file = fs.file_paths.try_to_get(file_id);
+    } else {
+        // Otherwise we try to open a new project_editor iff the file_id exists,
+        // file_id is a project file and file_id can be set as a new project.
 
-        debug::ensure(file);
-        debug::ensure(is_undefined(file->pj_id));
+        add_gui_task([this, file_id]() {
+            if (new_project_req.try_request()) {
+                auto pj          = std::make_unique<project>();
+                pj->project_file = file_id;
 
-        if (not file or is_defined(file->pj_id))
-            return undefined<project_id>();
+                mod.files.read([&](const auto& fs, auto) noexcept {
+                    mod.ids.read([&](const auto& ids, auto) noexcept {
+                        if (const auto ret = pj->load(fs, ids);
+                            ret.has_error()) {
+                            log(log_level::error, [&](auto& m) {
+                                format(m, "project: error during import ({})",
+                                       ret.error());
+                            });
 
-        auto& pj    = pjs.get(pj_id);
-        file->pj_id = pj_id;
+                            return;
+                        }
 
-        const auto filename    = file->path.sv();
-        const auto without_ext = filename.substr(0, filename.find_last_of('.'));
-
-        pj.set_title_name(without_ext);
-
-        return pj_id;
-    });
-}
-
-file_path_id application::close_project_window(const project_id pj_id) noexcept
-{
-    const auto* pj = pjs.try_to_get(pj_id);
-    debug::ensure(pj);
-
-    if (not pj)
-        return undefined<file_path_id>();
-
-    const auto file_id = pj->pj.file;
-
-    add_gui_task([&, file_id]() {
-        mod.files.write([&](auto& fs) {
-            if (auto* file = fs.file_paths.try_to_get(file_id))
-                file->pj_id = undefined<project_id>();
-
-            return file_id;
+                        new_project_req.fulfill(std::move(pj));
+                    });
+                });
+            }
         });
-    });
+    }
+}
 
-    pjs.free(pj_id);
-
-    return file_id;
+void application::close_project_window(const project_id pj_id) noexcept
+{
+    if (pjs.try_to_get(pj_id)) {
+        output_ed.remove_project(pj_id);
+        pjs.free(pj_id);
+    }
 }
 
 void application::free_project_window(const project_id pj_id) noexcept
 {
-    const auto* pj = pjs.try_to_get(pj_id);
-    debug::ensure(pj);
+    if (const auto* pj = pjs.try_to_get(pj_id)) {
+        const auto file_id = pj->pj.project_file;
 
-    if (not pj)
-        return;
-
-    const auto file_id = pj->pj.file;
-
-    add_gui_task([&, file_id]() {
-        mod.files.write([&](auto& fs) {
-            if (auto* file = fs.file_paths.try_to_get(file_id)) {
-                file->pj_id = undefined<project_id>();
-                fs.remove_file(file_id);
-            }
+        add_gui_task([&, file_id]() {
+            mod.files.write([&](auto& fs) {
+                if (auto* file = fs.file_paths.try_to_get(file_id)) {
+                    fs.remove_file(file_id);
+                }
+            });
         });
-    });
 
-    pjs.free(pj_id);
+        output_ed.remove_project(pj_id);
+        pjs.free(pj_id);
+    }
 }
 
 bool application::init() noexcept
 {
-    config.vars.rec_paths.read(
-      [&](const auto& paths, const auto /*vers*/) noexcept {
-          mod.files.write([&](auto& fs) {
-              for (const auto id : paths.ids) {
-                  const auto idx = get_index(id);
+    config.vars.rec_paths.read([&](const auto& conf,
+                                   const auto /*vers*/) noexcept {
+        const auto& paths = conf.recs.template get<path>();
+        const auto& names = conf.recs.template get<recorded_paths::name_str>();
+        const auto& priorities = conf.recs.template get<i8>();
 
-                  auto& new_dir    = fs.registred_paths.alloc();
-                  auto  new_dir_id = fs.registred_paths.get_id(new_dir);
-                  new_dir.name     = paths.names[idx].sv();
-                  new_dir.path     = paths.paths[idx].sv();
-                  new_dir.priority = paths.priorities[idx];
+        mod.files.write([&](auto& fs) {
+            if (not(fs.registred_paths.can_alloc(conf.recs.size()) or
+                    fs.registred_paths.template grow<2, 1>()))
+                return;
 
-                  jn.push(log_level::info,
-                          [&new_dir](auto& title, auto& msg) noexcept {
-                              title = "New directory registred";
-                              format(msg,
-                                     "{} registred as path `{}' priority: {}",
-                                     new_dir.name.sv(),
-                                     new_dir.path.sv(),
-                                     new_dir.priority);
-                          });
+            for (const auto id : conf.recs) {
+                const auto idx = get_index(id);
 
-                  fs.recorded_paths.emplace_back(new_dir_id);
-              }
-          });
-      });
+                auto& new_dir    = fs.registred_paths.alloc();
+                auto  new_dir_id = fs.registred_paths.get_id(new_dir);
+                new_dir.name     = names[idx].sv();
+                new_dir.path     = paths[idx].sv();
+                new_dir.priority = priorities[idx];
+
+                log(log_level::info, [&new_dir](auto& msg) noexcept {
+                    format(msg, "{} registred as path `{}' priority: {}",
+                           new_dir.name.sv(), new_dir.path.sv(),
+                           new_dir.priority);
+                });
+
+                fs.recorded_paths.emplace_back(new_dir_id);
+            }
+        });
+    });
 
     if (auto ret = mod.fill_components(); ret.has_error()) {
-        jn.push(log_level::warning, [&](auto& title, auto& msg) noexcept {
-            title = "Modeling initialization error";
-            msg   = "Fail to fill read component list";
+        log(log_level::warning, [&](auto& msg) noexcept {
+            format(msg, "fail to read components ({})", ret.error());
         });
     }
 
@@ -710,8 +697,8 @@ auto application::show_menu() noexcept -> show_result_t
 
             ImGui::MenuItem("Show output editor", nullptr, &output_ed.is_open);
 
-            ImGui::MenuItem(
-              "Show component hierarchy", nullptr, &library_wnd.is_open);
+            ImGui::MenuItem("Show component hierarchy", nullptr,
+                            &library_wnd.is_open);
 
             ImGui::MenuItem("Show memory usage", nullptr, &memory_wnd.is_open);
             ImGui::MenuItem("Show task usage", nullptr, &task_wnd.is_open);
@@ -740,9 +727,9 @@ auto application::show_menu() noexcept -> show_result_t
 
 void application::show_dock() noexcept
 {
-    static auto                  first_time = true;
-    constexpr ImGuiDockNodeFlags dockspace_flags =
-      ImGuiDockNodeFlags_PassthruCentralNode;
+    static auto first_time = true;
+    constexpr ImGuiDockNodeFlags
+      dockspace_flags = ImGuiDockNodeFlags_PassthruCentralNode;
 
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     main_dock_id = ImGui::DockSpaceOverViewport(0, viewport, dockspace_flags);
@@ -751,8 +738,8 @@ void application::show_dock() noexcept
         first_time = false;
 
         ImGui::DockBuilderRemoveNode(main_dock_id);
-        ImGui::DockBuilderAddNode(
-          main_dock_id, dockspace_flags | ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderAddNode(main_dock_id, dockspace_flags |
+                                                  ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(main_dock_id, viewport->Size);
 
         right_dock_id = ImGui::DockBuilderSplitNode(
@@ -779,16 +766,55 @@ void application::show_dock() noexcept
             ImGui::SetCursorPos(
               ImGui::GetCursorPos() +
               (ImGui::GetContentRegionAvail() - ImVec2(50.f, 15.f)) * 0.5f);
-            ImGui::TextFormat("Welcome to Irritator {}.{}.{}",
-                              VERSION_MAJOR,
-                              VERSION_MINOR,
-                              VERSION_PATCH);
+            ImGui::TextFormat("Welcome to Irritator {}.{}.{}", VERSION_MAJOR,
+                              VERSION_MINOR, VERSION_PATCH);
 
             ImGui::End();
         }
     }
 
     component_ed.display();
+
+    if (auto new_pj = new_project_req.try_take(); new_pj.has_value()) {
+        if (not pjs.can_alloc(1)) {
+            log(log_level::error, [&](auto& msg) noexcept {
+                format(
+                  msg,
+                  "project: there is {} projects opened. Close one before.",
+                  pjs.size());
+            });
+        } else {
+            if (auto* pj_released = new_pj->release()) {
+                const auto opened = mod.files.read(
+                  [&](const auto& fs, auto) noexcept -> bool {
+                      const auto  f_id = pj_released->project_file;
+                      const auto* f    = fs.file_paths.try_to_get(f_id);
+
+                      if (f) {
+                          const auto filename = f->path.sv();
+                          const auto dot      = filename.find_last_of('.');
+                          const auto label    = filename.substr(0, dot);
+
+                          auto& pj = pjs.alloc(label, std::move(*pj_released));
+                          const auto pj_id = pjs.get_id(pj);
+                          library_wnd.add_open_file(f_id, pj_id);
+                          output_ed.add_project(pj_id);
+                          return true;
+                      }
+
+                      return false;
+                  });
+
+                if (not opened) {
+                    const auto next_key = pjs.next_key();
+                    const auto label    = format_n<32>("project-{}", next_key);
+                    auto& pj = pjs.alloc(label.sv(), std::move(*pj_released));
+                    const auto pj_id = pjs.get_id(pj);
+                    output_ed.add_project(pj_id);
+                }
+            }
+        }
+    }
 
     {
         project_editor* pj       = nullptr;
@@ -799,7 +825,7 @@ void application::show_dock() noexcept
                 to_close = nullptr;
             }
 
-            pj->start_simulation_update_state(*this);
+            pj->update_simulation_state(*this);
             ImGui::PushID(pj);
 
             if (pj->show(*this) ==
@@ -814,6 +840,32 @@ void application::show_dock() noexcept
             close_project_window(pjs.get_id(*to_close));
     }
 
+    {
+        text_file_viewer* viewer   = nullptr;
+        text_file_viewer* to_close = nullptr;
+        while (file_viewers.next(viewer)) {
+            if (to_close) {
+                file_viewers.free(*to_close);
+                to_close = nullptr;
+            }
+
+            ImGui::PushID(get_index(file_viewers.get_id(viewer)));
+
+            const auto title = format_n<64>(
+              "file-viewer-{}", get_index(file_viewers.get_id(viewer)));
+
+            if (viewer->show(*this, title.c_str()) ==
+                window_status::request_close) {
+                to_close = viewer;
+            }
+
+            ImGui::PopID();
+        }
+
+        if (to_close)
+            file_viewers.free(*to_close);
+    }
+
     for_each_cond(sim_wnds, [&](const auto& v) noexcept {
         if (auto* pj = pjs.try_to_get(v.pj_id)) {
             auto* tn = pj->pj.tree_nodes.try_to_get(v.tn_id);
@@ -824,8 +876,8 @@ void application::show_dock() noexcept
                 return true;
 
             small_string<64> name;
-            format(
-              name, "{}-graph-{}", pj->pj.name.sv(), get_index(v.graph_ed_id));
+            format(name, "{}-graph-{}", pj->pj.name.sv(),
+                   get_index(v.graph_ed_id));
 
             if (ge->show(name.c_str(), *this, *pj, *tn, *go) ==
                 graph_editor::show_result_type::request_to_close) {
@@ -907,19 +959,16 @@ bool show_select_model_box(const char*     button_label,
 
     if (ImGui::Button(button_label)) {
         debug::ensure(ed.pj.tree_nodes.get_id(tn) == access.parent_id);
-        app.component_model_sel.update(ed.pj,
-                                       access.parent_id,
-                                       access.compo_id,
-                                       access.tn_id,
-                                       access.mdl_id);
+        app.component_model_sel.update(ed.pj, access.parent_id, access.compo_id,
+                                       access.tn_id, access.mdl_id);
 
         ImGui::OpenPopup(popup_label);
     }
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal(
-          popup_label, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(popup_label, nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
 
         if (const auto r = app.component_model_sel.combobox(
               "Select model to observe grid", ed.pj);
@@ -961,19 +1010,16 @@ bool show_select_model_box(const char*     button_label,
 
     if (ImGui::Button(button_label)) {
         debug::ensure(ed.pj.tree_nodes.get_id(tn) == access.parent_id);
-        app.component_model_sel.update(ed.pj,
-                                       access.parent_id,
-                                       access.compo_id,
-                                       access.tn_id,
-                                       access.mdl_id);
+        app.component_model_sel.update(ed.pj, access.parent_id, access.compo_id,
+                                       access.tn_id, access.mdl_id);
 
         ImGui::OpenPopup(popup_label);
     }
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal(
-          popup_label, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (ImGui::BeginPopupModal(popup_label, nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
 
         if (const auto r = app.component_model_sel.combobox(
               "Select model to observe graph", ed.pj);
@@ -1009,63 +1055,33 @@ void application::start_load_project(const project_id pj_id) noexcept
 {
     add_gui_task([&, pj_id]() noexcept {
         auto* pj = pjs.try_to_get(pj_id);
-        if (not pj or is_undefined(pj->pj.file))
+        if (not pj or is_undefined(pj->pj.project_file))
             return;
 
-        if (auto ret = pj->pj.load(mod); ret.has_value()) {
-            pj->disable_access = false;
-
-            jn.push(log_level::info, [&](auto& title, auto& /*msg*/) noexcept {
-                mod.files.read([&](const auto& fs, const auto /*vesr*/) {
-                    format(title,
-                           "Loading project file {} success",
-                           fs.file_paths.get(pj->pj.file).path.sv());
-                });
-            });
-        } else {
-            jn.push(log_level::error, [&](auto& title, auto& msg) noexcept {
-                mod.files.read([&](const auto& fs, const auto /*vesr*/) {
-                    format(title,
-                           "Loading project file {} error",
-                           fs.file_paths.get(pj->pj.file).path.sv());
-                });
-
-                if (ret.error().cat() == category::project) {
-                    if (static_cast<project_errc>(ret.error().value()) ==
-                        project_errc::file_access_error) {
-                        msg = "Access error.";
-                    }
-                } else if (ret.error().cat() == category::json) {
-                    switch (static_cast<json_errc>(ret.error().value())) {
-                    case json_errc::memory_error:
-                        msg = "json de-archiving memory error: not "
-                              "enough memory\n";
-                        break;
-
-                    case json_errc::arg_error:
-                        msg = "json de-archiving internal error\n";
-                        break;
-
-                    case json_errc::file_error:
-                        msg = "json de-archiving memory error: not "
-                              "enough memory\n";
-                        break;
-
-                    case json_errc::invalid_project_format:
-                        format(msg,
-                               "json de-archiving json format error "
-                               "`{}' at offset "
-                               "{}\n",
-                               0,
-                               0);
-                        break;
-
-                    default:
-                        format(msg, "json de-archiving unknown error\n");
-                    }
+        mod.files.read([&](const auto& fs, auto) noexcept {
+            mod.ids.read([&](const auto& ids, auto) noexcept {
+                if (auto ret = pj->pj.load(fs, ids); ret.has_value()) {
+                    log(log_level::info, [&](auto& msg) noexcept {
+                        mod.files.read([&](const auto& fs,
+                                           const auto /*vesr*/) {
+                            format(
+                              msg, "Loading project file {} success",
+                              fs.file_paths.get(pj->pj.project_file).path.sv());
+                        });
+                    });
+                } else {
+                    log(log_level::error, [&](auto& msg) noexcept {
+                        mod.files.read([&](const auto& fs,
+                                           const auto /*vesr*/) {
+                            format(
+                              msg, "Loading project file {} error",
+                              fs.file_paths.get(pj->pj.project_file).path.sv());
+                            format(msg, "{}", ret.error());
+                        });
+                    });
                 }
             });
-        }
+        });
     });
 }
 
@@ -1076,62 +1092,32 @@ void application::start_save_project(const project_id pj_id) noexcept
         if (not pj_ed)
             return;
 
-        if (auto ret = pj_ed->pj.save(mod); ret) {
-            jn.push(log_level::info, [&](auto& title, auto& /*msg*/) noexcept {
-                mod.files.read([&](const auto& fs, const auto /*vers*/) {
-                    format(title,
-                           "Saving project file {} success",
-                           fs.file_paths.get(pj_ed->pj.file).path.sv());
-                });
-            });
-        } else {
-            jn.push(log_level::error, [&](auto& title, auto& msg) noexcept {
-                const small_string<127> name =
-                  mod.files.read([&](const auto& fs, const auto /*vers*/) {
-                      const auto* f = fs.file_paths.try_to_get(pj_ed->pj.file);
-                      return f ? f->path.sv() : std::string_view{ "-" };
-                  });
+        mod.files.read([&](const auto& fs, auto) noexcept {
+            mod.ids.read([&](const auto& ids, auto) noexcept {
+                if (auto ret = pj_ed->pj.save(fs, ids); ret) {
+                    log(log_level::info, [&](auto& msg) noexcept {
+                        mod.files.read(
+                          [&](const auto& fs, const auto /*vers*/) {
+                              format(msg, "Saving project file {} success",
+                                     fs.file_paths.get(pj_ed->pj.project_file)
+                                       .path.sv());
+                          });
+                    });
+                } else {
+                    log(log_level::error, [&](auto& msg) noexcept {
+                        const small_string<127> name = mod.files.read(
+                          [&](const auto& fs, const auto /*vers*/) {
+                              const auto* f = fs.file_paths.try_to_get(
+                                pj_ed->pj.project_file);
+                              return f ? f->path.sv() : std::string_view{ "-" };
+                          });
 
-                format(title, "Saving project file {} error", name.sv());
-
-                if (ret.error().cat() == category::project) {
-                    if (static_cast<project_errc>(ret.error().value()) ==
-                        project_errc::file_access_error) {
-                        msg = "Access error.";
-                    }
-                } else if (ret.error().cat() == category::json) {
-                    switch (static_cast<json_errc>(ret.error().value())) {
-                    case json_errc::memory_error:
-                        format(msg,
-                               "json archiving memory error: not "
-                               "enough memory\n");
-                        break;
-
-                    case json_errc::arg_error:
-                        format(msg, "json archiving internal error\n");
-                        break;
-
-                    case json_errc::file_error:
-                        format(msg,
-                               "json archiving memory error: not "
-                               "enough memory\n");
-                        break;
-
-                    case json_errc::invalid_project_format:
-                        format(msg,
-                               "json archiving json format error "
-                               "`{}' at offset "
-                               "{}\n",
-                               0,
-                               0);
-                        break;
-
-                    default:
-                        format(msg, "json de-archiving unknown error\n");
-                    }
+                        format(msg, "Saving project file {} error {}",
+                               name.sv(), ret.error());
+                    });
                 }
             });
-        }
+        });
     });
 }
 
@@ -1139,25 +1125,25 @@ void application::start_save_component(const component_id id) noexcept
 {
     add_gui_task([&, id]() noexcept {
         mod.ids.read([&](const auto& ids, auto) noexcept {
-            if (ids.exists(id)) {
-                const auto& compo = ids.components[id];
+            mod.files.read([&](const auto& fs, auto) noexcept {
+                if (ids.exists(id)) {
+                    const auto& compo = ids.components[id];
 
-                if (auto ret = mod.save(id); not ret) {
-                    jn.push(log_level::error, [&](auto& title, auto& msg) {
-                        title = "Component save error";
-                        format(msg,
-                               "Fail to save {} (part: {} {}",
-                               compo.name.sv(),
-                               ordinal(ret.error().cat()),
-                               ret.error().value());
-                    });
-                } else {
-                    jn.push(log_level::notice, [&](auto& title, auto& msg) {
-                        title = "Component save";
-                        format(msg, "Save {} success", compo.name.sv());
-                    });
+                    if (auto ret = mod.save(ids, fs, id); not ret) {
+                        log(log_level::error, [&](auto& msg) {
+                            format(msg,
+                                   "component: fail to save {} (part: {} {}",
+                                   compo.name.sv(), ordinal(ret.error().cat()),
+                                   ret.error().value());
+                        });
+                    } else {
+                        log(log_level::notice, [&](auto& msg) {
+                            format(msg, "component: save {} success",
+                                   compo.name.sv());
+                        });
+                    }
                 }
-            }
+            });
         });
     });
 }
@@ -1196,8 +1182,8 @@ void application::start_init_source(const project_id  pj_id,
                     src.buffer = std::span(data.chunk_real);
 
                     data.chunk_id[0] = 0x648593178264597;
-                    data.chunk_id[1] =
-                      static_cast<u64>(reinterpret_cast<uintptr_t>(c));
+                    data.chunk_id[1] = static_cast<u64>(
+                      reinterpret_cast<uintptr_t>(c));
                     data.chunk_id[2] = 0;
                     data.chunk_id[3] = 0;
                     data.chunk_id[4] = 0;
@@ -1218,6 +1204,110 @@ void application::start_dir_path_refresh(const dir_path_id id) noexcept
 {
     add_gui_task([&, id]() noexcept {
         mod.files.write([&](auto& fs) { fs.refresh(id); });
+    });
+}
+
+// text_file_viewer implementation
+
+window_status text_file_viewer::show(application& app,
+                                     const char*  title) noexcept
+{
+    if (not is_dock_init) {
+        ImGui::SetNextWindowDockID(app.get_main_dock_id());
+        is_dock_init = true;
+    }
+
+    bool is_open = true;
+    if (not ImGui::Begin(title, &is_open)) {
+        ImGui::End();
+        return is_open ? window_status::keep_open
+                       : window_status::request_close;
+    }
+
+    if (auto vec = content_request.try_take(); vec.has_value()) {
+        content.write([&](auto& buffer) noexcept { buffer = std::move(*vec); });
+    }
+
+    app.mod.files.read([&](const auto& fs, auto) noexcept {
+        if (const auto* f = fs.file_paths.try_to_get(file_id)) {
+            ImGui::TextFormat("File name: {}", f->path.sv());
+        }
+
+        content.read([&](const auto& buffer, auto /*vers*/) noexcept {
+            ImGui::TextWrapped("%.*s", static_cast<int>(buffer.size()),
+                               buffer.data());
+        });
+    });
+
+    ImGui::End();
+
+    return is_open ? window_status::keep_open : window_status::request_close;
+}
+
+void text_file_viewer::update(application&       app,
+                              const file_path_id file_id_) noexcept
+{
+    app.add_gui_task([&, file_id_]() noexcept {
+        const auto filename = app.mod.files.read(
+          [&](const auto& fs, auto) noexcept {
+              return make_file(fs, file_id_);
+          });
+
+        if (not filename.has_value()) {
+            log(log_level::error, [&](auto& msg) {
+                msg = "text-file: Fail to create file name";
+            });
+            return;
+        }
+
+        auto file_size = std::uintmax_t{};
+
+        try {
+            auto       ec = std::error_code{};
+            const auto sv = filename->sv();
+
+            file_size = std::filesystem::file_size(sv, ec);
+
+            if (ec) {
+                log(log_level::error, [&](auto& msg) {
+                    format(msg, "text-file: {} access error", filename->sv());
+                });
+                return;
+            }
+        } catch (...) {
+        }
+
+        auto file = file::open(*filename, file_mode{ file_open_options::read,
+                                                     file_open_options::text });
+
+        if (file.has_error()) {
+            log(log_level::error, [&](auto& msg) {
+                format(msg, "text-file: fail to open file {} (part: {} {})",
+                       filename->sv(), ordinal(file.error().cat()),
+                       file.error().value());
+            });
+            return;
+        }
+
+        const auto limit = app.config.vars.text_file_viewer_max_file_size
+                             .load();
+
+        if (std::cmp_greater(file_size, limit)) {
+            log(log_level::error, [&](auto& msg) {
+                format(msg,
+                       "text-file: file {} is too big to be loaded ({} bytes)",
+                       filename->sv(), file_size);
+            });
+
+            return;
+        }
+
+        auto content = file->read_entire_file();
+
+        if (content_request.try_request()) {
+            content_request.fulfill(std::move(content));
+            file_id = file_id_;
+        }
     });
 }
 

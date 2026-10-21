@@ -10,7 +10,6 @@
 #include <irritator/global.hpp>
 #include <irritator/helpers.hpp>
 #include <irritator/modeling.hpp>
-#include <irritator/observation.hpp>
 #include <irritator/thread.hpp>
 #include <irritator/timeline.hpp>
 
@@ -42,202 +41,12 @@ enum class hsm_editor_data_id : u32;
 enum class simulation_editor_data_id : u32;
 
 enum class graph_editor_id : u32;
+enum class text_file_viewer_id : u32;
 
 enum class task_status : u8 { not_started, started, finished };
 enum class main_task : u8 { simulation_0 = 0, simulation_1, simulation_2, gui };
 
-enum class simulation_status : u8 {
-    not_started,
-    initializing,
-    initialized,
-    run_requiring,
-    running,
-    paused,
-    pause_forced,
-    finish_requiring,
-    finishing,
-    finished,
-    debugged,
-};
-
 enum class simulation_plot_type : u8 { none, plotlines, plotscatters };
-
-/// @class request_buffer
-///
-/// @brief A thread-safe asynchronous mailbox with a built-in anti-spam
-/// mechanism.
-///
-/// esigned for a "Request-Fulfill" pattern between a high-frequency
-/// GUI thread and asynchronous worker threads. It prevents "Request Storms" by
-/// ensuring only one computation task is active at any given time.
-///
-/// @tparam T The type of data being transferred. Supports complex types
-/// (strings, vectors).
-///
-/// @code
-/// void update_gui() {
-///     // 1. We are trying to retrieve data that has just finished
-///     if (auto result = my_buffer.try_take())
-///         this->data = *result; // update the gui
-///
-///     // 2. If the data is still missing AND no task is in progress
-///     if (not this->has_data() && my_buffer.should_request()) {
-///         // This line will only be executed ONCE until fulfill() is called.
-///         add_gui_task([]() {
-///             auto data = expensive_calculation();
-///             my_buffer.fulfill(std::move(data));
-///         });
-///     }
-/// }
-/// @endcode
-template<typename T>
-class request_buffer
-{
-public:
-    enum class state : u8 { idle, pending, ready };
-
-    request_buffer() noexcept = default;
-
-    request_buffer(const request_buffer&)            = delete;
-    request_buffer& operator=(const request_buffer&) = delete;
-
-    /// Checks if a new request should be sent.
-    /// @return true if state was Idle (now pending), false if a task is already
-    /// running.
-    bool should_request() noexcept
-    {
-        state expected = state::idle;
-        return m_state.compare_exchange_strong(
-          expected, state::pending, std::memory_order_acq_rel);
-    }
-
-    /// Delivers the result from the worker thread.
-    void fulfill(T&& data) noexcept
-    {
-        {
-            std::lock_guard lock(m_mutex);
-            m_value.emplace(std::forward<T>(data));
-        }
-        m_state.store(state::ready, std::memory_order_release);
-    }
-
-    /// Attempts to consume the result in the GUI thread.
-    /// @return std::optional containing the data if ready, otherwise
-    /// std::nullopt.
-    std::optional<T> try_take() noexcept
-    {
-        if (m_state.load(std::memory_order_acquire) == state::ready) {
-            std::unique_lock lock(m_mutex, std::try_to_lock);
-            if (lock.owns_lock()) {
-                std::optional<T> out = std::move(m_value);
-                m_value.reset();
-                m_state.store(state::idle, std::memory_order_release);
-                return out;
-            }
-        }
-        return std::nullopt;
-    }
-
-    /// Resets the buffer to idle. Use this if a task fails or times out.
-    void cancel() noexcept
-    {
-        std::lock_guard lock(m_mutex);
-        m_value.reset();
-        m_state.store(state::idle, std::memory_order_release);
-    }
-
-private:
-    std::atomic<state> m_state{ state::idle };
-    mutable std::mutex m_mutex;
-    std::optional<T>   m_value;
-};
-
-/// @class atomic_request_buffer
-///
-/// @brief An ultra-fast, lock-free asynchronous mailbox for small data types.
-///
-/// @details Optimized version using purely atomic operations. Ideal for IDs,
-/// Enums, or small numeric results. T must be Trivially Copyable.
-///
-/// @code
-/// void on_render_frame() {
-///     // 1. try to read
-///     if (auto score = score_buffer.try_take()) {
-///         this->current_score = *score;
-///     }
-///
-///     // 2. If we need information and haven't already started the task
-///     if (needs_update && score_buffer.should_request()) {
-///         std::thread([&](){
-///             int res = compute_heavy_score();
-///             score_buffer.fulfill(res);
-///         }).detach();
-///     }
-/// }
-/// @endcode
-template<typename T>
-class atomic_request_buffer
-{
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "T must be trivially copyable for atomic_request_buffer");
-
-public:
-    enum class state : u8 { idle, pending, ready };
-
-    atomic_request_buffer() noexcept = default;
-
-    atomic_request_buffer(const atomic_request_buffer&)            = delete;
-    atomic_request_buffer& operator=(const atomic_request_buffer&) = delete;
-
-    atomic_request_buffer(atomic_request_buffer&& other) noexcept
-    {
-        m_state.store(other.m_state.load(std::memory_order_acquire));
-        m_value.store(other.m_value.load(std::memory_order_relaxed));
-        other.m_state.store(state::idle, std::memory_order_release);
-    }
-
-    atomic_request_buffer& operator=(atomic_request_buffer&& other) noexcept
-    {
-        if (this != &other) {
-            m_state.store(other.m_state.load(std::memory_order_acquire));
-            m_value.store(other.m_value.load(std::memory_order_relaxed));
-            other.m_state.store(state::idle, std::memory_order_release);
-        }
-        return *this;
-    }
-
-    bool should_request() noexcept
-    {
-        state expected = state::idle;
-        return m_state.compare_exchange_strong(
-          expected, state::pending, std::memory_order_acq_rel);
-    }
-
-    void fulfill(T data) noexcept
-    {
-        m_value.store(data, std::memory_order_relaxed);
-        m_state.store(state::ready, std::memory_order_release);
-    }
-
-    std::optional<T> try_take() noexcept
-    {
-        if (m_state.load(std::memory_order_acquire) == state::ready) {
-            T result = m_value.load(std::memory_order_relaxed);
-            m_state.store(state::idle, std::memory_order_release);
-            return result;
-        }
-        return std::nullopt;
-    }
-
-    void cancel() noexcept
-    {
-        m_state.store(state::idle, std::memory_order_release);
-    }
-
-private:
-    std::atomic<state> m_state{ state::idle };
-    std::atomic<T>     m_value{ T{} };
-};
 
 /**
  * @brief  Display ComboBox to select a file from a directory.
@@ -262,7 +71,23 @@ auto show_data_file_input(const file_access& fs,
  * selection.
  * @return True if the user change the distribution type or the parameters.
  */
+bool show_random_distribution_input(distribution_type& type,
+                                    std::span<real, 2> reals,
+                                    std::span<i32, 2>  ints) noexcept;
+
+/** Display combobox and input real, input integer for each type of random
+ * distribution. The @c random_source @c src is updated according to user
+ * selection.
+ * @return True if the user change the distribution type or the parameters.
+ */
 bool show_random_distribution_input(random_source& src) noexcept;
+
+/** Display combobox and input real, input integer for each type of random
+ * distribution. The @c random_source @c src is updated according to user
+ * selection.
+ * @return True if the user change the distribution type or the parameters.
+ */
+bool show_random_distribution_input(random_factor& src) noexcept;
 
 /** Display combobox and input real, input integer for each type of random
  * distribution. The @c random_source @c src is updated according to user
@@ -325,6 +150,12 @@ public:
     bool is_open = true;
 
 private:
+    u32 max_history_size = 256u;
+    u32 max_loop_number  = 60u;
+
+    u32 loop_number = 0u;
+
+    bool clear_expected   = false;
     bool auto_scroll      = true;
     bool scroll_to_bottom = false;
 };
@@ -348,9 +179,9 @@ public:
      * @attention Use this function after the call to ImPlot::BeginPlot() and
      * before the call to ImPlot::EndPlot().
      */
-    void show_plot_line(const observer&                       obs,
-                        const variable_observer::type_options options,
-                        const name_str&                       name) noexcept;
+    void show_plot_line(const observer&         obs,
+                        const plot_type_options options,
+                        const char*             name) noexcept;
 };
 
 /** A class to compute 3D projection of 3D points using three rotation
@@ -404,11 +235,46 @@ private:
     std::array<float, 9> m_rot_z{ 0, 0, 0 };
 };
 
+enum class window_status : u8 {
+    keep_open,    /**< Nothing to do. */
+    request_close /**< The window must be closed by the called. */
+};
+
+class text_file_viewer
+{
+public:
+    text_file_viewer() noexcept = default;
+
+    /** Display the content of a text file into a ImGui::BeginChild() /
+     * ImGui::EndChild() widget. The content of the @c shared_buffer is
+     * displayed. */
+    window_status show(application& app, const char* title) noexcept;
+
+    /** The content is read from the file system using the @c fs file access and
+     * the @c file_id identifier.
+     *
+     * @param fs The file access to read the file content.
+     * @param file_id The identifier of the file to read.
+     */
+    void update(application& app, const file_path_id file_id) noexcept;
+
+private:
+    file_path_id file_id = undefined<file_path_id>();
+
+    request_buffer<vector<char>> content_request;
+    shared_buffer<vector<char>>  content;
+
+    bool is_dock_init = false;
+};
+
 /// Use to display a grid_observation_system into ImGui widget. An instance of
 /// this class is available in @c application::simulation_editor::grid_obs.
 struct grid_observation_widget {
+
     /// Display the @c grid_observation_system into ImPlot::PlotHeatmap plot.
-    void show(grid_observer& grid, const ImVec2& size) noexcept;
+    void show(grid_observer& grid,
+              const project& pj,
+              const ImVec2&  size) noexcept;
 };
 
 // Callback function use into ImPlot::Plot like functions that use ring_buffer
@@ -447,26 +313,26 @@ public:
     constexpr static inline flags empty_option = flags{};
 
     struct combo_box_result {
-        file_path_id file_id =
-          undefined<file_path_id>(); //!< The file selected by the user. If
-                                     //!< undefined, the user select nothing or
-                                     //!< cancel.
-        int close = false; //<! @c true if user click on save or close.
-        int save  = false; //<! @c true if user click on save.
+        file_path_id
+          file_id = undefined<file_path_id>(); //!< The file selected by the
+                                               //!< user. If undefined, the user
+                                               //!< select nothing or cancel.
+        int close = false; //!< @c true if user click on save or close.
+        int save  = false; //!< @c true if user click on save.
     };
 
-    combo_box_result combobox(application&               app,
-                              const file_access&         fs,
-                              const file_path::file_type type,
+    combo_box_result combobox(application&       app,
+                              const file_access& fs,
+                              const file_type    type,
                               const flags = empty_option) noexcept;
 
-    combo_box_result combobox_ro(const file_access&         fs,
-                                 const file_path::file_type type,
+    combo_box_result combobox_ro(const file_access& fs,
+                                 const file_type    type,
                                  const flags = empty_option) noexcept;
 
 private:
-    atomic_request_buffer<dir_path_id>  new_dir_;
-    atomic_request_buffer<file_path_id> new_file_;
+    std::atomic<dir_path_id>  new_dir_;
+    std::atomic<file_path_id> new_file_;
 
     registred_path_id reg_id_  = undefined<registred_path_id>();
     dir_path_id       dir_id_  = undefined<dir_path_id>();
@@ -475,16 +341,15 @@ private:
     void combobox_reg(const file_access& fs) noexcept;
     void combobox_dir(application& app, const file_access& fs) noexcept;
     void combobox_dir_ro(const file_access& fs) noexcept;
-    void combobox_file(application&               app,
-                       const file_access&         fs,
-                       const file_path::file_type type) noexcept;
-    void combobox_file_ro(const file_access&         fs,
-                          const file_path::file_type type) noexcept;
+    void combobox_file(application&       app,
+                       const file_access& fs,
+                       const file_type    type) noexcept;
+    void combobox_file_ro(const file_access& fs, const file_type type) noexcept;
 };
 
 struct plot_copy {
     small_string<16u>        name;
-    ring_buffer<observation> linear_outputs;
+    vector<resampled_sample> linear_outputs;
     simulation_plot_type     plot_type = simulation_plot_type::none;
 };
 
@@ -515,7 +380,17 @@ public:
                   const variable_observer::sub_id svobs) noexcept;
     void save_copy(const plot_copy_id id) noexcept;
 
+    void add_project(const project_id id) noexcept;
+    void remove_project(const project_id id) noexcept;
+
 private:
+    void display_project(const project_id pj) noexcept;
+    void display_plot(const project_id pj) noexcept;
+    void force_display(const project_id, const bool display_or_not) noexcept;
+    void force_display(const project_id,
+                       const tree_node_id,
+                       const bool display_or_not) noexcept;
+
     ImPlotContext* m_ctx = nullptr;
 
     std::filesystem::path m_file;
@@ -524,6 +399,9 @@ private:
     project_id                m_pj_id   = undefined<project_id>();
     variable_observer_id      m_vobs_id = undefined<variable_observer_id>();
     variable_observer::sub_id m_sub_id = undefined<variable_observer::sub_id>();
+
+    vector<bool> m_display_selected_project; //!< list of projects. @TODO merge
+                                             //!< it with app.pjs structure.
 
     enum class save_option : u8 {
         none,
@@ -778,28 +656,34 @@ private:
 class simulation_component_editor_data
 {
 public:
-    simulation_component_editor_data(
-      const component_id            id,
-      const simulation_component_id sid,
-      const simulation_component& /*sim*/) noexcept;
+    simulation_component_editor_data(const component_id            id,
+                                     const simulation_component_id sid,
+                                     const simulation_component& sim) noexcept;
 
     bool show_selected_nodes(component_editor&,
                              const component_access&,
                              component&) noexcept;
+
     bool show(component_editor&, const component_access&, component&) noexcept;
 
-    component_id            m_id     = undefined<component_id>();
-    simulation_component_id m_sim_id = undefined<simulation_component_id>();
-    registred_path_id       m_reg    = undefined<registred_path_id>();
-    dir_path_id             m_dir    = undefined<dir_path_id>();
-    file_path_id            m_file   = undefined<file_path_id>();
+    component_id m_id = undefined<component_id>();
 
 private:
     void read(application& app, component&) noexcept;
     void write(application& app, component&) noexcept;
 
+    bool display_objective(project& pj) noexcept;
+    bool display_parameter_table(project& pj) noexcept;
+    bool display_observation_table(project& pj) noexcept;
+
     simulation_component m_sim;
-    u64                  m_version = std::numeric_limits<u64>::max();
+
+    u64 m_version = std::numeric_limits<u64>::max();
+
+    /** Mailbox to share new project loaded from project file (.pirt) from use
+     * selection.
+     */
+    request_buffer<project> m_task_project;
 };
 
 class hsm_component_editor_data
@@ -807,8 +691,8 @@ class hsm_component_editor_data
 public:
     constexpr static inline const char* name = "HSM Editor";
 
-    constexpr static inline auto max_number_of_state =
-      hierarchical_state_machine::max_number_of_state;
+    constexpr static inline auto
+      max_number_of_state = hierarchical_state_machine::max_number_of_state;
 
     hsm_component_editor_data(const component_id     id,
                               const hsm_component_id hid,
@@ -1002,9 +886,9 @@ private:
     bool show_minimap          = true;
     bool can_edit_parameters   = true;
 
-    bool enable_show =
-      true; /**< @c false, the display of nodes and links are disabled. Mainly
-               use during @c rebuild or @c init. */
+    bool enable_show = true;  /**< @c false, the display of nodes and links are
+                                 disabled. Mainly  use during @c rebuild or @c
+                                 init. */
     bool rebuild_wip = false; /**< @ true, a rebuild order is in work in
                                  progress. No other rebuild can occured. */
 
@@ -1012,9 +896,7 @@ private:
     void show_nodes(application& app, project_editor& pj_ed) noexcept;
     void show_links() noexcept;
     void compute_automatic_layout() noexcept;
-    int  show_menu(application&    app,
-                   project_editor& pj_ed,
-                   const ImVec2    click_pos) noexcept;
+    int  show_menu(project_editor& pj_ed, const ImVec2 click_pos) noexcept;
 
     spin_mutex mutex;
 };
@@ -1140,88 +1022,11 @@ private:
     bool           show_file_dialog = false;
 };
 
-enum class command_type {
-    none,
-    new_model,
-    free_model,
-    copy_model,
-    new_connection,
-    free_connection,
-    new_observer,
-    free_observer,
-    send_message
-};
-
-struct command {
-    struct none_t {};
-
-    struct new_model_t {
-        tree_node_id  tn_id;
-        dynamics_type type;
-        float         x;
-        float         y;
-    };
-
-    struct free_model_t {
-        tree_node_id tn_id;
-        model_id     mdl_id;
-    };
-
-    struct copy_model_t {
-        tree_node_id tn_id;
-        model_id     mdl_id;
-    };
-
-    struct new_connection_t {
-        tree_node_id tn_id;
-        model_id     mdl_src_id;
-        model_id     mdl_dst_id;
-        i8           port_src;
-        i8           port_dst;
-    };
-
-    struct free_connection_t {
-        tree_node_id tn_id;
-        model_id     mdl_src_id;
-        model_id     mdl_dst_id;
-        i8           port_src;
-        i8           port_dst;
-    };
-
-    struct new_observer_t {
-        tree_node_id tn_id;
-        model_id     mdl_id;
-    };
-
-    struct free_observer_t {
-        tree_node_id tn_id;
-        model_id     mdl_id;
-    };
-
-    struct send_message_t {
-        model_id mdl_id;
-    };
-
-    union data_t {
-        none_t            none;
-        new_model_t       new_model;
-        free_model_t      free_model;
-        copy_model_t      copy_model;
-        new_connection_t  new_connection;
-        free_connection_t free_connection;
-        new_observer_t    new_observer;
-        free_observer_t   free_observer;
-        send_message_t    send_message;
-    };
-
-    command_type type = command_type::none;
-    data_t       data;
-};
-
 struct project_editor {
     enum class visualization_mode { flat, tree };
 
-    explicit project_editor(const std::string_view default_name) noexcept;
+    project_editor(const std::string_view default_name,
+                   project&&              project_) noexcept;
 
     ~project_editor() noexcept;
 
@@ -1245,91 +1050,41 @@ struct project_editor {
     void display_subwindows(application& app) noexcept;
     void close_subwindows(application& app) noexcept;
 
-    void start_simulation_update_state(application& app) noexcept;
-
-    void start_simulation_copy_modeling(application& app) noexcept;
-    void start_simulation_init(application& app) noexcept;
-    void start_simulation_start(application& app) noexcept;
-    void start_simulation_observation(application& app) noexcept;
-    void stop_simulation_observation(application& app) noexcept;
-    void start_simulation_live_run(application& app) noexcept;
-    void start_simulation_static_run(application& app) noexcept;
-    void start_simulation_step_by_step(application& app) noexcept;
-    void start_simulation_pause(application& app) noexcept;
-    void start_simulation_stop(application& app) noexcept;
-    void start_simulation_finish(application& app) noexcept;
-    void start_simulation_advance(application& app) noexcept;
-    void start_simulation_back(application& app) noexcept;
+    void update_simulation_state(application& app) noexcept;
+    void import_from_modeling(application& app) noexcept;
+    void init_simulation(application& app) noexcept;
+    void run_bag_simulation(application& app) noexcept;
+    void run_simulation(application& app) noexcept;
+    void pause_simulation() noexcept;
+    void finish_simulation(application& app) noexcept;
+    void advance_simulation(application& app) noexcept;
+    void back_simulation(application& app) noexcept;
 
     bool can_edit() const noexcept;
     bool can_display_graph_editor() const noexcept;
 
-    std::atomic_bool force_pause           = false;
-    std::atomic_bool force_stop            = false;
-    bool             show_minimap          = true;
-    bool             store_all_changes     = false;
-    bool             real_time             = false;
-    bool             have_use_back_advance = false;
-    bool             display_graph         = true;
-
-    bool allow_user_changes = false;
+    std::atomic_bool force_pause   = false;
+    bool             show_minimap  = true;
+    bool             display_graph = true;
 
     enum class raw_data_type : u8 { none, graph, binary, text };
 
     raw_data_type save_simulation_raw_data = raw_data_type::none;
 
-    bool             is_dock_init   = false;
-    std::atomic_bool disable_access = true;
-
-    /** Return true if a simulation is currently running.
-     *
-     * A simulation is running if and only if the simulation status is in state:
-     * running, running_required or paused.
-     */
-    bool is_simulation_running() const noexcept;
+    bool is_dock_init = false;
 
     // timeline tl;
-
-    /// Default stores 128 snapshots.
-    ///
-    /// @TODO Adds this parameters in global file settings.
-    simulation_snapshot_handler snaps{ 128 };
-
-    /// The index of the current selected
-    int current_snap = -1;
 
     real simulation_last_finite_t   = 0;
     real simulation_display_current = 0;
 
-    //! Number of microsecond to run 1 unit of simulation time. The default is
-    //! to run 1 unit of simulation per second.
-    i64 nb_microsecond_per_simulation_time = 1000000;
-
-    //! The duration of a simulation run task. The default is to run one task in
-    //! 100ms.
-    static inline constexpr i64 thread_frame_duration = 100000;
-
-    using time_point =
-      std::chrono::time_point<std::chrono::high_resolution_clock>;
-
-    std::chrono::milliseconds simulation_time_duration{ 1000 };
-    std::chrono::milliseconds simulation_task_duration{ 10 };
-
-    //! Use in live modeling to store the time-point of the start of the
-    //! simulation and allow to compute the next wakeup of the simulation task.
-    time_point start;
-
-    //! Use in live modeling to store the time-point of the next wakeup of the
-    //! simulation.
-    time_point wakeup;
+    std::chrono::milliseconds one_simulation_time_duration{ 1000 };
+    std::chrono::milliseconds simulation_task_duration{ 16 };
 
     tree_node_id head    = undefined<tree_node_id>();
     tree_node_id current = undefined<tree_node_id>();
 
     visualization_mode mode = visualization_mode::flat;
-
-    std::atomic<simulation_status> simulation_state =
-      simulation_status::not_started;
 
     ImPlotContext* output_context = nullptr;
 
@@ -1337,8 +1092,6 @@ struct project_editor {
     using tree_node_observation_t = constrained_value<int, 1, 100>;
     tree_node_observation_t tree_node_observation{ 1 };
     float                   tree_node_observation_height = 300.f;
-
-    circular_buffer<command, 256> commands;
 
     project pj;
 
@@ -1378,12 +1131,8 @@ struct project_editor {
 
 inline bool project_editor::can_edit() const noexcept
 {
-    if (any_equal(simulation_state,
-                  simulation_status::not_started,
-                  simulation_status::finished))
-        return true;
-
-    return allow_user_changes;
+    return any_equal(pj.simulation_state, simulation_status::initialized,
+                     simulation_status::paused, simulation_status::finished);
 }
 
 class component_editor
@@ -1486,14 +1235,19 @@ public:
 class library_window
 {
 public:
-    constexpr static inline const char* name = "Library";
+    constexpr static inline const char* name                = "Library";
+    constexpr static inline auto        open_file_list_size = 64;
+
+    union file_target {
+        project_id   pj_id = undefined<project_id>();
+        component_id compo_id;
+        graph_id     g_id;
+    };
 
     library_window() noexcept
       : stack(max_component_stack_size, reserve_tag)
+      , open_file_list(open_file_list_size, reserve_tag)
     {}
-
-    void try_set_component_as_project(application&       app,
-                                      const component_id id) noexcept;
 
     enum class is_component_deletable_t : u8 {
         deletable,
@@ -1509,25 +1263,25 @@ public:
 
     void show() noexcept;
 
+    void add_open_file(const file_path_id, const project_id) noexcept;
+    void add_open_file(const file_path_id, const component_id) noexcept;
+    void add_open_file(const file_path_id, const graph_id) noexcept;
+    std::optional<file_target> get_open_file(const file_path_id) noexcept;
+    void                       close_open_file(const file_path_id) noexcept;
+
     bool is_open = true;
 
 private:
-    vector<tree_node*> stack;
+    vector<const tree_node*> stack;
 
-    enum class file_type : u8 {
-        none,
-        component,
-        project,
-        txt,
-        data,
-        dot,
-    };
+    /// Stores the list of opened files.
+    table<file_path_id, file_target> open_file_list;
 
-    bitflags<file_type> flags = bitflags<file_type>(file_type::component,
-                                                    file_type::project,
-                                                    file_type::txt,
-                                                    file_type::data,
-                                                    file_type::dot);
+    bitflags<file_type> flags = bitflags<file_type>(file_type::component_file,
+                                                    file_type::project_file,
+                                                    file_type::txt_file,
+                                                    file_type::data_file,
+                                                    file_type::dot_file);
 
     is_component_deletable_t is_component_deletable(
       const application&      app,
@@ -1551,7 +1305,10 @@ private:
     void show_file_component(const file_access&,
                              const component_access&,
                              const component_id) noexcept;
-    void show_file_project(const file_access&, const file_path_id) noexcept;
+    void show_file_project(const file_access&,
+                           const component_access&,
+                           const file_path&,
+                           const file_path_id) noexcept;
 };
 
 class settings_window
@@ -1571,6 +1328,17 @@ public:
     std::chrono::time_point<std::chrono::steady_clock> last_change;
 
     bool timer_started = false;
+
+private:
+    /// To share new registred_path identifier between task and main gui thread.
+    std::atomic<recorded_path_id> new_reg_dir_id;
+
+    /// To share new recorded path name.
+    request_buffer<recorded_paths::name_str> new_name;
+
+    recorded_path_id new_dir_id     = undefined<recorded_path_id>();
+    bool             choose_new_dir = false;
+    bool             need_restart   = false;
 };
 
 struct task_window {
@@ -1728,7 +1496,8 @@ private:
     void component_comboxbox(const char* label, const data_type& data) noexcept;
     void observable_model_treenode(const project&   pj,
                                    const data_type& data) noexcept;
-    void observable_model_treenode(const project& pj, tree_node& tn) noexcept;
+    void observable_model_treenode(const project&   pj,
+                                   const tree_node& tn) noexcept;
 };
 
 class simulation_to_cpp
@@ -1758,7 +1527,7 @@ struct global_simulation_window {
 class application
 {
 public:
-    explicit application(journal_handler& jn) noexcept;
+    explicit application(log_history& jn) noexcept;
 
     ~application() noexcept;
 
@@ -1768,11 +1537,12 @@ private:
 public:
     ImFont* icons = nullptr;
 
-    config_manager   config;
-    modeling         mod;
-    journal_handler& jn;
+    config_manager config;
+    modeling       mod;
+    log_history&   jn;
 
-    data_array<project_editor, project_id> pjs;
+    data_array<project_editor, project_id>            pjs;
+    data_array<text_file_viewer, text_file_viewer_id> file_viewers;
 
     enum class show_result_t {
         success,          /**< Nothing to do. */
@@ -1820,17 +1590,27 @@ public:
     hsm_simulation_editor          hsm_sim;
     project_external_source_editor data_ed;
 
-    /// Try to allocate a project and affect a new name to the newly
-    /// allocated project_window. If project allocation fails, a message is
-    /// put in @c journal_handler.
-    project_id alloc_project_window() noexcept;
+    request_buffer<std::unique_ptr<project>> new_project_req;
 
-    /// Open a project window according to the @a file_id.
-    project_id open_project_window(const file_path_id file_id) noexcept;
+    void request_alloc_project_editor(std::unique_ptr<project> pj) noexcept
+    {
+        if (new_project_req.try_request())
+            new_project_req.fulfill(std::move(pj));
+    }
+
+    /// Open a new project window iff component @c id can be set as a project.
+    void try_set_component_as_project(const file_access&      files,
+                                      const component_access& ids,
+                                      const component_id      id) noexcept;
+
+    /// Open a new project window according to the @a file_id
+    void try_open_project_window(const file_access&      files,
+                                 const component_access& ids,
+                                 const file_path_id      file_id) noexcept;
 
     /// Close a project window according to the @a project_id but keep the
     /// correspondiing @c project_editor::file @c file_path_id.
-    file_path_id close_project_window(const project_id project_id) noexcept;
+    void close_project_window(const project_id project_id) noexcept;
 
     /// Free the @a project according to the @a project_id
     void free_project_window(const project_id id) noexcept;
@@ -1845,12 +1625,12 @@ public:
      * @c project_id. Task is added at tail of the @c ring_buffer and ensure
      * linear operation.
      *
-     * @param id The identifier use to select the @a
+     * @param id A value used to select the ordered-task-list the @a
      * task_manager::ordered_task_lists.
      * @param fn The function to run.
      */
     template<typename Fn>
-    void add_simulation_task(const project_id id, Fn&& fn) noexcept;
+    void add_simulation_task(const unsigned id, Fn&& fn) noexcept;
 
     /**
      * Helpers function to add a @c gui_task into the @c ordered_task_list
@@ -1886,8 +1666,8 @@ public:
 
     void request_open_directory_dlg(const registred_path_id id) noexcept;
 
-    atomic_request_buffer<file_path_id> new_file;
-    atomic_request_buffer<dir_path_id>  new_dir;
+    std::atomic<file_path_id> new_file;
+    std::atomic<dir_path_id>  new_dir;
 
 private:
     friend task_window;
@@ -1906,8 +1686,6 @@ private:
     show_result_t show_menu() noexcept;
     void          show_dock() noexcept;
     void          show_select_directory_dlg() noexcept;
-
-    u64 m_journal_timestep;
 };
 
 /// Display dialog box to choose a @c model in a hierarchy of a @c tree_node
@@ -1946,12 +1724,12 @@ bool show_local_observers(application&            app,
 
 //! @brief Get the file path of the @c imgui.ini file saved in $HOME.
 //! @return A pointer to a newly allocated memory.
-std::filesystem::path get_imgui_filename() noexcept;
+path get_imgui_filename() noexcept;
 
 template<typename Fn>
-void application::add_simulation_task(const project_id id, Fn&& fn) noexcept
+void application::add_simulation_task(const unsigned id, Fn&& fn) noexcept
 {
-    const auto index = get_index(id) % 3;
+    const auto index = id % task_mgr.ordered_size();
 
     task_mgr.ordered(index).add(std::forward<Fn>(fn));
 }
@@ -1968,14 +1746,6 @@ void application::add_gui_task(Fn&& fn) noexcept
 inline bool project_editor::can_display_graph_editor() const noexcept
 {
     return display_graph;
-}
-
-inline bool project_editor::is_simulation_running() const noexcept
-{
-    return any_equal(simulation_state,
-                     simulation_status::paused,
-                     simulation_status::running,
-                     simulation_status::run_requiring);
 }
 
 inline tree_node_id project_editor::selected_tn() noexcept

@@ -46,9 +46,7 @@ auto get_internal_component_type(std::string_view name) noexcept
     };
 
     auto it = binary_find(
-      std::begin(table),
-      std::end(table),
-      name,
+      std::begin(table), std::end(table), name,
       [](auto left, auto right) noexcept -> bool {
           if constexpr (std::is_same_v<decltype(left), std::string_view>)
               return left < right.name;
@@ -83,9 +81,7 @@ auto get_component_type(std::string_view name) noexcept
     };
 
     auto it = binary_find(
-      std::begin(table),
-      std::end(table),
-      name,
+      std::begin(table), std::end(table), name,
       [](auto left, auto right) noexcept -> bool {
           if constexpr (std::is_same_v<decltype(left), std::string_view>)
               return left < right.name;
@@ -123,80 +119,145 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
         { "logical_or_2", dynamics_type::logical_or_2 },
         { "logical_or_3", dynamics_type::logical_or_3 },
         { "priority_queue", dynamics_type::priority_queue },
+        { "qss1_abs", dynamics_type::qss1_abs },
+        { "qss1_atan", dynamics_type::qss1_atan },
+        { "qss1_atan2", dynamics_type::qss1_atan2 },
         { "qss1_compare", dynamics_type::qss1_compare },
         { "qss1_cos", dynamics_type::qss1_cos },
         { "qss1_cross", dynamics_type::qss1_cross },
+        { "qss1_dead_zone", dynamics_type::qss1_dead_zone },
+        { "qss1_division", dynamics_type::qss1_division },
         { "qss1_exp", dynamics_type::qss1_exp },
         { "qss1_filter", dynamics_type::qss1_filter },
         { "qss1_flipflop", dynamics_type::qss1_flipflop },
         { "qss1_gain", dynamics_type::qss1_gain },
+        { "qss1_hysteresis", dynamics_type::qss1_hysteresis },
         { "qss1_integer", dynamics_type::qss1_integer },
+        { "qss1_integrate_and_fire", dynamics_type::qss1_integrate_and_fire },
         { "qss1_integrator", dynamics_type::qss1_integrator },
         { "qss1_inverse", dynamics_type::qss1_inverse },
         { "qss1_log", dynamics_type::qss1_log },
+        { "qss1_max_hold", dynamics_type::qss1_max_hold },
+        { "qss1_maximum", dynamics_type::qss1_maximum },
+        { "qss1_min_hold", dynamics_type::qss1_min_hold },
+        { "qss1_minimum", dynamics_type::qss1_minimum },
         { "qss1_multiplier", dynamics_type::qss1_multiplier },
         { "qss1_power", dynamics_type::qss1_power },
+        { "qss1_pwm", dynamics_type::qss1_pwm },
+        { "qss1_quantizer", dynamics_type::qss1_quantizer },
+        { "qss1_sample_hold", dynamics_type::qss1_sample_hold },
+        { "qss1_saturation", dynamics_type::qss1_saturation },
+        { "qss1_sigmoid", dynamics_type::qss1_sigmoid },
+        { "qss1_sign", dynamics_type::qss1_sign },
         { "qss1_sin", dynamics_type::qss1_sin },
+        { "qss1_sqrt", dynamics_type::qss1_sqrt },
         { "qss1_square", dynamics_type::qss1_square },
         { "qss1_sum_2", dynamics_type::qss1_sum_2 },
         { "qss1_sum_3", dynamics_type::qss1_sum_3 },
         { "qss1_sum_4", dynamics_type::qss1_sum_4 },
+        { "qss1_tan", dynamics_type::qss1_tan },
+        { "qss1_tanh", dynamics_type::qss1_tanh },
+        { "qss1_threshold_crossing", dynamics_type::qss1_threshold_crossing },
+        { "qss1_wrap", dynamics_type::qss1_wrap },
         { "qss1_wsum_2", dynamics_type::qss1_wsum_2 },
         { "qss1_wsum_3", dynamics_type::qss1_wsum_3 },
         { "qss1_wsum_4", dynamics_type::qss1_wsum_4 },
+        { "qss2_abs", dynamics_type::qss2_abs },
+        { "qss2_atan", dynamics_type::qss2_atan },
+        { "qss2_atan2", dynamics_type::qss2_atan2 },
         { "qss2_compare", dynamics_type::qss2_compare },
         { "qss2_cos", dynamics_type::qss2_cos },
         { "qss2_cross", dynamics_type::qss2_cross },
+        { "qss2_dead_zone", dynamics_type::qss2_dead_zone },
+        { "qss2_division", dynamics_type::qss2_division },
         { "qss2_exp", dynamics_type::qss2_exp },
         { "qss2_filter", dynamics_type::qss2_filter },
         { "qss2_flipflop", dynamics_type::qss2_flipflop },
         { "qss2_gain", dynamics_type::qss2_gain },
+        { "qss2_hysteresis", dynamics_type::qss2_hysteresis },
         { "qss2_integer", dynamics_type::qss2_integer },
+        { "qss2_integrate_and_fire", dynamics_type::qss2_integrate_and_fire },
         { "qss2_integrator", dynamics_type::qss2_integrator },
         { "qss2_inverse", dynamics_type::qss2_inverse },
         { "qss2_log", dynamics_type::qss2_log },
+        { "qss2_max_hold", dynamics_type::qss2_max_hold },
+        { "qss2_maximum", dynamics_type::qss2_maximum },
+        { "qss2_min_hold", dynamics_type::qss2_min_hold },
+        { "qss2_minimum", dynamics_type::qss2_minimum },
         { "qss2_multiplier", dynamics_type::qss2_multiplier },
         { "qss2_power", dynamics_type::qss2_power },
+        { "qss2_pwm", dynamics_type::qss2_pwm },
+        { "qss2_quantizer", dynamics_type::qss2_quantizer },
+        { "qss2_sample_hold", dynamics_type::qss2_sample_hold },
+        { "qss2_saturation", dynamics_type::qss2_saturation },
+        { "qss2_sigmoid", dynamics_type::qss2_sigmoid },
+        { "qss2_sign", dynamics_type::qss2_sign },
         { "qss2_sin", dynamics_type::qss2_sin },
+        { "qss2_sqrt", dynamics_type::qss2_sqrt },
         { "qss2_square", dynamics_type::qss2_square },
         { "qss2_sum_2", dynamics_type::qss2_sum_2 },
         { "qss2_sum_3", dynamics_type::qss2_sum_3 },
         { "qss2_sum_4", dynamics_type::qss2_sum_4 },
+        { "qss2_tan", dynamics_type::qss2_tan },
+        { "qss2_tanh", dynamics_type::qss2_tanh },
+        { "qss2_threshold_crossing", dynamics_type::qss2_threshold_crossing },
+        { "qss2_wrap", dynamics_type::qss2_wrap },
         { "qss2_wsum_2", dynamics_type::qss2_wsum_2 },
         { "qss2_wsum_3", dynamics_type::qss2_wsum_3 },
         { "qss2_wsum_4", dynamics_type::qss2_wsum_4 },
+        { "qss3_abs", dynamics_type::qss3_abs },
+        { "qss3_atan", dynamics_type::qss3_atan },
+        { "qss3_atan2", dynamics_type::qss3_atan2 },
         { "qss3_compare", dynamics_type::qss3_compare },
         { "qss3_cos", dynamics_type::qss3_cos },
         { "qss3_cross", dynamics_type::qss3_cross },
+        { "qss3_dead_zone", dynamics_type::qss3_dead_zone },
+        { "qss3_division", dynamics_type::qss3_division },
         { "qss3_exp", dynamics_type::qss3_exp },
         { "qss3_filter", dynamics_type::qss3_filter },
         { "qss3_flipflop", dynamics_type::qss3_flipflop },
         { "qss3_gain", dynamics_type::qss3_gain },
+        { "qss3_hysteresis", dynamics_type::qss3_hysteresis },
         { "qss3_integer", dynamics_type::qss3_integer },
+        { "qss3_integrate_and_fire", dynamics_type::qss3_integrate_and_fire },
         { "qss3_integrator", dynamics_type::qss3_integrator },
         { "qss3_inverse", dynamics_type::qss3_inverse },
         { "qss3_log", dynamics_type::qss3_log },
+        { "qss3_max_hold", dynamics_type::qss3_max_hold },
+        { "qss3_maximum", dynamics_type::qss3_maximum },
+        { "qss3_min_hold", dynamics_type::qss3_min_hold },
+        { "qss3_minimum", dynamics_type::qss3_minimum },
         { "qss3_multiplier", dynamics_type::qss3_multiplier },
         { "qss3_power", dynamics_type::qss3_power },
+        { "qss3_pwm", dynamics_type::qss3_pwm },
+        { "qss3_quantizer", dynamics_type::qss3_quantizer },
+        { "qss3_sample_hold", dynamics_type::qss3_sample_hold },
+        { "qss3_saturation", dynamics_type::qss3_saturation },
+        { "qss3_sigmoid", dynamics_type::qss3_sigmoid },
+        { "qss3_sign", dynamics_type::qss3_sign },
         { "qss3_sin", dynamics_type::qss3_sin },
+        { "qss3_sqrt", dynamics_type::qss3_sqrt },
         { "qss3_square", dynamics_type::qss3_square },
         { "qss3_sum_2", dynamics_type::qss3_sum_2 },
         { "qss3_sum_3", dynamics_type::qss3_sum_3 },
         { "qss3_sum_4", dynamics_type::qss3_sum_4 },
+        { "qss3_tan", dynamics_type::qss3_tan },
+        { "qss3_tanh", dynamics_type::qss3_tanh },
+        { "qss3_threshold_crossing", dynamics_type::qss3_threshold_crossing },
+        { "qss3_wrap", dynamics_type::qss3_wrap },
         { "qss3_wsum_2", dynamics_type::qss3_wsum_2 },
         { "qss3_wsum_3", dynamics_type::qss3_wsum_3 },
         { "qss3_wsum_4", dynamics_type::qss3_wsum_4 },
         { "queue", dynamics_type::queue },
         { "simulation_wrapper", dynamics_type::simulation_wrapper },
-        { "time_func", dynamics_type::time_func }
+        { "time_func", dynamics_type::time_func },
+        { "zero_order_hold", dynamics_type::zero_order_hold }
     };
 
     static_assert(std::size(table) == static_cast<sz>(dynamics_type_size()));
 
     auto it = binary_find(
-      std::begin(table),
-      std::end(table),
-      dynamics_name,
+      std::begin(table), std::end(table), dynamics_name,
       [](auto left, auto right) noexcept -> bool {
           if constexpr (std::is_same_v<decltype(left), std::string_view>)
               return left < right.name;
@@ -242,9 +303,7 @@ auto get_distribution_type(std::string_view name) noexcept
     };
 
     auto it = binary_find(
-      std::begin(table),
-      std::end(table),
-      name,
+      std::begin(table), std::end(table), name,
       [](auto left, auto right) noexcept -> bool {
           if constexpr (std::is_same_v<decltype(left), std::string_view>)
               return left < right.name;
@@ -254,6 +313,33 @@ auto get_distribution_type(std::string_view name) noexcept
 
     return it == std::end(table) ? std::nullopt : std::make_optional(it->type);
 }
+
+struct to_dot {
+    to_dot(const std::string_view buf_) noexcept
+      : buf(buf_)
+    {}
+
+    const std::string_view buf;
+};
+
+} // namespace irt
+
+template<>
+struct fmt::formatter<irt::to_dot> {
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    template<typename FormatContext>
+    auto format(const irt::to_dot& sv, FormatContext& ctx) const
+    {
+        for (const auto c : sv.buf) {
+            *ctx.out()++ = (c == '-') ? '_' : c;
+        }
+
+        return ctx.out();
+    }
+};
+
+namespace irt {
 
 void write_dot_graph_simulation(std::FILE* os, const simulation& sim) noexcept
 {
@@ -270,65 +356,54 @@ void write_dot_graph_simulation(std::FILE* os, const simulation& sim) noexcept
     for (const auto& mdl : sim.models) {
         dispatch(
           mdl,
-          []<typename Dynamics>(
-            Dynamics& dyn, const auto& sim, const auto src_mdl_id, auto& os) {
+          []<typename Dynamics>(Dynamics& dyn, const auto& sim,
+                                const auto src_mdl_id, auto& os) {
               if constexpr (has_output_port<Dynamics>) {
                   for (int i = 0, e = length(dyn.y); i != e; ++i) {
                       const auto  y_id = dyn.y[i];
                       const auto& y    = sim.output_ports.get(y_id);
 
                       const auto src_idx = get_index(src_mdl_id);
-                      const auto port_out =
-                        get_output_port_names<Dynamics>(dot_output_names)[i];
+                      const auto
+                        port_out = get_output_port_names<Dynamics>()[i];
 
                       for (auto it = y.connections.begin(),
                                 et = y.connections.end();
-                           it != et;
-                           ++it) {
-                          if (const auto* dst =
-                                sim.models.try_to_get(it->model)) {
+                           it != et; ++it) {
+                          if (const auto* dst = sim.models.try_to_get(
+                                it->model)) {
 
-                              fmt::print(
-                                " {}:{} -> {}:{}\n",
-                                src_idx,
-                                port_out,
-                                get_index(it->model),
-                                get_input_port_names(
-                                  dst->type, dot_input_names)[it->port_index]);
+                              fmt::print(" {}:{} -> {}:{}\n", src_idx,
+                                         to_dot(port_out), get_index(it->model),
+                                         to_dot(get_input_port_names(
+                                           dst->type)[it->port_index]));
                           }
                       }
 
                       for (auto* block = sim.nodes.try_to_get(y.next); block;
                            block       = sim.nodes.try_to_get(block->next)) {
 
-                          const auto src_idx  = get_index(src_mdl_id);
-                          const auto port_out = get_output_port_names<Dynamics>(
-                            dot_output_names)[i];
+                          const auto src_idx = get_index(src_mdl_id);
+                          const auto
+                            port_out = get_output_port_names<Dynamics>()[i];
 
                           for (auto it = block->nodes.begin(),
                                     et = block->nodes.end();
-                               it != et;
-                               ++it) {
-                              if (const auto* dst =
-                                    sim.models.try_to_get(it->model)) {
-                                  fmt::print(
-                                    os,
-                                    " {}:{} -> {}:{}\n",
-                                    src_idx,
-                                    port_out,
-                                    get_index(it->model),
-                                    get_input_port_names(
-                                      dst->type,
-                                      dot_input_names)[it->port_index]);
+                               it != et; ++it) {
+                              if (const auto* dst = sim.models.try_to_get(
+                                    it->model)) {
+                                  fmt::print(os, " {}:{} -> {}:{}\n", src_idx,
+                                             to_dot(port_out),
+                                             get_index(it->model),
+                                             to_dot(get_input_port_names(
+                                               dst->type)[it->port_index]));
                               }
                           }
                       }
                   }
               }
           },
-          sim,
-          sim.models.get_id(mdl),
-          os);
+          sim, sim.models.get_id(mdl), os);
     }
 
     fmt::print(os, "}}\n");
@@ -360,8 +435,7 @@ public:
             m_reals[ordinal(index)] = "-std::numeric_limits<real>::infinity()";
         else
             fmt::format_to(std::back_inserter(m_reals[ordinal(index)]),
-                           "{:.{}g}",
-                           p.reals[ordinal(index)],
+                           "{:.{}g}", p.reals[ordinal(index)],
                            std::numeric_limits<real>::max_digits10);
 
         return m_reals[ordinal(index)];
@@ -374,8 +448,7 @@ public:
     {
         m_integers[ordinal(index)].clear();
 
-        fmt::format_to(std::back_inserter(m_integers[ordinal(index)]),
-                       "{}",
+        fmt::format_to(std::back_inserter(m_integers[ordinal(index)]), "{}",
                        p.integers[ordinal(index)]);
 
         return m_integers[ordinal(index)];
@@ -398,9 +471,7 @@ static void write_test_simulation_header(std::FILE*             os,
     expect(fatal(sim.can_alloc({})));
     expect(fatal(sim.hsms.can_alloc({})));
 )",
-               name,
-               sim.models.ssize(),
-               sim.hsms.ssize());
+               name, sim.models.ssize(), sim.hsms.ssize());
 }
 
 static void write_test_simulation_model(std::FILE*           os,
@@ -415,8 +486,7 @@ static void write_test_simulation_model(std::FILE*           os,
                R"(
     auto& mdl_{} = sim.alloc<irt::{}>();
 )",
-               idx,
-               irt::dynamics_type_names[ordinal(mdl.type)]);
+               idx, irt::dynamics_type_names[ordinal(mdl.type)]);
 
     switch (mdl.type) {
     case dynamics_type::qss1_integrator:
@@ -425,8 +495,7 @@ static void write_test_simulation_model(std::FILE*           os,
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_integrator({}, {});)",
-          idx,
-          o_param.reals(param, qss_integrator_tag::X),
+          idx, o_param.reals(param, qss_integrator_tag::X),
           o_param.reals(param, qss_integrator_tag::dQ));
         break;
 
@@ -436,8 +505,7 @@ static void write_test_simulation_model(std::FILE*           os,
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_cross({}, {}, {});)",
-          idx,
-          o_param.reals(param, qss_cross_tag::threshold),
+          idx, o_param.reals(param, qss_cross_tag::threshold),
           o_param.reals(param, qss_cross_tag::up_value),
           o_param.reals(param, qss_cross_tag::bottom_value));
         break;
@@ -446,10 +514,8 @@ static void write_test_simulation_model(std::FILE*           os,
     case dynamics_type::qss2_filter:
     case dynamics_type::qss3_filter:
         fmt::print(
-          os,
-          R"(    sim.parameters[sim.get_id(mdl_{})].set_filter({}, {});)",
-          idx,
-          o_param.reals(param, qss_filter_tag::lower_bound),
+          os, R"(    sim.parameters[sim.get_id(mdl_{})].set_filter({}, {});)",
+          idx, o_param.reals(param, qss_filter_tag::lower_bound),
           o_param.reals(param, qss_filter_tag::upper_bound));
         break;
 
@@ -458,18 +524,15 @@ static void write_test_simulation_model(std::FILE*           os,
     case dynamics_type::qss3_power:
         fmt::print(os,
                    R"(    sim.parameters[sim.get_id(mdl_{})].set_power({});)",
-                   idx,
-                   o_param.reals(param, qss_power_tag::exponent));
+                   idx, o_param.reals(param, qss_power_tag::exponent));
         break;
 
     case dynamics_type::qss1_wsum_2:
     case dynamics_type::qss2_wsum_2:
     case dynamics_type::qss3_wsum_2:
         fmt::print(
-          os,
-          R"(    sim.parameters[sim.get_id(mdl_{})].set_wsum2({}, {});)",
-          idx,
-          o_param.reals(param, qss_wsum_2_tag::coeff1),
+          os, R"(    sim.parameters[sim.get_id(mdl_{})].set_wsum2({}, {});)",
+          idx, o_param.reals(param, qss_wsum_2_tag::coeff1),
           o_param.reals(param, qss_wsum_2_tag::coeff2));
         break;
 
@@ -479,8 +542,7 @@ static void write_test_simulation_model(std::FILE*           os,
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_wsum3({}, {}, {});)",
-          idx,
-          o_param.reals(param, qss_wsum_3_tag::coeff1),
+          idx, o_param.reals(param, qss_wsum_3_tag::coeff1),
           o_param.reals(param, qss_wsum_3_tag::coeff2),
           o_param.reals(param, qss_wsum_3_tag::coeff3));
         break;
@@ -491,8 +553,7 @@ static void write_test_simulation_model(std::FILE*           os,
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_wsum4({}, {}, {}, {});)",
-          idx,
-          o_param.reals(param, qss_wsum_4_tag::coeff1),
+          idx, o_param.reals(param, qss_wsum_4_tag::coeff1),
           o_param.reals(param, qss_wsum_4_tag::coeff2),
           o_param.reals(param, qss_wsum_4_tag::coeff3),
           o_param.reals(param, qss_wsum_4_tag::coeff4));
@@ -502,10 +563,8 @@ static void write_test_simulation_model(std::FILE*           os,
     case dynamics_type::qss2_compare:
     case dynamics_type::qss3_compare:
         fmt::print(
-          os,
-          R"(    sim.parameters[sim.get_id(mdl_{})].set_compare({}, {});)",
-          idx,
-          o_param.reals(param, qss_compare_tag::equal),
+          os, R"(    sim.parameters[sim.get_id(mdl_{})].set_compare({}, {});)",
+          idx, o_param.reals(param, qss_compare_tag::equal),
           o_param.reals(param, qss_compare_tag::not_equal));
         break;
 
@@ -514,23 +573,20 @@ static void write_test_simulation_model(std::FILE*           os,
     case dynamics_type::qss3_gain:
         fmt::print(os,
                    R"(    sim.parameters[sim.get_id(mdl_{})].set_gain({});)",
-                   idx,
-                   o_param.reals(param, qss_gain_tag::k));
+                   idx, o_param.reals(param, qss_gain_tag::k));
         break;
 
     case dynamics_type::queue:
         fmt::print(os,
                    R"(    sim.parameters[sim.get_id(mdl_{})].set_queue({});)",
-                   idx,
-                   o_param.reals(param, queue_tag::sigma));
+                   idx, o_param.reals(param, queue_tag::sigma));
         break;
 
     case dynamics_type::dynamic_queue:
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_dynamic_queue_ta(get_source({}));)",
-          idx,
-          o_param.integers(param, dynamic_queue_tag::source_ta));
+          idx, o_param.integers(param, dynamic_queue_tag::source_ta));
         break;
 
     case dynamics_type::priority_queue:
@@ -538,38 +594,33 @@ static void write_test_simulation_model(std::FILE*           os,
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_priority_queue({});)",
           R"(    sim.parameters[sim.get_id(mdl_{})].set_priority_queue_ta(get_source({}));)",
-          idx,
-          o_param.reals(param, priority_queue_tag::sigma),
+          idx, o_param.reals(param, priority_queue_tag::sigma),
           o_param.integers(param, priority_queue_tag::source_ta));
         break;
 
     case dynamics_type::generator: {
-        const auto flags =
-          bitflags<generator::option>(param.integers[generator_tag::i_options]);
+        const auto flags = bitflags<generator::option>(
+          param.integers[generator_tag::i_options]);
 
         if (flags[generator::option::ta_use_source]) {
             fmt::print(
               os,
               R"(    sim.parameters[sim.get_id(mdl_{})].set_generator_ta(get_source({}));)",
-              idx,
-              o_param.integers(param, generator_tag::source_ta));
+              idx, o_param.integers(param, generator_tag::source_ta));
         }
 
         if (flags[generator::option::value_use_source]) {
             fmt::print(
               os,
               R"(    sim.parameters[sim.get_id(mdl_{})].set_generator_value(get_source({}));)",
-              idx,
-              o_param.integers(param, generator_tag::source_value));
+              idx, o_param.integers(param, generator_tag::source_value));
         }
     } break;
 
     case dynamics_type::constant:
         fmt::print(
-          os,
-          R"(    sim.parameters[sim.get_id(mdl_{})].set_constant({}, {});)",
-          idx,
-          o_param.reals(param, constant_tag::value),
+          os, R"(    sim.parameters[sim.get_id(mdl_{})].set_constant({}, {});)",
+          idx, o_param.reals(param, constant_tag::value),
           o_param.reals(param, constant_tag::offset));
         break;
 
@@ -577,8 +628,7 @@ static void write_test_simulation_model(std::FILE*           os,
         fmt::print(
           os,
           R"(    sim.parameters[sim.get_id(mdl_{})].set_time_func({}, {}, {});)",
-          idx,
-          o_param.reals(param, time_func_tag::offset),
+          idx, o_param.reals(param, time_func_tag::offset),
           o_param.reals(param, time_func_tag::timestep),
           o_param.integers(param, time_func_tag::i_type));
         break;
@@ -590,8 +640,7 @@ static void write_test_simulation_model(std::FILE*           os,
                 fmt::print(
                   os,
                   R"(    sim.parameters[sim.get_id(mdl_{})].set_hsm_wrapper_value(get_source({}));)",
-                  idx,
-                  o_param.integers(param, hsm_wrapper_tag::source_value));
+                  idx, o_param.integers(param, hsm_wrapper_tag::source_value));
                 break;
             }
         }
@@ -601,9 +650,7 @@ static void write_test_simulation_model(std::FILE*           os,
     sim.parameters[sim.get_id(mdl_{})].set_hsm_wrapper({});
     sim.parameters[sim.get_id(mdl_{})].set_hsm_wrapper({}, {}, {}, {}, {});
 )",
-                   idx,
-                   o_param.integers(param, hsm_wrapper_tag::id),
-                   idx,
+                   idx, o_param.integers(param, hsm_wrapper_tag::id), idx,
                    o_param.integers(param, hsm_wrapper_tag::i1),
                    o_param.integers(param, hsm_wrapper_tag::i2),
                    o_param.reals(param, hsm_wrapper_tag::r1),
@@ -622,8 +669,8 @@ static void write_test_simulation_models(std::FILE*        os,
     parameter_to_string params;
 
     for (const auto& mdl : sim.models)
-        write_test_simulation_model(
-          os, sim, mdl, sim.parameters[sim.get_id(mdl)], params);
+        write_test_simulation_model(os, sim, mdl,
+                                    sim.parameters[sim.get_id(mdl)], params);
 }
 
 static void write_test_simulation_hsm_state(
@@ -638,35 +685,20 @@ static void write_test_simulation_hsm_state(
     hsm_{}.states[{}].{}.var1 = irt::enum_cast<irt::hierarchical_state_machine::variable>({});
     hsm_{}.states[{}].{}.var2 = irt::enum_cast<irt::hierarchical_state_machine::variable>({});
     hsm_{}.states[{}].{}.type = irt::enum_cast<irt::hierarchical_state_machine::action_type>({});)",
-               hsm_index,
-               state_index,
-               action_name,
-               ordinal(state.var1),
-               hsm_index,
-               state_index,
-               action_name,
-               ordinal(state.var2),
-               hsm_index,
-               state_index,
-               action_name,
-               ordinal(state.type));
+               hsm_index, state_index, action_name, ordinal(state.var1),
+               hsm_index, state_index, action_name, ordinal(state.var2),
+               hsm_index, state_index, action_name, ordinal(state.type));
 
     if (state.var2 == hierarchical_state_machine::variable::constant_i) {
         fmt::print(os,
                    R"(
     hsm_{}.states[{}].{}.constant.i = {};)",
-                   hsm_index,
-                   state_index,
-                   action_name,
-                   state.constant.i);
+                   hsm_index, state_index, action_name, state.constant.i);
     } else if (state.var2 == hierarchical_state_machine::variable::constant_r) {
         fmt::print(os,
                    R"(
     hsm_{}.states[{}].{}.constant.f = {:g};)",
-                   hsm_index,
-                   state_index,
-                   action_name,
-                   state.constant.f);
+                   hsm_index, state_index, action_name, state.constant.f);
     }
 }
 
@@ -681,26 +713,16 @@ static void write_test_simulation_hsm_condition(
                    R"(
     hsm_{}.states[{}].condition.type = irt::enum_cast<irt::hierarchical_state_machine::condition_type>({});
     hsm_{}.states[{}].condition.constant.u = {};)",
-                   hsm_index,
-                   state_index,
-                   ordinal(condition.type),
-                   hsm_index,
-                   state_index,
-                   condition.constant.u);
+                   hsm_index, state_index, ordinal(condition.type), hsm_index,
+                   state_index, condition.constant.u);
     } else {
         fmt::print(os,
                    R"(
     hsm_{}.states[{}].condition.var1 = irt::enum_cast<irt::hierarchical_state_machine::variable>({});
     hsm_{}.states[{}].condition.var2 = irt::enum_cast<irt::hierarchical_state_machine::variable>({});
     hsm_{}.states[{}].condition.type = irt::enum_cast<irt::hierarchical_state_machine::condition_type>({});)",
-                   hsm_index,
-                   state_index,
-                   ordinal(condition.var1),
-                   hsm_index,
-                   state_index,
-                   ordinal(condition.var2),
-                   hsm_index,
-                   state_index,
+                   hsm_index, state_index, ordinal(condition.var1), hsm_index,
+                   state_index, ordinal(condition.var2), hsm_index, state_index,
                    ordinal(condition.type));
 
         if (condition.var2 ==
@@ -708,17 +730,13 @@ static void write_test_simulation_hsm_condition(
             fmt::print(os,
                        R"(
     hsm_{}.states[{}].condition.constant.i = {};)",
-                       hsm_index,
-                       state_index,
-                       condition.constant.i);
+                       hsm_index, state_index, condition.constant.i);
         } else if (condition.var2 ==
                    hierarchical_state_machine::variable::constant_r) {
             fmt::print(os,
                        R"(
     hsm_{}.states[{}].condition.constant.f = {:g};)",
-                       hsm_index,
-                       state_index,
-                       condition.constant.f);
+                       hsm_index, state_index, condition.constant.f);
         }
     }
 }
@@ -734,27 +752,20 @@ static void write_test_simulation_hsm_state(
     hsm_{}.set_state({}, {}, {});
     hsm_{}.states[{}].if_transition = {};
     hsm_{}.states[{}].else_transition = {};)",
-               hsm_index,
-               state_index,
-               state.super_id,
-               state.sub_id,
-               hsm_index,
-               state_index,
-               state.if_transition,
-               hsm_index,
-               state_index,
+               hsm_index, state_index, state.super_id, state.sub_id, hsm_index,
+               state_index, state.if_transition, hsm_index, state_index,
                state.else_transition);
 
-    write_test_simulation_hsm_state(
-      os, hsm_index, "enter_action", state.enter_action, state_index);
-    write_test_simulation_hsm_state(
-      os, hsm_index, "exit_action", state.exit_action, state_index);
-    write_test_simulation_hsm_state(
-      os, hsm_index, "if_action", state.if_action, state_index);
-    write_test_simulation_hsm_state(
-      os, hsm_index, "else_action", state.else_action, state_index);
-    write_test_simulation_hsm_condition(
-      os, hsm_index, state.condition, state_index);
+    write_test_simulation_hsm_state(os, hsm_index, "enter_action",
+                                    state.enter_action, state_index);
+    write_test_simulation_hsm_state(os, hsm_index, "exit_action",
+                                    state.exit_action, state_index);
+    write_test_simulation_hsm_state(os, hsm_index, "if_action", state.if_action,
+                                    state_index);
+    write_test_simulation_hsm_state(os, hsm_index, "else_action",
+                                    state.else_action, state_index);
+    write_test_simulation_hsm_condition(os, hsm_index, state.condition,
+                                        state_index);
 }
 
 static void write_test_simulation_hsm(std::FILE*                        os,
@@ -769,17 +780,9 @@ static void write_test_simulation_hsm(std::FILE*                        os,
     hsm_{}.top_state = {};
     hsm_{}.constants = {{ {:g}, {:g}, {:g}, {:g}, {:g}, {:g}, {:g}, {:g} }};
 )",
-               hsm_index,
-               hsm_index,
-               hsm.top_state,
-               hsm_index,
-               hsm.constants[0],
-               hsm.constants[1],
-               hsm.constants[2],
-               hsm.constants[3],
-               hsm.constants[4],
-               hsm.constants[5],
-               hsm.constants[6],
+               hsm_index, hsm_index, hsm.top_state, hsm_index, hsm.constants[0],
+               hsm.constants[1], hsm.constants[2], hsm.constants[3],
+               hsm.constants[4], hsm.constants[5], hsm.constants[6],
                hsm.constants[7]);
 
     constexpr auto length  = hierarchical_state_machine::max_number_of_state;
@@ -820,16 +823,12 @@ static void write_test_simulation_constant_source(
     format(constant_src_{}.name, "source-{}", src_index);
     constant_src_{}.length = {};
     constant_src_{}.buffer = {{ )",
-               src_index,
-               src_index,
-               src_index,
-               src_index,
-               src.length,
+               src_index, src_index, src_index, src_index, src.length,
                src_index);
 
     for (auto i = 0u; i < src.length; ++i)
-        fmt::print(
-          os, "{}{}", src.buffer[i], ((i + 1 >= src.length) ? "} " : ", "));
+        fmt::print(os, "{}{}", src.buffer[i],
+                   ((i + 1 >= src.length) ? "} " : ", "));
 
     fmt::print(os, "\n");
 }
@@ -968,46 +967,43 @@ static void write_test_simulation_connections(std::FILE*        os,
     for (const auto& mdl : sim.models) {
         dispatch(
           mdl,
-          []<typename Dynamics>(
-            Dynamics& dyn, const auto& sim, const auto src_mdl_id, auto& os) {
+          []<typename Dynamics>(Dynamics& dyn, const auto& sim,
+                                const auto src_mdl_id, auto& os) {
               if constexpr (has_output_port<Dynamics>) {
                   for (int i = 0, e = length(dyn.y); i != e; ++i) {
                       const auto  y_id = dyn.y[i];
-                      const auto& y    = sim.output_ports.get(y_id);
+                      const auto* y    = sim.output_ports.try_to_get(y_id);
+
+                      if (not y)
+                          continue;
 
                       const auto src_idx = get_index(src_mdl_id);
-                      for (auto it = y.connections.begin(),
-                                et = y.connections.end();
-                           it != et;
-                           ++it) {
-                          if (const auto* dst =
-                                sim.models.try_to_get(it->model)) {
+                      for (auto it = y->connections.begin(),
+                                et = y->connections.end();
+                           it != et; ++it) {
+                          if (const auto* dst = sim.models.try_to_get(
+                                it->model)) {
                               fmt::print(os,
                                          R"(
     expect(sim.connect_dynamics(mdl_{}, {}, mdl_{}, {}).has_value());)",
-                                         src_idx,
-                                         i,
-                                         get_index(it->model),
+                                         src_idx, i, get_index(it->model),
                                          it->port_index);
                           }
                       }
 
-                      for (auto* block = sim.nodes.try_to_get(y.next); block;
+                      for (auto* block = sim.nodes.try_to_get(y->next); block;
                            block       = sim.nodes.try_to_get(block->next)) {
 
                           const auto src_idx = get_index(src_mdl_id);
                           for (auto it = block->nodes.begin(),
                                     et = block->nodes.end();
-                               it != et;
-                               ++it) {
-                              if (const auto* dst =
-                                    sim.models.try_to_get(it->model)) {
+                               it != et; ++it) {
+                              if (const auto* dst = sim.models.try_to_get(
+                                    it->model)) {
                                   fmt::print(os,
                                              R"(
     expect(sim.connect_dynamics(mdl_{}, {}, mdl_{}, {}).has_value());)",
-                                             src_idx,
-                                             i,
-                                             get_index(it->model),
+                                             src_idx, i, get_index(it->model),
                                              it->port_index);
                               }
                           }
@@ -1015,9 +1011,7 @@ static void write_test_simulation_connections(std::FILE*        os,
                   }
               }
           },
-          sim,
-          sim.models.get_id(mdl),
-          os);
+          sim, sim.models.get_id(mdl), os);
     }
 }
 
@@ -1036,8 +1030,7 @@ static void write_test_simulation_loop(std::FILE* os,
     }} while (not sim.current_time_expired());
 
 )",
-               begin,
-               end);
+               begin, end);
 }
 
 auto write_test_simulation(std::FILE*                          os,
@@ -1066,22 +1059,19 @@ auto write_test_simulation(std::FILE*                          os,
             if (mdl.type == dynamics_type::counter) {
                 dispatch(
                   mdl,
-                  []<typename Dynamics>(
-                    const Dynamics& dyn, auto& os, const auto idx) {
+                  []<typename Dynamics>(const Dynamics& dyn, auto& os,
+                                        const auto idx) {
                       if constexpr (std::is_same_v<Dynamics, irt::counter>) {
                           fmt::print(os,
                                      R"(
     expect(eq(mdl_{}.number, static_cast<irt::i64>({})));
     expect(eq(mdl_{}.last_value, {:g}));
 )",
-                                     idx,
-                                     dyn.event_number,
-                                     idx,
+                                     idx, dyn.event_number, idx,
                                      dyn.last_value);
                       }
                   },
-                  os,
-                  get_index(sim.get_id(mdl)));
+                  os, get_index(sim.get_id(mdl)));
             }
         }
     }

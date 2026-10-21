@@ -4,10 +4,9 @@
 
 #include <irritator/archiver.hpp>
 #include <irritator/core.hpp>
-#include <irritator/error.hpp>
+#include <irritator/format.hpp>
 #include <irritator/global.hpp>
-#include <irritator/io.hpp>
-#include <irritator/observation.hpp>
+#include <irritator/modeling.hpp>
 
 #include <charconv>
 #include <filesystem>
@@ -56,15 +55,9 @@ static void show_version() noexcept
 #if !defined(VERSION_PATCH)
 #define VERSION_PATCH = "patch version undefined"
 #endif
-#if !defined(VERSION_TWEAK)
-#define VERSION_TWEAK = "tweak version undefined"
-#endif
 
-    fmt::print("irritator-cli {}.{}.{}-{}\n\n",
-               VERSION_MAJOR,
-               VERSION_MINOR,
-               VERSION_PATCH,
-               VERSION_TWEAK);
+    fmt::print("irritator-cli {}.{}.{}\n\n", VERSION_MAJOR, VERSION_MINOR,
+               VERSION_PATCH);
 }
 
 struct report_parameter {
@@ -113,8 +106,8 @@ static constexpr void warning(Args&&... args) noexcept
 
     irt::debug::ensure(sizeof...(args) == report_parameters[idx].arg);
 
-    fmt::vprint(
-      stderr, report_parameters[idx].str, fmt::make_format_args(args...));
+    fmt::vprint(stderr, report_parameters[idx].str,
+                fmt::make_format_args(args...));
 }
 
 template<ec Index, typename Ret, typename... Args>
@@ -124,10 +117,8 @@ static constexpr auto error(Ret&& ret, Args&&... args) noexcept -> Ret
 
     irt::debug::ensure(sizeof...(args) == report_parameters[idx].arg);
 
-    fmt::vprint(stderr,
-                fg(fmt::terminal_color::red),
-                report_parameters[idx].str,
-                fmt::make_format_args(args...));
+    fmt::vprint(stderr, fg(fmt::terminal_color::red),
+                report_parameters[idx].str, fmt::make_format_args(args...));
 
     return ret;
 }
@@ -157,9 +148,7 @@ static constexpr const option* get_from_short(
     const auto end   = std::end(options);
 
     const auto i = irt::binary_find(
-      begin,
-      end,
-      short_name,
+      begin, end, short_name,
       [](const auto& l, const auto& r) noexcept -> bool {
           if constexpr (std::is_same_v<std::decay_t<decltype(l)>,
                                        std::string_view>)
@@ -178,9 +167,7 @@ static constexpr const option* get_from_long(
     const auto end   = std::end(options);
 
     const auto i = irt::binary_find(
-      begin,
-      end,
-      short_name,
+      begin, end, short_name,
       [](const auto& l, const auto& r) noexcept -> bool {
           if constexpr (std::is_same_v<std::decay_t<decltype(l)>,
                                        std::string_view>)
@@ -196,7 +183,10 @@ class main_parameters
 {
     irt::sz memory = 1024 * 1024 * 8;
 
-    irt::journal_handler jn;
+    irt::task_manager   task_mgr;
+    irt::log_history    jn;
+    irt::journal_scope  scope;
+    irt::config_manager config;
 
     irt::modeling        mod;
     irt::json_dearchiver json;
@@ -210,13 +200,13 @@ class main_parameters
 
 public:
     main_parameters(int ac, const char* av[])
-      : mod(jn)
+      : task_mgr(1, 1)
       , args{ av + 1, static_cast<std::size_t>(ac - 1) }
       , r{ 0.0 }
     {
         mod.files.write([&](auto& fs) noexcept {
             registred_path_add(fs);
-            fs.browse_registreds(jn);
+            fs.browse_registreds();
         });
 
         if (auto ret = mod.fill_components(); ret.has_error()) {
@@ -241,59 +231,29 @@ public:
 
     void observation_initialize() noexcept
     {
-        for (auto& o : pj.grid_observers) {
-            o.init(pj, mod, pj.sim);
-            pj.file_obs.alloc(pj.grid_observers.get_id(o));
-        }
+        for (auto& o : pj.grid_observers)
+            o.init(pj, mod);
 
-        for (auto& o : pj.graph_observers) {
-            o.init(pj, mod, pj.sim);
-            pj.file_obs.alloc(pj.graph_observers.get_id(o));
-        }
+        for (auto& o : pj.graph_observers)
+            o.init(pj, mod);
 
         for (auto& o : pj.variable_observers)
-            if (auto ret = o.init(pj, pj.sim); !!ret)
-                pj.file_obs.alloc(pj.variable_observers.get_id(o));
-
-        const auto path = pj.get_observation_dir(mod);
-        if (path.has_value())
-            pj.file_obs.initialize(pj.sim, pj, path->string());
+            o.init(pj);
     }
 
     void observation_update() noexcept
     {
-        for (std::size_t i = 0, e = pj.sim.immediate_observers.size(); i != e;
-             ++i) {
-            const auto obs_id = pj.sim.immediate_observers[i];
-            if (auto* o = pj.sim.observers.try_to_get(obs_id); o)
-                if (o->states[irt::observer_flags::buffer_full])
-                    write_interpolate_data(*o, o->time_step);
-        }
-
         for (auto& g : pj.grid_observers) {
             const auto g_id = pj.grid_observers.get_id(g);
-            if (auto* g = pj.grid_observers.try_to_get(g_id); g)
-                if (g->can_update(pj.sim.current_time()))
-                    g->update(pj.sim);
+            if (auto* g = pj.grid_observers.try_to_get(g_id))
+                g->update(pj);
         }
 
         for (auto& g : pj.graph_observers) {
             const auto g_id = pj.graph_observers.get_id(g);
-            if (auto* g = pj.graph_observers.try_to_get(g_id); g)
-                if (g->can_update(pj.sim.current_time()))
-                    g->update(pj.sim);
+            if (auto* g = pj.graph_observers.try_to_get(g_id))
+                g->update(pj);
         }
-
-        if (pj.file_obs.can_update(pj.sim.current_time()))
-            pj.file_obs.update(pj.sim, pj);
-    }
-
-    void observation_finalize() noexcept
-    {
-        for (auto& obs : pj.sim.observers)
-            flush_interpolate_data(obs, obs.time_step);
-
-        pj.file_obs.finalize();
     }
 
     irt::expected<void> run() noexcept
@@ -304,12 +264,9 @@ public:
 
         fmt::print("grid-observers: {}\n"
                    "graph-observers: {}\n"
-                   "plot-observers: {}\n"
-                   "file-observers: {}\n",
-                   pj.grid_observers.ssize(),
-                   pj.graph_observers.ssize(),
-                   pj.variable_observers.ssize(),
-                   pj.file_obs.ids.ssize());
+                   "plot-observers: {}\n",
+                   pj.grid_observers.ssize(), pj.graph_observers.ssize(),
+                   pj.variable_observers.ssize());
 
         do {
             irt_check(pj.sim.run());
@@ -317,14 +274,16 @@ public:
         } while (not pj.sim.current_time_expired());
 
         irt_check(pj.sim.finalize());
-        observation_finalize();
+        observation_update();
 
         return irt::success();
     }
 
     irt::expected<void> prepare_and_run() noexcept
     {
-        fmt::print("Run simulation for file {}\n", front);
+        log(irt::log_level::notice, [&](auto& m) {
+            irt::format(m, "Run simulation for file {}\n", front);
+        });
 
         const std::filesystem::path str{ front };
         load_next_token();
@@ -336,7 +295,7 @@ public:
             if (json(pj, mod, pj.sim, str.string(), *file)) {
                 run();
             } else {
-                return irt::new_error(irt::json_errc::invalid_project_format);
+                return irt::make_error(irt::json_errc::invalid_project_format);
             }
         } else {
             return file.error();
@@ -350,21 +309,26 @@ public:
      * the directory exists in the filesystem.
      * @return 1 if the function succeded, 0 otherwise.
      */
-    int registred_path_add(const std::filesystem::path& path,
-                           const std::string_view       name,
-                           irt::file_access&            fs) noexcept
+    int registred_path_add(const irt::path&       path,
+                           const std::string_view name,
+                           irt::file_access&      fs) noexcept
     {
-        std::error_code ec;
-        if (std::filesystem::exists(path, ec) and ec == std::errc{}) {
-            auto&      dir    = fs.registred_paths.alloc();
-            const auto dir_id = fs.registred_paths.get_id(dir);
-            dir.name          = name;
-            dir.path          = path.string().c_str();
-            fs.recorded_paths.emplace_back(dir_id);
-            return 1;
+        const auto std_path = path.to_std_path();
+        auto       ec       = std::error_code{};
+
+        if (std::filesystem::exists(std_path, ec) and ec == std::errc{}) {
+            if (std::filesystem::is_directory(std_path, ec) and
+                ec == std::errc{}) {
+                auto&      dir    = fs.registred_paths.alloc();
+                const auto dir_id = fs.registred_paths.get_id(dir);
+                dir.name          = name;
+                dir.path          = path.sv();
+                fs.recorded_paths.emplace_back(dir_id);
+                return 1;
+            }
         }
 
-        warning<ec::bad_dir>(path.string());
+        warning<ec::bad_dir>(path.sv());
         return 0;
     }
 
@@ -426,8 +390,8 @@ public:
 
     bool parse_integer() noexcept
     {
-        if (const auto ec =
-              std::from_chars(front.data(), front.data() + front.size(), u);
+        if (const auto ec = std::from_chars(front.data(),
+                                            front.data() + front.size(), u);
             ec.ec == std::errc{}) {
             front = front.substr(ec.ptr - front.data());
         } else {
@@ -440,8 +404,8 @@ public:
     /** Parse a real from @c front and if it empty, front args. */
     bool parse_real() noexcept
     {
-        if (const auto ec =
-              std::from_chars(front.data(), front.data() + front.size(), r);
+        if (const auto ec = std::from_chars(front.data(),
+                                            front.data() + front.size(), r);
             ec.ec == std::errc{}) {
             front = front.substr(ec.ptr - front.data());
         } else {
@@ -611,14 +575,6 @@ public:
 
         if (auto ret = prepare_and_run(); not ret) {
             switch (ret.error().cat()) {
-            case irt::category::json:
-                warning<ec::json_file>(front.front(),
-                                       std::string_view{ "unknown" });
-                return false;
-            case irt::category::file:;
-                warning<ec::open_file>(front.front(),
-                                       std::string_view{ "unknown" });
-                return false;
             case irt::category::modeling:
                 warning<ec::modeling_init_error>(ret.error().value());
                 return false;

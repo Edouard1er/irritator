@@ -61,25 +61,9 @@ inline file_path_id get_file_from_component(const component_access& ids,
     return undefined<file_path_id>();
 }
 
-/// Check if a @c T with name @c name exists in the @c data_array @c data. Used
-/// for @c file_path, @c dir_path and @c reg_path.
-template<typename T, typename Identifier>
-constexpr bool path_exist(const data_array<T, Identifier>& data,
-                          const vector<Identifier>&        container,
-                          std::string_view                 name) noexcept
-{
-    for (const auto id : container)
-        if (const auto* item = data.try_to_get(id))
-            if (item->path.sv() == name)
-                return true;
-
-    return false;
-}
-
 /// Adds the extension to the file path string according to @c type extension.
-inline void add_extension(
-  file_path_str&       file,
-  file_path::file_type type = file_path::file_type::component_file) noexcept
+inline void add_extension(file_path_str& file,
+                          file_type type = file_type::component_file) noexcept
 {
     const std::decay_t<decltype(file)> tmp(file);
 
@@ -87,21 +71,20 @@ inline void add_extension(
         format(file,
                "{}{}",
                tmp.sv().substr(0, dot),
-               file_path::file_type_names[ordinal(type)]);
+               file_type_names[ordinal(type)]);
     } else {
-        format(
-          file, "{}{}", tmp.sv(), file_path::file_type_names[ordinal(type)]);
+        format(file, "{}{}", tmp.sv(), file_type_names[ordinal(type)]);
     }
 }
 
 /// Checks if the file path string has the corresponding @c type extension.
 constexpr bool has_extension(
   const std::string_view filename,
-  file_path::file_type   type = file_path::file_type::component_file) noexcept
+  file_type              type = file_type::component_file) noexcept
 {
     if (auto dot = filename.find_last_of('.'); dot != std::string_view::npos) {
         const auto ext = filename.substr(dot);
-        return ext == file_path::file_type_names[ordinal(type)];
+        return ext == file_type_names[ordinal(type)];
     }
 
     return false;
@@ -114,68 +97,57 @@ constexpr bool has_extension(
 /// @return The irritator file type known or @c file_type::undefined_file
 /// otherwise.
 ///
-constexpr file_path::file_type get_extension(
-  const std::string_view filename) noexcept
+constexpr file_type get_extension(const std::string_view filename) noexcept
 {
     if (auto dot = filename.find_last_of('.'); dot != std::string_view::npos) {
         const auto ext = filename.substr(dot);
 
-        for (sz i = 0; i < std::size(file_path::file_type_names); ++i)
-            if (file_path::file_type_names[i] == ext)
-                return enum_cast<file_path::file_type>(i);
+        for (sz i = 0; i < std::size(file_type_names); ++i)
+            if (file_type_names[i] == ext)
+                return enum_cast<file_type>(i);
     }
 
-    return file_path::file_type::undefined_file;
-}
-
-/// Checks if the file path string has an extension equals to any one of
-/// irritator files (.irt, .pirt, .data, etc.).
-constexpr bool has_irritator_extension(const std::string_view filename) noexcept
-{
-    if (auto dot = filename.find_last_of('.'); dot != std::string_view::npos) {
-        const auto ext = filename.substr(dot);
-
-        for (const auto& valid_extension : file_path::file_type_names)
-            if (valid_extension == ext)
-                return true;
-    }
-
-    return false;
+    return file_type::undefined_file;
 }
 
 /// Checks if the file path string has a valid filename and has the
 /// corresponding @c type extension.
 constexpr bool is_valid_filename(
   const std::string_view filename,
-  file_path::file_type   type = file_path::file_type::component_file) noexcept
+  file_type              type = file_type::component_file) noexcept
 {
     return not filename.empty() and filename[0] != '.' and
            filename[0] != '-' and all_char_valid(filename) and
-           filename.ends_with(file_path::file_type_names[ordinal(type)]);
+           filename.ends_with(file_type_names[ordinal(type)]);
 }
 
 static_assert(is_valid_filename("file.irt"));
-static_assert(is_valid_filename("file.pirt",
-                                file_path::file_type::project_file));
+static_assert(is_valid_filename("file.pirt", file_type::project_file));
 
-inline std::optional<std::filesystem::path> make_file(
-  const registred_path& r,
-  const dir_path&       d,
-  const file_path&      f) noexcept
+inline std::optional<path> make_file(const registred_path& r,
+                                     const dir_path&       d,
+                                     const file_path&      f) noexcept
 {
-    try {
-        std::filesystem::path ret(r.path.sv());
-        ret /= d.path.sv();
-        ret /= f.path.sv();
-        return ret;
-    } catch (...) {
+    debug::ensure(not r.path.empty());
+    debug::ensure(not d.path.empty());
+    debug::ensure(not f.path.empty());
+
+    auto ret = path{ r.path.sv() };
+    if (not ret.can_append(d.path.sv()))
         return std::nullopt;
-    }
+
+    ret /= d.path.sv();
+    if (not ret.can_append(f.path.sv()))
+        return std::nullopt;
+
+    ret /= f.path.sv();
+
+    return ret;
 }
 
 struct component_filenames {
-    std::filesystem::path component;
-    std::filesystem::path description;
+    path component;
+    path description;
 };
 
 inline auto make_component_files(const file_access&      fs,
@@ -189,13 +161,13 @@ inline auto make_component_files(const file_access&      fs,
         if (const auto* dir = fs.dir_paths.try_to_get(fp->parent)) {
             if (const auto* reg = fs.registred_paths.try_to_get(dir->parent)) {
                 try {
-                    std::filesystem::path base(reg->path.sv());
+                    path base(reg->path.sv());
                     base /= dir->path.sv();
                     base /= fp->path.sv();
-                    base.replace_extension(".irt");
+                    base.replace_extension(file_type::component_file);
 
-                    std::filesystem::path desc(base);
-                    desc.replace_extension(".desc");
+                    path desc(base);
+                    desc.replace_extension(file_type::txt_file);
 
                     return component_filenames{ .component   = base,
                                                 .description = desc };
@@ -208,14 +180,13 @@ inline auto make_component_files(const file_access&      fs,
     return std::nullopt;
 }
 
-inline std::optional<std::filesystem::path> make_file(
-  const file_access&         fs,
-  const component_file_path& c) noexcept
+inline std::optional<path> make_file(const file_access&         fs,
+                                     const component_file_path& c) noexcept
 {
     if (const auto* fp = fs.file_paths.try_to_get(c.file)) {
         if (const auto* dir = fs.dir_paths.try_to_get(fp->parent)) {
             if (const auto* reg = fs.registred_paths.try_to_get(dir->parent)) {
-                std::filesystem::path file(reg->path.sv());
+                path file(reg->path.sv());
                 file /= dir->path.sv();
                 file /= fp->path.sv();
                 return file;
@@ -226,33 +197,25 @@ inline std::optional<std::filesystem::path> make_file(
     return std::nullopt;
 }
 
-inline std::optional<std::filesystem::path> make_file(
-  const modeling&  mod,
-  const file_path& f) noexcept
+inline std::optional<path> make_file(const file_access& fs,
+                                     const file_path&   f) noexcept
 {
-    return mod.files.read([&](const auto& fs, const auto /*vers*/) noexcept
-                            -> std::optional<std::filesystem::path> {
-        if (auto* dir = fs.dir_paths.try_to_get(f.parent))
-            if (auto* reg = fs.registred_paths.try_to_get(dir->parent))
-                return make_file(*reg, *dir, f);
+    if (auto* dir = fs.dir_paths.try_to_get(f.parent))
+        if (auto* reg = fs.registred_paths.try_to_get(dir->parent))
+            return make_file(*reg, *dir, f);
 
-        return std::nullopt;
-    });
+    return std::nullopt;
 }
 
-inline std::optional<std::filesystem::path> make_file(
-  const modeling&    mod,
-  const file_path_id f) noexcept
+inline std::optional<path> make_file(const file_access& fs,
+                                     const file_path_id f) noexcept
 {
-    return mod.files.read([&](const auto& fs, const auto /*vers*/) noexcept
-                            -> std::optional<std::filesystem::path> {
-        if (auto* file = fs.file_paths.try_to_get(f))
-            if (auto* dir = fs.dir_paths.try_to_get(file->parent))
-                if (auto* reg = fs.registred_paths.try_to_get(dir->parent))
-                    return make_file(*reg, *dir, *file);
+    if (auto* file = fs.file_paths.try_to_get(f))
+        if (auto* dir = fs.dir_paths.try_to_get(file->parent))
+            if (auto* reg = fs.registred_paths.try_to_get(dir->parent))
+                return make_file(*reg, *dir, *file);
 
-        return std::nullopt;
-    });
+    return std::nullopt;
 }
 
 inline expected<file> open_file(
@@ -261,31 +224,21 @@ inline expected<file> open_file(
   const file_path&      file_p,
   const file_mode       mode = file_mode(file_open_options::read)) noexcept
 {
-    try {
-        std::filesystem::path p = reg_p.path.u8sv();
-        p /= dir_p.path.u8sv();
-        p /= file_p.path.u8sv();
+    if (auto path = make_file(reg_p, dir_p, file_p); path.has_value())
+        return file::open(*path, mode);
 
-        return file::open(p, mode);
-    } catch (...) {
-        return new_error(file_errc::memory_error);
-    }
+    return make_error(std::errc::not_enough_memory);
 }
 
 inline expected<file> open_file(
-  const modeling&    mod,
+  const file_access& fs,
   const file_path_id id,
   const file_mode    mode = file_mode(file_open_options::read)) noexcept
 {
-    try {
-        if (const auto filename = make_file(mod, id); filename.has_value()) {
-            return file::open(*filename, mode);
-        }
+    if (const auto filename = make_file(fs, id); filename.has_value())
+        return file::open(*filename, mode);
 
-        return new_error(file_errc::open_error);
-    } catch (...) {
-        return new_error(file_errc::memory_error);
-    }
+    return make_error(std::errc::not_enough_memory);
 }
 
 /// Checks the type of \c component pointed by the \c tree_node \c.
@@ -293,46 +246,16 @@ inline expected<file> open_file(
 /// \return true in the underlying \c component in the \c tree_node \c is a
 /// graph or a grid otherwise return false. If the component does not exists
 /// this function returns false.
-inline bool component_is_grid_or_graph(const modeling&  mod,
-                                       const tree_node& tn) noexcept
+inline bool component_is_grid_or_graph(const component_access& ids,
+                                       const tree_node&        tn) noexcept
 {
-    return mod.ids.read([&](const auto& ids, auto) noexcept {
-        if (ids.exists(tn.id)) {
-            return any_equal(ids.components[tn.id].type,
-                             component_type::graph,
-                             component_type::grid);
-        }
+    if (ids.exists(tn.id)) {
+        return any_equal(ids.components[tn.id].type,
+                         component_type::graph,
+                         component_type::grid);
+    }
 
-        return false;
-    });
-}
-
-template<typename Function>
-void for_each_component(const modeling& mod, Function&& f) noexcept
-{
-    mod.files.read([&](const auto& fs, const auto /*vers*/) noexcept {
-        for (const auto reg_id : fs.recorded_paths) {
-            if (const auto* reg = fs.registred_paths.try_to_get(reg_id)) {
-                for (const auto dir_id : reg->children) {
-                    if (const auto* dir = fs.dir_paths.try_to_get(dir_id)) {
-                        for (const auto file_id : dir->children) {
-                            if (const auto* file =
-                                  fs.file_paths.try_to_get(file_id)) {
-                                mod.ids.read(
-                                  [&](const auto& ids, auto) noexcept {
-                                      if (ids.exists(file->component))
-                                          f(*reg,
-                                            *dir,
-                                            *file,
-                                            ids.components[file->component]);
-                                  });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
+    return false;
 }
 
 //! Call \c f for each model found into \c tree_node::nodes_v table.
@@ -340,12 +263,14 @@ template<typename Function>
 void for_each_model(simulation& sim, tree_node& tn, Function&& f) noexcept
 {
     for (sz i = 0, e = tn.unique_id_to_model_id.data.size(); i < e; ++i) {
-        if_data_exists_do(
-          sim.models, tn.unique_id_to_model_id.data[i].value, [&](auto& mdl) {
-              std::invoke(std::forward<Function>(f),
-                          tn.unique_id_to_model_id.data[i].id.sv(),
-                          mdl);
-          });
+        if_data_exists_do(sim.models,
+                          tn.unique_id_to_model_id.data[i].value.mdl_id,
+                          [&](auto& mdl) {
+                              std::invoke(
+                                std::forward<Function>(f),
+                                tn.unique_id_to_model_id.data[i].id.sv(),
+                                mdl);
+                          });
     }
 }
 
@@ -355,7 +280,7 @@ void for_each_model(const simulation& sim,
                     Function&&        f) noexcept
 {
     for (sz i = 0, e = tn.unique_id_to_model_id.data.size(); i < e; ++i) {
-        const auto mdl_id = tn.unique_id_to_model_id.data[i].value;
+        const auto mdl_id = tn.unique_id_to_model_id.data[i].value.mdl_id;
         if (const auto* mdl = sim.models.try_to_get(mdl_id); mdl)
             std::invoke(std::forward<Function>(f),
                         tn.unique_id_to_model_id.data[i].id.sv(),

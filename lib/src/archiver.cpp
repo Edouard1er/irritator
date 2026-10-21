@@ -8,6 +8,8 @@
 
 namespace irt {
 
+#if 0
+
 struct file_header {
     enum class mode_type : u32 {
         none = 0,
@@ -357,10 +359,12 @@ struct binary_archiver::impl {
             buffer.resize(size);
             io(buffer.data(), size);
             buffer[size] = '\0';
-            src.file_path.assign(buffer.begin(), buffer.end());
+
+            const auto sv = std::string_view{ buffer.data(), buffer.size() };
+            src.file_path.assign(sv);
             return true;
         } else {
-            auto str       = src.file_path.string();
+            auto str       = src.file_path.sv();
             auto orig_size = str.size();
             debug::ensure(orig_size < INT32_MAX);
             i32 size = static_cast<i32>(orig_size);
@@ -386,10 +390,12 @@ struct binary_archiver::impl {
             buffer.resize(size);
             io(buffer.data(), size);
             buffer[size] = '\0';
-            src.file_path.assign(buffer.begin(), buffer.end());
+
+            const auto sv = std::string_view{ buffer.data(), buffer.size() };
+            src.file_path.assign(sv);
             return true;
         } else {
-            auto str       = src.file_path.string();
+            auto str       = src.file_path.sv();
             auto orig_size = str.size();
             debug::ensure(orig_size < INT32_MAX);
             i32 size = static_cast<i32>(orig_size);
@@ -755,5 +761,7 @@ void binary_archiver::clear_cache() noexcept
     to_text.data.clear();
     to_random.data.clear();
 }
+
+#endif
 
 } //  irt

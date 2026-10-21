@@ -97,8 +97,9 @@ void component_model_selector::component_comboxbox(
     }
 }
 
-void component_model_selector::observable_model_treenode(const project& pj,
-                                                         tree_node& tn) noexcept
+void component_model_selector::observable_model_treenode(
+  const project&   pj,
+  const tree_node& tn) noexcept
 {
     auto& app = container_of(this, &application::component_model_sel);
 
@@ -112,7 +113,7 @@ void component_model_selector::observable_model_treenode(const project& pj,
                            ordinal(tn.id));
 
             if (compo.type == component_type::generic) {
-                ImGui::PushID(&tn);
+                ImGui::PushID(get_index(pj.tree_nodes.get_id(tn)));
                 if (ImGui::TreeNodeEx(label.c_str(),
                                       ImGuiTreeNodeFlags_DefaultOpen)) {
                     for_each_model(
@@ -123,7 +124,7 @@ void component_model_selector::observable_model_treenode(const project& pj,
                           const auto current_mdl_id = pj.sim.models.get_id(mdl);
                           ImGui::PushID(get_index(current_mdl_id));
 
-                          const auto current_tn_id = pj.node(tn);
+                          const auto current_tn_id = pj.tree_nodes.get_id(tn);
                           if (ImGui::Selectable(
                                 dynamics_type_names[ordinal(mdl.type)],
                                 tn_id == current_tn_id &&
@@ -232,10 +233,10 @@ void component_model_selector::update(const project&     pj,
             tn_id              = undefined<tree_node_id>();
             mdl_id             = undefined<model_id>();
 
-            app.jn.push(log_level::error, [&](auto& title, auto& msg) noexcept {
-                title = "Component model selector error";
-                msg   = "Fail to update component list";
-            });
+            using namespace std::string_view_literals;
+
+            log(log_level::error,
+                "component-model-selector: fail to update component list"sv);
         } else {
             component_selected = -1;
             for (sz i = 0, e = data.components.size(); i != e; ++i) {
