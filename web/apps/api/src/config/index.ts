@@ -5,6 +5,7 @@ export interface Config {
   runnerPath: string; host: string; port: number; bodyLimit: number;
   timeoutMs: number; maxConcurrent: number; maxStdoutBytes: number; maxStderrBytes: number;
   engineLimits: typeof caps;
+  maxDepth?: number; maxInstances?: number;
 }
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   function integer(name: string, fallback: number, min: number, max: number): number {
@@ -26,6 +27,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxConnections: integer('ENGINE_MAX_CONNECTIONS',caps.maxConnections,0,caps.maxConnections),
       maxRunCalls: integer('ENGINE_MAX_RUN_CALLS',caps.maxRunCalls,1,caps.maxRunCalls),
       maxPoints: integer('ENGINE_MAX_POINTS',caps.maxPoints,1,caps.maxPoints)
-    }
+    },
+    maxDepth: integer('ENGINE_MAX_DEPTH',8,1,8),
+    maxInstances: integer('ENGINE_MAX_INSTANCES',512,1,512)
   };
 }

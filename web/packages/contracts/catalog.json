@@ -3,10 +3,210 @@
   "adapterVersion": "0.1.0",
   "engineVersion": "0.1.0",
   "components": [
-    {"type":"constant","name":"Constant","parameters":{"value":{"type":"number","minimum":-1000000000000,"maximum":1000000000000},"offset":{"type":"number","minimum":0,"maximum":1000000000}},"required":["value","offset"],"inputs":[],"outputs":[{"port":0,"name":"value"}]},
-    {"type":"qss1_sum_2","name":"QSS1 sum (2)","parameters":{},"required":[],"inputs":[{"port":0,"name":"x0"},{"port":1,"name":"x1"}],"outputs":[{"port":0,"name":"sum"}]},
-    {"type":"qss1_sum_3","name":"QSS1 sum (3)","parameters":{},"required":[],"inputs":[{"port":0,"name":"x0"},{"port":1,"name":"x1"},{"port":2,"name":"x2"}],"outputs":[{"port":0,"name":"sum"}]},
-    {"type":"qss1_integrator","name":"QSS1 integrator","parameters":{"X":{"type":"number","minimum":-1000000000000,"maximum":1000000000000},"dQ":{"type":"number","minimum":0.000000001,"maximum":1000000000000}},"required":["X","dQ"],"inputs":[{"port":0,"name":"derivative"},{"port":1,"name":"reset"}],"outputs":[{"port":0,"name":"X"}]},
-    {"type":"qss3_integrator","name":"QSS3 integrator","parameters":{"X":{"type":"number","minimum":-1000000000000,"maximum":1000000000000},"dQ":{"type":"number","minimum":0.000000001,"maximum":1000000000000}},"required":["X","dQ"],"inputs":[{"port":0,"name":"derivative"},{"port":1,"name":"reset"}],"outputs":[{"port":0,"name":"X"}]}
+    {
+      "type": "constant",
+      "name": "Constant",
+      "parameters": {
+        "value": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000
+        },
+        "offset": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000
+        }
+      },
+      "required": [
+        "value",
+        "offset"
+      ],
+      "inputs": [],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "type": "qss1_sum_2",
+      "name": "QSS1 sum (2)",
+      "parameters": {},
+      "required": [],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x0"
+        },
+        {
+          "port": 1,
+          "name": "x1"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "sum"
+        }
+      ]
+    },
+    {
+      "type": "qss1_sum_3",
+      "name": "QSS1 sum (3)",
+      "parameters": {},
+      "required": [],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x0"
+        },
+        {
+          "port": 1,
+          "name": "x1"
+        },
+        {
+          "port": 2,
+          "name": "x2"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "sum"
+        }
+      ]
+    },
+    {
+      "type": "qss1_integrator",
+      "name": "QSS1 integrator",
+      "parameters": {
+        "X": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000
+        },
+        "dQ": {
+          "type": "number",
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "required": [
+        "X",
+        "dQ"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "derivative"
+        },
+        {
+          "port": 1,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "X"
+        }
+      ]
+    },
+    {
+      "type": "qss3_integrator",
+      "name": "QSS3 integrator",
+      "parameters": {
+        "X": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000
+        },
+        "dQ": {
+          "type": "number",
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "required": [
+        "X",
+        "dQ"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "derivative"
+        },
+        {
+          "port": 1,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "X"
+        }
+      ]
+    },
+    {
+      "type": "qss2_integrator",
+      "name": "QSS2 integrator",
+      "parameters": {
+        "X": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000
+        },
+        "dQ": {
+          "type": "number",
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "required": [
+        "X",
+        "dQ"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "derivative"
+        },
+        {
+          "port": 1,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "X"
+        }
+      ]
+    },
+    {
+      "type": "qss1_multiplier",
+      "name": "QSS1 multiplier",
+      "parameters": {},
+      "required": [],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x0"
+        },
+        {
+          "port": 1,
+          "name": "x1"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "product"
+        }
+      ]
+    }
   ]
 }

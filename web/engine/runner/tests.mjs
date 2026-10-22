@@ -1,4 +1,5 @@
 import test from 'node:test';
+import './hierarchy-tests.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

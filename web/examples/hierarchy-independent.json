@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 2,
+  "model": {
+    "id": "hierarchy-independent",
+    "definitions": [
+      {
+        "id": "IntegratorBlock",
+        "name": "IntegratorBlock",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "p0"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "p0"
+          }
+        ],
+        "components": [
+          {
+            "id": "state",
+            "type": "qss2_integrator",
+            "parameters": {
+              "X": 5,
+              "dQ": 0.25
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "state",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "state",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "a",
+        "type": "constant",
+        "parameters": {
+          "value": 2,
+          "offset": 0
+        }
+      },
+      {
+        "id": "b",
+        "type": "constant",
+        "parameters": {
+          "value": -3,
+          "offset": 0
+        }
+      },
+      {
+        "id": "up",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "IntegratorBlock"
+      },
+      {
+        "id": "down",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "IntegratorBlock"
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "a",
+          "port": 0
+        },
+        "to": {
+          "component": "up",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "b",
+          "port": 0
+        },
+        "to": {
+          "component": "down",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "up/state",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "down/state",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

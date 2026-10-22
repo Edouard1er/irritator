@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { ApiError, requestSchema, validateGraph, type RunRequest } from '../../../../packages/contracts/index.js';
+import { ApiError, validateRequest, type RunRequest } from '../../../../packages/contracts/index.js';
 import type { Engine } from '../services/engine.js';
 
 export function routes(app: FastifyInstance, engine: Engine): void {
@@ -15,8 +15,8 @@ export function routes(app: FastifyInstance, engine: Engine): void {
     }
   });
   app.get('/api/v1/components',async()=>engine.describe());
-  app.post<{ Body: RunRequest }>('/api/v1/simulations/run',{schema:{body:requestSchema}},async(request,reply)=>{
-    validateGraph(request.body);
+  app.post<{ Body: RunRequest }>('/api/v1/simulations/run',async(request,reply)=>{
+    validateRequest(request.body);
     const controller=new AbortController();
     const abort=()=>controller.abort();
     const close=()=>{if(!reply.raw.writableEnded) controller.abort();};

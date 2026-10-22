@@ -1,11 +1,13 @@
-# Irritator : première intégration web
+# Irritator Web : modèles DEVS atomiques et hiérarchiques
 
 Backend local Fastify/TypeScript et runner C++20 utilisant **libirritator**.
 Le modèle est un graphe JSON dynamique. Le backend lance un nouveau processus
 natif par simulation avec `spawn`, transmet la requête sur stdin et contrôle
 stdout, stderr, le code de sortie et la réponse. Aucun calcul DEVS n'est effectué
 dans TypeScript. L’éditeur graphique Next.js est maintenant disponible dans
-[`apps/frontend`](apps/frontend/README.md) (Test 5), sur le port 3000.
+[`apps/frontend`](apps/frontend/README.md), sur le port 3000. Le Test 6 ajoute
+les définitions couplées partagées, leurs interfaces, la navigation hiérarchique
+et l’exécution native via `project::set`. Le contrat plat v1 reste accepté.
 
 Dans un second terminal, après le démarrage du backend décrit ci-dessous :
 
@@ -49,8 +51,7 @@ sources. Les binaires Release sont dans `build-web-test4/runner`.
 Le backend écoute `http://127.0.0.1:3001`. Ctrl+C l'arrête et nettoie ses processus.
 Les chemins relatifs de configuration se résolvent depuis `web`, le dossier
 d'exécution des commandes npm. `npm ci` utilise les versions de `package-lock.json`.
-Un seul package npm à la racine évite un outil de monorepo supplémentaire ;
-`apps/frontend/` pourra être ajouté ensuite, avec extraction en workspaces au besoin.
+Les packages API et frontend ont leurs propres installations npm et verrous.
 
 ## API et expérience reproductible
 
@@ -122,6 +123,8 @@ modification des contrats. Aucun schéma utilisateur n'est compilé.
 | qss1_sum_3 | objet vide | 0,1,2 | 0 : somme |
 | qss1_integrator | X, dQ | 0 : dérivée, 1 : reset | 0 : X |
 | qss3_integrator | X, dQ | 0 : dérivée, 1 : reset | 0 : X |
+| qss2_integrator | X, dQ | 0 : dérivée, 1 : reset | 0 : X |
+| qss1_multiplier | aucun | 0 et 1 : facteurs | 0 : produit |
 
 `offset` est un délai non négatif depuis le début de simulation. `X` est la
 condition initiale, `dQ` le quantum strictement positif. Les valeurs numériques
@@ -165,6 +168,7 @@ Seul le serveur peut définir le chemin de l'exécutable ; il ne vient jamais du
 | ENGINE_MAX_STDOUT_BYTES / ENGINE_MAX_STDERR_BYTES | 4 MiB / 64 KiB, plafonds identiques |
 | ENGINE_MAX_COMPONENTS / ENGINE_MAX_CONNECTIONS | 128 / 512 |
 | ENGINE_MAX_RUN_CALLS / ENGINE_MAX_POINTS | 100000 / 20000 |
+| ENGINE_MAX_DEPTH / ENGINE_MAX_INSTANCES | 8 / 512 (v2) |
 
 Le JSON peut seulement **réduire** les budgets de calcul via `limits`.
 Maximum 32 observations, identifiants ASCII de 64 caractères, horizon <=1e9,
@@ -226,11 +230,70 @@ Les commandes CMake Linux sont analogues (`cmake -S . -B build-engine -G Ninja
 libirritator puis configuration du runner avec `-DIRRITATOR_BUILD_DIR=...`).
 Seule Windows/MSVC est validée dans cette campagne.
 
+## Modèles hiérarchiques (Test 6)
+
+Le [contrat v2](packages/contracts/README.md) décrit définitions, occurrences,
+ports stables et observations par chemin. Les définitions sont dans le document,
+distinctes du catalogue atomique global. La conversion est native ; Fastify ne
+déplie aucun graphe exécutable et ne calcule aucune trajectoire.
+
+```powershell
+# Depuis la racine, après construction du runner :
+$runner=(Resolve-Path build-web-test4/runner/irritator-runner.exe).Path
+foreach($name in @('hierarchy-sum','hierarchy-nested','hierarchy-independent')) {
+  Get-Content "web/examples/$name.json" -Raw | & $runner
+  $body=Get-Content "web/examples/$name.json" -Raw
+  $result=Invoke-RestMethod 'http://127.0.0.1:3001/api/v1/simulations/run' -Method Post -ContentType 'application/json' -Body $body
+  $result.observations | ConvertTo-Json -Depth 12
+}
+```
+
+Les deux modèles de sommes donnent `(0,10),(1,110),(2,1110)` avec 14 appels
+`run`, contre 10 pour la référence plate. Le modèle indépendant utilise deux
+occurrences de la même définition QSS2, avec X=5 et dérivées 2/−3 ; états finaux
+11/−4 et trajectoires exactement identiques aux références plates natives.
+Le rééchantillonnage Hermite QSS2 produit un écart initial .008 à t=.1 pour
+la dérivée 2. Tolérance analytique de cette expérience : .01 ; aucun point
+n’est corrigé. Le [rapport](../reports/hierarchy-test-6.md) explique cette limite.
+
+Dans l’interface : **Mes composants** → identifiant et nom → **Créer le composant
+couplé** → ajouter entrées/sorties → ajouter les enfants → relier `$input`,
+les enfants et `$output` → **Enregistrer la définition** → insérer plusieurs
+instances. **Ouvrir le contenu** et le fil d’Ariane changent de portée.
+**Observations hiérarchiques** sélectionne un atome par chemin d’instance.
+Enregistrer/Ouvrir exporte et importe la requête scientifique v2 ; la disposition
+de chaque définition et la navigation restent dans le workspace navigateur v2.
+Les workspaces v1 sont lus sans réécrire leur clé d’origine.
+
+Pour reproduire les tests dans un répertoire de construction séparé, utiliser
+Developer PowerShell x64 :
+
+```powershell
+cmake -S web/engine/runner -B build-web-test6/runner -G Ninja -DCMAKE_BUILD_TYPE=Release -DIRRITATOR_BUILD_DIR=D:/these/irritator/build-wrapper-test3
+cmake --build build-web-test6/runner --parallel 2
+$env:IRRITATOR_RUNNER=(Resolve-Path build-web-test6/runner/irritator-runner.exe).Path
+Set-Location web
+npm.cmd run test:all
+Set-Location apps/frontend
+npm.cmd run typecheck
+npm.cmd test
+# Avec Fastify et Next.js démarrés sur les ports voulus :
+$env:FRONTEND_URL='http://127.0.0.1:3003'
+$env:IRRITATOR_BROWSER_EVIDENCE='../../../build-web-test6/logs/browser-regression'
+$env:IRRITATOR_BROWSER_SCREENSHOTS='../../../build-web-test6/logs/screenshots-regression'
+npm.cmd run test:e2e
+```
+
+`npm run test:all` inclut les tests historiques et les nouveaux tests v2,
+dont le runner direct, HTTP réel, les rejets avant lancement, budgets après
+fanout/fanin, timeout et feedback. Les tests navigateur scientifiques utilisent
+le runner natif. Les variables de destinations des preuves évitent d’écraser
+les captures historiques du Test 5.
+
 ## Prochaines étapes
 
 La décision entre format natif et format intermédiaire et la préparation du
 wrapper sont dans `architecture.md`. Le contrat constitue les données nécessaires
-au futur éditeur React Flow : types, paramètres, contraintes et ports. Les
-composants couplés, imports .irt/.pirt, plans d'expérience et simulation_wrapper
-restent à intégrer en réutilisant modeling/project et le wrapper stabilisé.
-Voir aussi `../reports/web-integration-test-4.md`.
+à l’éditeur React Flow : types, paramètres, contraintes et ports. Les imports
+.irt/.pirt, plans d’expérience et simulation_wrapper web restent à intégrer.
+`simulation_wrapper`, son architecture et le moteur restent inchangés.

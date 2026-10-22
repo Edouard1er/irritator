@@ -72,12 +72,16 @@ export class ProcessEngine implements Engine {
     for(const key of Object.keys(this.config.engineLimits) as (keyof Config['engineLimits'])[]) {
       effective.limits[key] = Math.min(request.limits?.[key] ?? this.config.engineLimits[key],this.config.engineLimits[key]);
     }
+    if (effective.schemaVersion === 2) {
+      effective.limits.maxDepth = Math.min(request.limits?.maxDepth ?? 8, this.config.maxDepth ?? 8);
+      effective.limits.maxInstances = Math.min(request.limits?.maxInstances ?? 512, this.config.maxInstances ?? 512);
+    }
     validateRequest(effective);
     const { value, exitCode } = await this.invoke([],JSON.stringify(effective),signal);
     if(exitCode!==0) {
       const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown } } | null;
       if(!failure || failure.schemaVersion!==1 || failure.status!=='failed' || typeof failure.error?.code!=='string' || typeof failure.error.message!=='string') throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner failed without a valid error envelope',502);
-      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR']);
+      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR','DEFINITION_NOT_FOUND','INVALID_EXTERNAL_PORT','INVALID_SCOPE','RECURSIVE_DEFINITION','HIERARCHY_DEPTH','EXPANSION_LIMIT','NATIVE_CONSTRUCTION_ERROR']);
       const detail = failure.error;
       if(!allowed.has(detail.code as string) || (detail.message as string).length>1024) throw new ApiError('RUNNER_PROTOCOL_ERROR','Unknown runner error',502);
       const status = detail.code==='LIMIT_EXCEEDED' ? 422 : ['INTERNAL_ERROR','SERIALIZATION_ERROR'].includes(detail.code as string) ? 502 : 422;

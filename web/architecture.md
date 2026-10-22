@@ -43,6 +43,60 @@ Le schéma et le catalogue applicatifs sont partagés et embarqués dans le runn
 par CMake. Les deux frontières valident les données ; les erreurs natives de
 connexion/initialisation/exécution sont conservées (catégorie et code).
 
+## Extension hiérarchique — Test 6
+
+Décision préalable consignée dans `reports/hierarchy-test-6.md` avant les
+modifications de code. Le v1 conserve son schéma et sa traduction directe.
+Le [v2](packages/contracts/README.md) ajoute des définitions partagées et des
+instances, sans exposer les ressources ni identifiants du format natif .irt.
+
+```text
+React Flow (portée courante + interfaces visibles)
+  → requête v1 ou v2 scientifique, séparée du workspace graphique
+Fastify validateRequest (schéma + références + DAG + budgets d’expansion)
+  → ProcessEngine (stdin borné, timeout, concurrence, contrôle des sorties)
+Runner C++ (schéma RapidJSON + validation indépendante)
+  v1 → simulation.alloc/parameters/connect
+  v2 → component_access::alloc_generic_component
+     → generic_component::alloc(dynamics_type ou component_id)
+     → children_parameters / connect / connect_input / connect_output
+     → project::set(component_access, file_access vide, racine)
+     → tree_node::children : chemin JSON → model_id réellement alloué
+  → simulation.observe / initialize / run / tick_resamplers / finalize
+  → trajectoires moteur, sans retouche
+```
+
+`modeling` possède les accès synchronisés aux conteneurs natifs. Dans un runner
+isolé monoprocessus, `component_access` et `file_access` suffisent directement ;
+aucun catalogue disque ni tâche de chargement n’est nécessaire.
+`project::rebuild` rappellerait `set` avec la même racine ; chaque requête est
+construite une seule fois, donc `set` est le bon point d’entrée.
+
+Les définitions sont allouées une fois dans les conteneurs ; chaque enfant
+couplé référence leur `component_id`. `project.cpp::make_tree_recursive` et
+`make_tree_leaf` créent des états distincts par occurrence puis
+`simulation_copy_connections` résout récursivement les EIC/IC/EOC.
+L’adaptateur ne construit pas un autre graphe d’exécution : ses parcours ne
+servent qu’à valider les budgets et à résoudre les observations après conversion.
+Il vérifie que chaque chemin atomique correspond à un `model_id` distinct.
+Des noms natifs courts générés et des tables explicites évitent toute collision
+par troncature des identifiants JSON dans `name_str`.
+
+Les budgets comptent les occurrences réelles, atomes et produits de fanout/fanin
+des interfaces ; un même composant utilisé deux fois compte deux fois. Les
+définitions inutilisées sont validées aussi. La récursion de définitions est
+interdite ; les cycles de couplages DEVS ne le sont pas.
+
+Le frontend ajoute des métadonnées locales pour les nœuds couplés et interfaces,
+sans les mélanger au catalogue HTTP atomique. Le workspace v2 conserve un plan
+par définition et la navigation ; sa migration laisse la clé v1 intacte et
+n’écrase jamais des données dont la restauration échoue.
+
+Audit : React édite, sérialise et affiche ; Fastify valide et isole les processus ;
+l’adaptateur C++ construit les objets natifs et remappe les observations ;
+libirritator conserve composition exécutable, états, transitions, ordonnanceur,
+QSS et simulations imbriquées. Aucun changement du noyau ou de simulation_wrapper.
+
 ## Suite : simulation_wrapper
 
 L'infrastructure native n'est pas un chargeur autonome de JSON imbriqué :

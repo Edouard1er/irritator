@@ -1,4 +1,6 @@
 #include <irritator/core.hpp>
+#include <irritator/modeling.hpp>
+#include <memory>
 #include <rapidjson/document.h>
 #include <rapidjson/schema.h>
 #include <rapidjson/stringbuffer.h>
@@ -61,7 +63,7 @@ using constructor = irt::model& (*)(irt::simulation&);
 const std::map<std::string,constructor> registry{
     {"constant",allocate<irt::constant>}, {"qss1_sum_2",allocate<irt::qss1_sum_2>},
     {"qss1_sum_3",allocate<irt::qss1_sum_3>}, {"qss1_integrator",allocate<irt::qss1_integrator>},
-    {"qss3_integrator",allocate<irt::qss3_integrator>}
+    {"qss3_integrator",allocate<irt::qss3_integrator>}, {"qss2_integrator",allocate<irt::qss2_integrator>}, {"qss1_multiplier",allocate<irt::qss1_multiplier>}
 };
 const V& descriptor(const D& catalog,const std::string& type) {
     for(const auto& c:catalog["components"].GetArray()) if(str(c["type"])==type) return c;
@@ -85,12 +87,15 @@ void configure_debug_diagnostics() {
     if(redirected<0) fail("INITIALIZATION_ERROR","Cannot redirect Debug diagnostics to stderr");
 #endif
 }
+#include "hierarchy.hpp"
 D execute(const D& doc,const D& catalog) {
     const auto& model=doc["model"];
     const auto& components=model["components"];
     const double start=doc["simulation"]["start"].GetDouble(), end=doc["simulation"]["end"].GetDouble();
     if (!(end>start) || end-start>1e9) fail("INVALID_TIME","Expected start < end and horizon <= 1e9");
     const auto max_calls=limit(doc,"maxRunCalls",100000), max_points=limit(doc,"maxPoints",20000);
+    const bool hierarchical=doc["schemaVersion"].GetInt()==2;
+    if (!hierarchical) {
     if (components.Size()>unsigned(limit(doc,"maxComponents",128)) ||
         model["connections"].Size()>unsigned(limit(doc,"maxConnections",512))) fail("LIMIT_EXCEEDED","Model size budget exceeded");
     std::map<std::string,const V*> specs;
@@ -132,10 +137,17 @@ D execute(const D& doc,const D& catalog) {
         if(estimated>max_points) fail("LIMIT_EXCEEDED","Potential sampling grid exceeds maxPoints (including terminal margin)");
     }
 
+    }
+    std::unique_ptr<native_hierarchy> hierarchy;
+    if(hierarchical) hierarchy=std::make_unique<native_hierarchy>(doc,catalog);
     configure_debug_diagnostics();
-    irt::simulation sim;
+    std::unique_ptr<irt::simulation> flat;
+    if(hierarchy) hierarchy->build(); else flat=std::make_unique<irt::simulation>();
+    auto& sim=hierarchy?hierarchy->project->sim:*flat;
     if(!sim.can_alloc(components.Size()) || !sim.can_connect(model["connections"].Size())) fail("LIMIT_EXCEEDED","Engine capacity unavailable");
     std::map<std::string,irt::model_id> ids;
+    if(hierarchy) ids=hierarchy->models;
+    else {
     for(const auto& c:components.GetArray()) {
         const auto type=str(c["type"]);
         auto& native=registry.at(type)(sim);
@@ -143,11 +155,12 @@ D execute(const D& doc,const D& catalog) {
         ids.emplace(str(c["id"]),id);
         const auto& p=c["parameters"];
         if(type=="constant") sim.parameters[id].set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
-        else if(type=="qss1_integrator" || type=="qss3_integrator") sim.parameters[id].set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
+        else if(type=="qss1_integrator" || type=="qss2_integrator" || type=="qss3_integrator") sim.parameters[id].set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
     }
     for(const auto& e:model["connections"].GetArray())
         check(sim.connect(sim.models.get(ids.at(str(e["from"]["component"]))),e["from"]["port"].GetInt(),
                           sim.models.get(ids.at(str(e["to"]["component"]))),e["to"]["port"].GetInt()),"INVALID_CONNECTION","simulation.connect");
+    }
     sim.limits.set_bound(start,end);
     std::vector<irt::observer_id> observers;
     for(const auto& o:model["observations"].GetArray()) {
@@ -203,6 +216,7 @@ D execute(const D& doc,const D& catalog) {
     result.AddMember("observations",observations,a);
     V diagnostics(rapidjson::kObjectType);
     diagnostics.AddMember("observationPolicy","engine-resampled-sealed-deduplicated",a).AddMember("engineVersion","0.1.0",a).AddMember("adapterVersion","0.1.0",a);
+    if(hierarchy) diagnostics.AddMember("nativeModelCount",static_cast<unsigned>(hierarchy->models.size()),a).AddMember("distinctNativeModelIds",true,a);
     result.AddMember("diagnostics",diagnostics,a);
     return result;
 }
@@ -221,7 +235,7 @@ int main(int argc,char** argv) {
         D doc; doc.Parse<rapidjson::kParseValidateEncodingFlag | rapidjson::kParseIterativeFlag>(input.data(),input.size());
         if(doc.HasParseError()) fail("INVALID_JSON","Invalid JSON document at byte "+std::to_string(doc.GetErrorOffset()));
         unique_keys(doc);
-        D schema; schema.Parse(request_schema_json);
+        D schema; schema.Parse(doc.IsObject() && doc.HasMember("schemaVersion") && doc["schemaVersion"].IsInt() && doc["schemaVersion"].GetInt()==2?request_v2_schema_json:request_schema_json);
         rapidjson::SchemaDocument compiled(schema);
         rapidjson::SchemaValidator validator(compiled);
         if(!doc.Accept(validator)) {

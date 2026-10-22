@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { spawn } from 'node:child_process';
 import { buildApp } from '../src/app.js';
 import { readConfig } from '../src/config/index.js';
 import { ProcessEngine } from '../src/services/engine.js';
@@ -68,11 +69,21 @@ test('server caps lower client requests',async()=>{
 });
 test('HTTP disconnection releases native process slot',{timeout:15000},async()=>{
   const config={...readConfig(),maxConcurrent:1,timeoutMs:5000};
-  const app=buildApp(config);await app.listen({host:'127.0.0.1',port:0});
+  let notifyStarted!: () => void;
+  const started = new Promise<void>(resolve => { notifyStarted = resolve; });
+  // Synchronize on the real simulation launch. A racing --describe request
+  // otherwise takes the sole slot before the TCP POST arrives (notably Debug).
+  const engine = new ProcessEngine(config, (executable, args) => {
+    const child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['pipe','pipe','pipe'] });
+    if (args.length === 0) notifyStarted();
+    return child;
+  });
+  const app=buildApp(config,engine);await app.listen({host:'127.0.0.1',port:0});
   try {
     const model=reference();model.model.components.push({id:'feedback',type:'qss1_sum_2',parameters:{}});model.model.connections.push({from:{component:'sum',port:0},to:{component:'feedback',port:0}},{from:{component:'feedback',port:0},to:{component:'sum',port:0}});
     validateRequest(model);
     const abort=new AbortController();const request=fetch(`${app.listeningOrigin}/api/v1/simulations/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(model),signal:abort.signal}).catch(()=>undefined);
+    await started;
     // Observe that the sole slot is occupied, then disconnect this client.
     let busy=false;
     for(let i=0;i<30;i++) {await delay(10);const h=await app.inject({method:'GET',url:'/api/v1/health'});if(h.statusCode===503 && h.json().error.code==='ENGINE_BUSY'){busy=true;break;}}

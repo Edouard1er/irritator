@@ -12,7 +12,7 @@ describe('Bibliothèque alimentée par API', () => {
   it('affiche une attente sans inventer de catalogue', () => { render(<ComponentLibrary onAdd={vi.fn()} onRetry={vi.fn()} />); expect(screen.getByText('Chargement du catalogue…')).toBeVisible(); expect(screen.queryByRole('button', { name: /Ajouter/ })).not.toBeInTheDocument(); });
   it('recherche les cinq types réellement transmis et les ajoute par clic', () => {
     const add = vi.fn(); render(<ComponentLibrary catalog={catalog} onAdd={add} onRetry={vi.fn()} />);
-    expect(screen.getAllByRole('button', { name: /Ajouter/ })).toHaveLength(5);
+    expect(screen.getAllByRole('button', { name: /Ajouter/ })).toHaveLength(catalog.components.length);
     fireEvent.change(screen.getByLabelText('Rechercher un composant'), { target: { value: 'qss3' } });
     expect(screen.getAllByRole('button', { name: /Ajouter/ })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Ajouter qss3_integrator' })); expect(add).toHaveBeenCalledWith(catalog.components[4]);

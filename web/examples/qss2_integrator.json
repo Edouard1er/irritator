@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "connections": [
+      {
+        "to": {
+          "component": "x",
+          "port": 0
+        },
+        "from": {
+          "component": "rate",
+          "port": 0
+        }
+      }
+    ],
+    "id": "qss2_integrator",
+    "observations": [
+      {
+        "component": "x",
+        "samplingInterval": 0.1
+      }
+    ],
+    "components": [
+      {
+        "id": "rate",
+        "parameters": {
+          "offset": 0,
+          "value": 2
+        },
+        "type": "constant"
+      },
+      {
+        "id": "x",
+        "parameters": {
+          "dQ": 0.25,
+          "X": 5
+        },
+        "type": "qss2_integrator"
+      }
+    ]
+  },
+  "simulation": {
+    "end": 3,
+    "start": 0
+  }
+}

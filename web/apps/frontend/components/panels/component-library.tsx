@@ -2,12 +2,16 @@
 import { useState } from 'react';
 import { Plus, Search, Box, Sigma, Activity } from 'lucide-react';
 import type { Catalog, ComponentSpec } from '@/lib/modeling/model';
+import type { CoupledDefinition } from '@contracts';
 
 export function category(spec: ComponentSpec): string {
   return spec.inputs.length === 0 ? 'Sources' : spec.type.includes('integrator') ? 'Intégrateurs' : 'Opérateurs';
 }
-export function ComponentLibrary({ catalog, error, onAdd, onRetry }: { catalog?: Catalog; error?: string; onAdd: (spec: ComponentSpec) => void; onRetry: () => void }) {
+export function ComponentLibrary({ catalog, error, onAdd, onRetry, definitions = [], onCreate, onOpen, onInstance }: { catalog?: Catalog; error?: string; onAdd: (spec: ComponentSpec) => void; onRetry: () => void; definitions?: CoupledDefinition[]; onCreate?: (id: string, name: string) => string | undefined; onOpen?: (id: string) => void; onInstance?: (id: string) => void }) {
   const [query, setQuery] = useState('');
+  const [definitionId, setDefinitionId] = useState('');
+  const [definitionName, setDefinitionName] = useState('');
+  const [createError, setCreateError] = useState<string>();
   return <aside className="library panel" aria-label="Bibliothèque de composants">
     <div className="panel-heading"><span>COMPOSANTS</span><span className="count">{catalog?.components.length ?? '—'}</span></div>
     <label className="search"><Search size={15} /><input aria-label="Rechercher un composant" placeholder="Rechercher un composant…" value={query} onChange={e => setQuery(e.target.value)} /><kbd>⌕</kbd></label>
@@ -23,6 +27,13 @@ export function ComponentLibrary({ catalog, error, onAdd, onRetry }: { catalog?:
       })}
       {!catalog.components.some(s => `${s.name} ${s.type}`.toLowerCase().includes(query.toLowerCase())) && <p className="muted small">Aucun composant correspondant.</p>}
     </>}
-    <div className="library-note"><span className="eyebrow">CATALOGUE DU MOTEUR</span><p>Ajoutez un composant par clic ou glissez-le sur le canevas.</p><span className="mono">Contrat v1 · DEVS / QSS</span></div>
+    {onCreate && <section className="library-group coupled-library"><h3>Mes composants</h3><p className="muted small">Définitions partagées : une modification s’applique à toutes les instances.</p>
+      {definitions.map(d => <div className="coupled-item" key={d.id}><strong>{d.name}</strong><code>{d.id}</code><div><button onClick={() => onOpen?.(d.id)} aria-label={`Ouvrir définition ${d.id}`}>Ouvrir</button><button onClick={() => onInstance?.(d.id)} aria-label={`Insérer ${d.id}`}>+ Instance</button></div></div>)}
+      <form onSubmit={e => { e.preventDefault(); const error = onCreate(definitionId, definitionName || definitionId); setCreateError(error); if (!error) { setDefinitionId(''); setDefinitionName(''); } }}>
+        <label className="field">Identifiant de définition<input value={definitionId} onChange={e => setDefinitionId(e.target.value)} maxLength={64} required /></label>
+        <label className="field">Nom de définition<input value={definitionName} onChange={e => setDefinitionName(e.target.value)} maxLength={64} /></label>
+        <button type="submit">Créer le composant couplé</button>{createError && <p role="alert">{createError}</p>}
+      </form></section>}
+    <div className="library-note"><span className="eyebrow">COMPOSANTS ATOMIQUES DU MOTEUR</span><p>Ajoutez un composant par clic ou glissez-le sur le canevas.</p><span className="mono">DEVS / QSS</span></div>
   </aside>;
 }

@@ -1,5 +1,6 @@
 import { Ajv } from 'ajv';
-import { ApiError, requestSchema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
+import { ApiError, requestSchema, requestV2Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
+import { validateHierarchy } from '@contracts';
 import type { catalog } from '@contracts';
 
 export type Catalog = typeof catalog;
@@ -10,6 +11,9 @@ export interface EditorState {
   request: RunRequest;
   positions: Record<string, Position>;
   viewport: Viewport;
+  scopes?: Record<string, { positions: Record<string, Position>; viewport: Viewport }>;
+  activeScope?: string;
+  scopeTrail?: string[];
 }
 export const initialViewport: Viewport = { x: 70, y: 45, zoom: 1 };
 export const emptyModel = (): EditorState => ({
@@ -21,13 +25,18 @@ export const emptyModel = (): EditorState => ({
 const editorSchema = structuredClone(requestSchema);
 editorSchema.properties.model.properties.components.minItems = 0;
 const checkEditor = new Ajv({ strict: true, strictNumbers: true }).compile<RunRequest>(editorSchema);
+const v2EditorSchema = structuredClone(requestV2Schema);
+v2EditorSchema.properties.model.properties.components.minItems = 0;
+const checkEditorV2 = new Ajv({ strict: false, strictNumbers: true }).compile<RunRequest>(v2EditorSchema);
 export function validateEditorDocument(input: unknown): asserts input is RunRequest {
-  if (!checkEditor(input)) throw new ApiError('INVALID_MODEL', `JSON : ${checkEditor.errors?.[0]?.instancePath ?? ''} ${checkEditor.errors?.[0]?.message ?? ''}`);
-  validateGraph(input);
+  const check = (input as RunRequest | null)?.schemaVersion === 2 ? checkEditorV2 : checkEditor;
+  if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON : ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
+  if (input.schemaVersion === 2) validateHierarchy(input, true); else validateGraph(input);
 }
 
 export function serializeModel(state: EditorState): RunRequest {
   const r = state.request;
+  if (r.schemaVersion === 2) { const result = structuredClone(r); validateRequest(result); return result; }
   const result: RunRequest = {
     schemaVersion: 1,
     model: {
@@ -90,7 +99,7 @@ export function toConnection(c: FlowConnection): RunRequest['model']['connection
 }
 export const edgeId = (c: RunRequest['model']['connections'][number]) => `${c.from.component}:${c.from.port}>${c.to.component}:${c.to.port}`;
 export function uniqueId(spec: ComponentSpec, components: Component[]): string {
-  const base = spec.inputs.length === 0 ? 'c' : spec.type.includes('sum') ? 'sum' : 'integrator';
+  const base = spec.type.startsWith('coupled:') ? spec.type.slice(8) : spec.inputs.length === 0 ? 'c' : spec.type.includes('sum') ? 'sum' : spec.type.includes('multiplier') ? 'product' : 'integrator';
   if (base !== 'c' && !components.some(c => c.id === base)) return base;
   let n = 1;
   while (components.some(c => c.id === `${base}${n}`)) n++;

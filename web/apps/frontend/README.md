@@ -1,6 +1,6 @@
-# Irritator Web — éditeur graphique (Test 5)
+# Irritator Web — éditeur graphique et hiérarchique (Tests 5–6)
 
-Éditeur local Next.js / React Flow connecté au **véritable runner C++ du Test 4**.
+Éditeur local Next.js / React Flow connecté au **véritable runner C++ Irritator**.
 Les composants, paramètres et ports viennent de `GET /api/v1/components`.
 React édite et sérialise le modèle ; seuls Fastify et libirritator l’exécutent.
 
@@ -37,7 +37,7 @@ En cas de port occupé : `npm.cmd run dev -- --port 3002`.
 Les packages API et frontend sont indépendants : pas de workspaces ni de
 changement aux commandes, dépendances ou verrou npm du Test 4. Le frontend
 importe le contrat partagé par l’alias TypeScript `@contracts` ; le schéma,
-les types, les validations et le parseur de résultats restent ceux du Test 4.
+les types, validations et parseur de résultats sont communs aux contrats v1/v2.
 Le catalogue partagé sert à vérifier le protocole ; la bibliothèque affiche
 seulement les métadonnées effectivement reçues de l’API, sans repli fictif.
 
@@ -85,11 +85,14 @@ les auto-connexions et doublons exacts sont refusés.
 - **Ouvrir** : sélectionner par exemple `D:\these\irritator\web\examples\sum3.json`.
   Les positions sont reconstruites de façon déterministe. Les fichiers sont
   limités à 1 Mio et vérifiés avec le schéma partagé ; aucun import `.irt/.pirt`.
-- **Enregistrer** : télécharger un JSON scientifique v1 directement accepté
+- **Enregistrer** : télécharger un JSON scientifique v1 ou v2 directement accepté
   par le backend. Les paramètres, observations et limites facultatives importées
   sont conservés. Aucun champ graphique n’est ajouté à ce fichier.
 - La sauvegarde automatique du navigateur stocke séparément modèle, positions
-  et caméra, sous `irritator.workspace.v1`. Elle est restaurée au rechargement.
+  et caméra de chaque portée, sous `irritator.workspace.v2`. Elle est restaurée au
+  rechargement, avec migration non destructive de `irritator.workspace.v1`.
+  La clé historique est conservée. Une restauration impossible bloque toute
+  réécriture automatique jusqu’à Nouveau ou l’import réussi d’un document.
   Les erreurs de quota ou de saisie sont signalées ; la dernière sauvegarde valide
   est conservée. Elle ne remplace pas un export de fichier durable.
 - Nouveau/Ouvrir et la fermeture de page avertissent en présence de modifications
@@ -129,7 +132,7 @@ téléchargé implicitement. Les résultats et requêtes sont enregistrés dans
 `build-web-test5/logs/browser/`, les journaux dans `build-web-test5/logs/`, les
 captures réelles dans `reports/frontend-test-5/`.
 
-Non-régression Test 4, depuis `web` : `npm.cmd run test:all` (73 tests).
+Non-régression et hiérarchie, depuis `web` : `npm.cmd run test:all`.
 Voir le [rapport Test 5](../../../reports/frontend-test-5.md) pour le détail des
 exécutions, y compris les tests natifs Release/Debug et les limites de validation.
 
@@ -139,9 +142,55 @@ charge uniquement côté client et depuis cette origine locale. Après installat
 et compilation, aucun CDN, police distante ou service Internet n’est requis.
 Les dépendances sont verrouillées dans `package-lock.json`.
 
+## Créer et réutiliser un composant couplé
+
+1. Dans **Mes composants**, saisir identifiant et nom, puis **Créer le composant
+   couplé**. Cela active le contrat v2 pour ce document.
+2. Ajouter les ports externes. Leurs indices restent stables ; le nom peut être
+   édité dans la barre d’interface.
+3. Ajouter les enfants depuis le catalogue atomique ou insérer une autre
+   définition depuis **Mes composants**. Une référence récursive est rejetée.
+4. Dans **Relier des ports**, connecter les sorties du nœud `$input` aux entrées
+   des enfants (EIC), les enfants entre eux (IC) et leurs sorties au nœud `$output`
+   (EOC). Les handles React Flow représentent exactement les mêmes couplages.
+5. Cliquer **Enregistrer la définition**, puis insérer autant d’instances que
+   nécessaire dans le modèle principal. Renommer chaque instance via l’inspecteur.
+6. Ouvrir une instance avec **Ouvrir le contenu**. Le fil d’Ariane permet de
+   revenir au parent ou à la racine ; les positions et caméras sont propres aux
+   définitions. Modifier une définition modifie tous ses usages : il n’existe pas
+   de copie cachée ni d’override de paramètres par instance.
+7. Dans **Observations hiérarchiques**, sélectionner un chemin tel que
+   `sumB/sum` et cliquer **Observer ce chemin**. Les observations portent sur
+   un état atomique natif ; une sortie couplée transmet des événements mais n’est
+   pas elle-même un état observable. Les renommages remappent les chemins.
+8. Simuler, exporter, réimporter et simuler à nouveau. Les exemples
+   `web/examples/hierarchy-sum.json` et `hierarchy-nested.json` publient
+   exactement `10,110,1110` aux dates `0,1,2` sur `[0,3[`.
+
+Une définition vide/incomplète peut être éditée et sauvegardée localement.
+Un port déclaré sans couplage atomique bloque l’exécution/export scientifique.
+Supprimer un port retire ses connexions internes et celles de toutes ses
+instances ; le message indique leur nombre. Les autres indices ne changent pas.
+
+Le catalogue atomique comporte sept types, dont `qss2_integrator` et
+`qss1_multiplier`. Leurs paramètres passent par le même inspecteur générique.
+Pour QSS2 (X=5,dQ=.25,dérivée 2,pas .1), l’interpolation native initiale publie
+5.192 à .1 au lieu de 5.2 ; la réponse reste intacte. Tolérance analytique .01
+dans ces tests ; les références plates et hiérarchiques sont identiques.
+Voir le [contrat](../../packages/contracts/README.md) et le
+[rapport Test 6](../../../reports/hierarchy-test-6.md).
+
+Pour conserver les preuves du Test 5 lors des non-régressions :
+
+```powershell
+$env:IRRITATOR_BROWSER_EVIDENCE='../../../build-web-test6/logs/browser-regression'
+$env:IRRITATOR_BROWSER_SCREENSHOTS='../../../build-web-test6/logs/screenshots-regression'
+npm.cmd run test:e2e
+```
+
 ## Périmètre
 
-Cinq types atomiques du Test 4, sans hiérarchie, wrapper graphique, plans
+Sept types atomiques et hiérarchie native jusqu’à huit niveaux, sans wrapper graphique, plans
 d’expériences, modèle halieutique, base de données, authentification ou calcul
 distribué. Interface prioritairement desktop (largeur minimale 1000 px), panneau
 de résultats redimensionnable verticalement. Pas encore d’annuler/rétablir ni de

@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 2,
+  "model": {
+    "id": "hierarchy-sum",
+    "definitions": [
+      {
+        "id": "Sum2Block",
+        "name": "Sum2Block",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "p0"
+          },
+          {
+            "port": 1,
+            "name": "p1"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "p0"
+          }
+        ],
+        "components": [
+          {
+            "id": "sum",
+            "type": "qss1_sum_2",
+            "parameters": {}
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "c1",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "c2",
+        "type": "constant",
+        "parameters": {
+          "value": 100,
+          "offset": 1
+        }
+      },
+      {
+        "id": "c3",
+        "type": "constant",
+        "parameters": {
+          "value": 1000,
+          "offset": 2
+        }
+      },
+      {
+        "id": "sumA",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "Sum2Block"
+      },
+      {
+        "id": "sumB",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "Sum2Block"
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "c1",
+          "port": 0
+        },
+        "to": {
+          "component": "sumA",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "c2",
+          "port": 0
+        },
+        "to": {
+          "component": "sumA",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "sumA",
+          "port": 0
+        },
+        "to": {
+          "component": "sumB",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "c3",
+          "port": 0
+        },
+        "to": {
+          "component": "sumB",
+          "port": 1
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "sumB/sum",
+        "samplingInterval": 1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}
