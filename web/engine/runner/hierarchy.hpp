@@ -3,6 +3,7 @@
 struct native_hierarchy {
     const D& doc;
     const D& catalog;
+    bool interface_root=false;
     struct summary {
         int atoms=0, instances=0, connections=0, depth=0;
         std::map<int,int> inputs, outputs;
@@ -20,12 +21,16 @@ struct native_hierarchy {
     };
     std::map<std::string,scope> scopes;
     std::map<std::string,irt::model_id> models;
+    irt_web::target_table targets;
+    std::map<const V*,const irt_web::descriptor*> wrapper_descriptors;
+    mutable std::map<std::pair<const V*,std::string>,V> wrapper_ports;
+    mutable D port_storage;
 
-    explicit native_hierarchy(const D& d,const D& c):doc(d),catalog(c) {
+    explicit native_hierarchy(const D& d,const D& c,bool root_interface=false):doc(d),catalog(c),interface_root(root_interface) {
         for(const auto& def:doc["model"]["definitions"].GetArray())
             if(!definitions.emplace(str(def["id"]),&def).second) fail("INVALID_MODEL","Duplicate definition");
         for(const auto& [id,def]:definitions) { validate(*def,true); }
-        validate(doc["model"],false);
+        validate(doc["model"],interface_root);
         for(const auto& [id,def]:definitions) (void)describe(id,0);
         auto root=count(doc["model"],0);
         budget(root);
@@ -42,7 +47,7 @@ struct native_hierarchy {
                 const auto name=path.substr(begin,slash==std::string::npos?slash:slash-begin);
                 const auto& c=child(*scope,name,"OBSERVATION_ERROR");
                 if(slash==std::string::npos) {
-                    if(str(c["type"])=="coupled") fail("OBSERVATION_ERROR","Observe an atomic descendant by instance path");
+                    if(str(c["type"])=="coupled" || str(c["type"])=="simulation_wrapper") fail("OBSERVATION_ERROR","Observe an atomic descendant with an observation function");
                     break;
                 }
                 if(str(c["type"])!="coupled") fail("OBSERVATION_ERROR","Path traverses an atomic model");
@@ -65,6 +70,17 @@ struct native_hierarchy {
         fail(code,"Child outside current scope: "+name);
     }
     const V& ports(const V& c,const char* direction) const {
+        if(str(c["type"])=="simulation_wrapper" && doc["schemaVersion"].GetInt()==3) {
+            const auto key=std::make_pair(&c,std::string(direction));
+            auto [it,inserted]=wrapper_ports.try_emplace(key,rapidjson::kArrayType);
+            if(inserted) {
+                // Values own their allocator: this document outlives validation.
+                const auto& e=c["experiment"];
+                const auto n=std::string(direction)=="inputs"?e["factors"].Size()+2:e["factors"].Size()+e["selections"].Size();
+                for(unsigned p=0;p<n;++p) { V item(rapidjson::kObjectType); item.AddMember("port",p,port_storage.GetAllocator()); it->second.PushBack(item,port_storage.GetAllocator()); }
+            }
+            return it->second;
+        }
         return str(c["type"])=="coupled"?definition(c)[direction]:descriptor(catalog,str(c["type"]))[direction];
     }
     bool has_port(const V& list,int port) const {
@@ -83,6 +99,8 @@ struct native_hierarchy {
             if(str(c["type"])=="coupled") {
                 (void)definition(c);
                 if(c["parameters"].MemberCount()) fail("INVALID_PARAMETER","Coupled instances have shared definitions without overrides");
+            } else if(str(c["type"])=="simulation_wrapper" && doc["schemaVersion"].GetInt()==3) {
+                if(c["parameters"].MemberCount()) fail("INVALID_PARAMETER","Wrapper parameters must be empty; use experiment");
             } else {
                 const auto& desc=descriptor(catalog,str(c["type"]));
                 for(const auto& key:desc["required"].GetArray()) if(!c["parameters"].HasMember(key.GetString())) fail("INVALID_PARAMETER","Missing atomic parameter");
@@ -152,17 +170,23 @@ struct native_hierarchy {
         }
         return ret;
     }
+    void prepare_access() {
+        if(!access) access=std::make_unique<irt::component_access>(irt::modeling_reserve_definition{});
+        if(!files) files=std::make_unique<irt::file_access>();
+    }
     void build() {
-        access=std::make_unique<irt::component_access>(irt::modeling_reserve_definition{});
-        files=std::make_unique<irt::file_access>();
+        prepare_access();
         project=std::make_unique<irt::project>();
         for(const auto& [id,d]:definitions) declare(id,d);
-        declare("$root",nullptr);
+        declare("$root",interface_root?&doc["model"]:nullptr);
         for(const auto& [id,d]:definitions) fill(id,*d);
         fill("$root",doc["model"]);
         // Reserve enough native edge storage for external fanout, before set.
-        project->sim.grow_connections_to(512);
-        check(project->set(*access,*files,scopes.at("$root").id),"NATIVE_CONSTRUCTION_ERROR","project::set");
+        try {
+            (void)irt_web::build_project(*project,*access,*files,scopes.at("$root").id);
+        } catch(const std::exception& error) {
+            fail("NATIVE_CONSTRUCTION_ERROR",error.what());
+        }
         collect("$root",*project->tree_nodes.try_to_get(project->tn_head()),doc["model"],"");
         if(project->sim.models.size()!=models.size()) fail("NATIVE_CONSTRUCTION_ERROR","Native model remapping is incomplete");
         std::set<irt::model_id> distinct;
@@ -170,7 +194,7 @@ struct native_hierarchy {
     }
     void declare(const std::string& name,const V* d) {
         if(!access->can_alloc_generic_component(1)) fail("NATIVE_CONSTRUCTION_ERROR","Cannot allocate native definition");
-        scope s; s.id=access->alloc_generic_component();
+        scope s; s.id=irt_web::declare_component(*access);
         auto& c=access->components[s.id];
         if(d) {
             for(const auto& p:(*d)["inputs"].GetArray()) {
@@ -201,13 +225,13 @@ struct native_hierarchy {
         auto& scope=scopes.at(name);
         auto& gen=access->generic_components.get(access->components[scope.id].id.generic_id);
         for(const auto& c:s["components"].GetArray()) {
-            if(!gen.grow_children()) fail("NATIVE_CONSTRUCTION_ERROR","Cannot grow native children");
             const auto type=str(c["type"]);
-            auto& ch=type=="coupled"?gen.alloc(scopes.at(str(c["definition"])).id):gen.alloc(dynamics(type));
-            const auto id=gen.children.get_id(ch);
+            const auto name="n"+std::to_string(gen.children.max_used());
+            const auto id=type=="coupled"?irt_web::add_child(gen,scopes.at(str(c["definition"])).id,name):
+                type=="simulation_wrapper"?irt_web::add_wrapper(gen,name,*wrapper_descriptors.at(&c)):
+                irt_web::add_child(gen,dynamics(type),name);
             scope.children.emplace(str(c["id"]),id);
             // Generated short names avoid native name_str truncation of JSON ids.
-            gen.children_names[id]="n"+std::to_string(irt::get_index(id));
             set_parameters(gen.children_parameters[id],type,c["parameters"]);
         }
         const auto n=s["connections"].Size();
@@ -229,6 +253,7 @@ struct native_hierarchy {
             } else {
                 if(!node.is_model()) fail("NATIVE_CONSTRUCTION_ERROR","Missing native atomic model");
                 models.emplace(path,node.mdl);
+                targets.emplace(path,irt_web::native_target{project->tree_nodes.get_id(tn),node.mdl});
             }
         }
     }

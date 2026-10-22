@@ -2,6 +2,9 @@ import { Ajv } from 'ajv';
 import catalogData from './catalog.json' with { type: 'json' };
 import schemaData from './request.schema.json' with { type: 'json' };
 import schemaV2Data from './request-v2.schema.json' with { type: 'json' };
+import schemaV3Data from './request-v3.schema.json' with { type: 'json' };
+import { validateWrapperRequest } from './wrapper-v3.js';
+export * from './wrapper-v3.js';
 
 export const catalog = catalogData;
 // Both Ajv (draft 7) and RapidJSON (draft 4) support this common subset.
@@ -9,15 +12,17 @@ const { $schema: _dialect, ...schema } = schemaData;
 export const requestSchema = schema;
 const { $schema: _v2dialect, ...v2schema } = schemaV2Data;
 export const requestV2Schema = v2schema;
+const { $schema: _v3dialect, ...v3schema } = schemaV3Data;
+export const requestV3Schema = v3schema;
 export const caps = { maxComponents: 128, maxConnections: 512, maxRunCalls: 100000, maxPoints: 20000 };
-export interface Component { id: string; type: string; parameters: Record<string, number>; definition?: string }
+export interface Component { id: string; type: string; parameters: Record<string, number>; definition?: string; experiment?: import('./wrapper-v3.js').WrapperExperiment; experimentOverrides?: import('./wrapper-v3.js').ExperimentOverride[] }
 export interface Endpoint { component: string; port: number }
 export interface CoupledDefinition { id: string; name: string; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[]; components: Component[]; connections: { from: Endpoint; to: Endpoint }[] }
 export interface RunRequest {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   model: { id: string; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number }[]; definitions?: CoupledDefinition[] };
   simulation: { start: number; end: number };
-  limits?: Partial<typeof caps> & { maxDepth?: number; maxInstances?: number };
+  limits?: Partial<typeof caps> & { maxDepth?: number; maxInstances?: number } & Partial<typeof import('./wrapper-v3.js').wrapperCaps>;
 }
 export interface RunResult {
   schemaVersion: 1; status: 'completed'; modelId: string;
@@ -31,12 +36,15 @@ export class ApiError extends Error {
 }
 const validate = new Ajv({ strict: true, coerceTypes: false, removeAdditional: false, useDefaults: false }).compile<RunRequest>(requestSchema);
 const validateV2 = new Ajv({ strict: false, coerceTypes: false, removeAdditional: false, useDefaults: false }).compile<RunRequest>(requestV2Schema);
+const validateV3 = new Ajv({ strict: false, strictNumbers: true, coerceTypes: false, removeAdditional: false, useDefaults: false }).compile<RunRequest>(requestV3Schema);
 export function validateRequest(input: unknown): asserts input is RunRequest {
-  const check = (input as { schemaVersion?: unknown } | null)?.schemaVersion === 2 ? validateV2 : validate;
+  const version = (input as { schemaVersion?: unknown } | null)?.schemaVersion;
+  const check = version === 3 ? validateV3 : version === 2 ? validateV2 : validate;
   if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON schema: ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
   validateGraph(input);
 }
 export function validateGraph(request: RunRequest): void {
+  if (request.schemaVersion === 3) { validateWrapperRequest(request); return; }
   if (request.schemaVersion === 2) { validateHierarchy(request); return; }
   const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
   const { model, simulation: { start, end } } = request;
@@ -100,7 +108,7 @@ export function parseResult(input: unknown, request: RunRequest): RunResult {
 
 
 const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
-export function validateHierarchy(r: RunRequest, editing = false): void {
+export function validateHierarchy(r: RunRequest, editing = false): Map<string, { atoms: number; connections: number }> {
   const limits = { ...caps, maxDepth: 8, maxInstances: 512, ...r.limits };
   const { start, end } = r.simulation;
   if (!(end > start) || !Number.isFinite(end - start) || end - start > 1e9) fail('INVALID_TIME', 'Expected start < end and horizon <= 1e9');
@@ -114,6 +122,10 @@ export function validateHierarchy(r: RunRequest, editing = false): void {
   }
   const getDefinition = (c: Component) => definitions.get(c.definition ?? '') ?? fail('DEFINITION_NOT_FOUND', `Unknown definition: ${c.definition}`);
   const ports = (c: Component, direction: 'inputs' | 'outputs') => {
+    if (r.schemaVersion === 3 && c.type === 'simulation_wrapper') {
+      const e = c.experiment!;
+      return Array.from({ length: e.factors.length + (direction === 'inputs' ? 2 : e.selections.length) }, (_, port) => ({ port, name: String(port) }));
+    }
     const spec = c.type === 'coupled' ? getDefinition(c) : catalog.components.find(s => s.type === c.type) ?? fail('UNKNOWN_COMPONENT', `Unsupported component: ${c.type}`);
     return spec[direction];
   };
@@ -125,6 +137,8 @@ export function validateHierarchy(r: RunRequest, editing = false): void {
       if (c.type === 'coupled') {
         getDefinition(c);
         if (Object.keys(c.parameters).length) fail('INVALID_PARAMETER', 'Coupled instances use shared definitions, without parameter overrides');
+      } else if (r.schemaVersion === 3 && c.type === 'simulation_wrapper') {
+        if (Object.keys(c.parameters).length) fail('INVALID_PARAMETER', 'Wrapper parameters must be empty; use experiment');
       } else {
         const spec = catalog.components.find(s => s.type === c.type) ?? fail('UNKNOWN_COMPONENT', `Unsupported component: ${c.type}`);
         for (const name of spec.required) if (!Object.hasOwn(c.parameters, name)) fail('INVALID_PARAMETER', `Missing parameter: ${name}`);
@@ -197,9 +211,11 @@ export function validateHierarchy(r: RunRequest, editing = false): void {
     return summary;
   }
   // Unused definitions are validated too: a document is portable as a whole.
-  for (const d of definitions.values()) { instances = 0; atoms = 0; connections = 0; expand(d, 1); }
+  const sizes = new Map<string, { atoms: number; connections: number }>();
+  for (const d of definitions.values()) { instances = 0; atoms = 0; connections = 0; expand(d, 1); sizes.set(d.id, { atoms, connections }); }
   instances = 0; atoms = 0; connections = 0;
   expand(r.model, 0);
+  sizes.set('$root', { atoms, connections });
   if (!editing && atoms === 0) fail('INVALID_MODEL', 'No executable atomic model');
   let points = 0;
   const observed = new Set<string>();
@@ -208,7 +224,7 @@ export function validateHierarchy(r: RunRequest, editing = false): void {
     const path = o.component.split('/');
     for (let i = 0; i < path.length; i++) {
       const c = scope.components.find(c => c.id === path[i]) ?? fail('OBSERVATION_ERROR', `Unresolved observation: ${o.component}`);
-      if (i === path.length - 1) { if (c.type === 'coupled') fail('OBSERVATION_ERROR', 'Observe an atomic descendant using its instance path'); }
+      if (i === path.length - 1) { if (c.type === 'coupled' || c.type === 'simulation_wrapper') fail('OBSERVATION_ERROR', 'Observe an atomic descendant with an observation function'); }
       else { if (c.type !== 'coupled') fail('OBSERVATION_ERROR', 'Observation traverses an atomic model'); scope = getDefinition(c); }
     }
     if (observed.has(o.component)) fail('OBSERVATION_ERROR', 'Duplicate observation');
@@ -217,4 +233,5 @@ export function validateHierarchy(r: RunRequest, editing = false): void {
     points += Math.ceil((end - start) / o.samplingInterval) + 2;
     if (points > limits.maxPoints) fail('LIMIT_EXCEEDED', 'Potential sampling grid exceeds maxPoints');
   }
+  return sizes;
 }

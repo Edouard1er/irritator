@@ -1,4 +1,4 @@
-# Contrats scientifiques v1 et v2
+# Contrats scientifiques v1, v2 et v3
 
 Les schémas JSON draft-04 sont exécutés par RapidJSON dans le runner et par Ajv
 dans le service et l’éditeur. `request.schema.json` reste le schéma v1.
@@ -126,3 +126,126 @@ Un document plat reste exporté en v1 tant qu’aucune définition couplée n’
 créée. Un document v2, même plat, conserve sa version à l’import/export.
 Les exports scientifiques omettent les données graphiques ; les workspaces
 navigateur v2 conservent chaque portée séparément et migrent le v1 sans le réécrire.
+
+## Simulation imbriquée v3 (Test 7C)
+
+`request-v3.schema.json` conserve les graphes v2 et ajoute un enfant
+`{id,type:"simulation_wrapper",parameters:{},experiment:{...}}`. Exemple exécutable :
+[`wrapper-affine-v3.json`](../../examples/wrapper-affine-v3.json).
+`experiment` exige `definition` (référence locale, y compris déclarée plus loin),
+`simulation:{start,end}`, `run:"complete"`, `factors`, `selections` et
+`objective:{method:"simple",type:"maximize"|"minimize",primary}`.
+
+Un facteur contient `id`, `target` (chemin d'instances relatif au prospectif),
+`parameter`, `type` et exactement `value` pour `single`, ou `values` non vide pour
+`fixed`. `name` est facultatif. Seuls `constant.value` et
+`qss{1,2,3}_integrator.X` sont admis : tous écrivent `reals[0]`. Les valeurs
+doivent respecter les bornes du paramètre du catalogue. `offset`, `dQ`, paramètres
+entiers et autres types ne sont pas des cibles de facteurs validées.
+Un seul facteur par cible ; identifiants uniques séparément pour facteurs et
+sélections. Leurs identifiants ont au plus 31 caractères ASCII ; les identifiants
+de composants/définitions gardent 64 caractères. Les noms affichés ont 64 caractères.
+
+Une sélection contient `id`, `target`, `criteria` et éventuellement `name`.
+Les critères sont `min`, `max`, `min-last`, `max-last`. La cible doit être un
+atome observable du catalogue. Les réductions sont celles du moteur, au pas
+interne 0,1 ; les deux critères terminaux lisent la même dernière valeur.
+Le sens d'optimisation est celui de l'objectif. `primary` désigne une sélection.
+Tous les autres modes, méthodes, familles de facteurs et critères sont rejetés
+par le schéma. Les définitions prospectives peuvent être couplées ; un prospectif
+contenant lui-même un wrapper est explicitement rejeté, même sans récursivité.
+Le DAG des références comprend les liens couplés **et** prospectifs ; il ne
+comprend pas les cycles de connexions DEVS.
+
+Pour F facteurs et S sélections : `1<=F<=10`, `S>=1`, `3<=F+S<=12`.
+Les entrées sont `init=0`, `run=1`, puis les F facteurs à partir de 2.
+Les sorties sont les S sélections dans l'ordre JSON, puis les F facteurs dans
+l'ordre JSON. Les facteurs émettent les trois réels du paramétrage natif ; par
+exemple un facteur sur `X` produit `[X0,dQ,0]`. Les ports sont calculés par
+occurrence et ne proviennent pas des tableaux du catalogue atomique.
+
+Une occurrence couplée peut ajouter un plan privé sans modifier sa définition :
+
+```json
+{"id":"right","type":"coupled","definition":"Cell","parameters":{},
+ "experimentOverrides":[{"target":"decision","factors":[
+   {"id":"rate","type":"fixed","values":[-2,2]}
+ ]}]}
+```
+
+`target` est relatif à l'occurrence couplée et doit atteindre un wrapper. Tous
+ses facteurs sont fournis, avec les mêmes identifiants et le même ordre. Seuls
+leur type `single`/`fixed` et leurs valeurs changent ; cibles, paramètres,
+sélections, horizon, objectif et dimensions restent ceux de la définition.
+Deux overrides au même niveau ne peuvent pas viser le même wrapper ; un override
+du niveau englobant remplace le plan obtenu dans ses descendants. Les plans
+effectifs sont validés avant la construction native. Chaque occurrence obtient
+une ressource privée par `bind_wrapper`, même sans override.
+
+Plafonds supplémentaires, abaissables par `limits` :
+
+| Limite | Plafond |
+|---|---:|
+| `maxWrappers` (déclarations et occurrences, contrôlées séparément) | 8 |
+| `maxScenarios` (produit cartésien par wrapper) | 128 |
+| `maxTotalScenarios` (somme par graphe exécuté) | 256 |
+| `maxTotalModels` (atomes cumulés des copies) | 8192 |
+| `maxTotalConnections` (connexions cumulées des copies) | 32768 |
+| `maxInternalPoints` (grilles d'observation prospectives cumulées) | 200000 |
+| `maxResultEvents` (journal de sorties parent) | 20000 |
+
+Les plafonds v2 restent applicables séparément au parent et à chaque définition.
+Le cumul inclut deux prototypes par déclaration de wrapper (descripteur et copie
+temporaire de `project::set`), puis un prototype privé et N scénarios par
+occurrence, ainsi qu'un récepteur conservateur par sortie. Les connexions sont
+comptées après expansion des interfaces. Les grilles internes sont estimées par
+`N * nombre de cibles sélectionnées distinctes * (ceil((end-start)/0.1)+2)`.
+Chaque définition inutilisée et chaque plan effectif sont également vérifiés.
+Ce sont des budgets logiques, pas une mesure exacte des octets alloués ni du
+nombre de sacs internes. Un timeout externe demeure nécessaire pour `complete`.
+La profondeur combinée des références est bornée à 16 ; les graphes couplés
+conservent leur plafond de huit niveaux.
+
+## Résultat v2 du runner pour les requêtes v3
+
+Une réussite scientifique v3 produit explicitement `schemaVersion:2` : mêmes
+champs `status`, `modelId`, `simulation`, `observations`, `diagnostics`, plus :
+
+```json
+{"resultEvents":[{"component":"decision","time":1,"port":0,
+                  "bag":3,"value":[3,0,0]}],
+ "wrappers":[{"component":"decision","inputs":3,"scenarioCount":3,
+              "outputs":[{"port":0,"kind":"selection","id":"terminal"},
+                         {"port":1,"kind":"selection","id":"minimum"},
+                         {"port":2,"kind":"factor","id":"rate"}]}]}
+```
+
+`bag` est le numéro de l'appel parent `run` collecté (depuis 1), une métadonnée
+locale du collecteur. Dates répétées et triplets restent intacts. Les sorties
+non connectées reçoivent un récepteur DEVS privé pour rendre leurs émissions
+natives collectables. `collectorModelCount` dans les diagnostics compte ces
+récepteurs. Aucun gagnant, identifiant de scénario sélectionné ou statut du
+wrapper n'est inventé. `scenarioCount` décrit la cardinalité du plan, vérifiée
+contre les scénarios natifs après initialisation. Sans commande, le journal
+est vide. Les réponses à la borne finale parent sont exclues.
+
+Les observations parent gardent leur collecte et rééchantillonnage historiques ;
+le journal ne les remplace pas. Les erreurs gardent l'enveloppe d'échec v1 et les
+codes natifs disponibles. Les réussites de requêtes v1/v2 restent en résultat v1.
+Les codes supplémentaires de validation sont `INVALID_EXPERIMENT`,
+`INVALID_FACTOR`, `INVALID_SELECTION` et `UNSUPPORTED_EXPERIMENT` ; les erreurs
+de références, construction et limites réutilisent les codes de l'adaptateur.
+`parseWrapperResult` valide la nouvelle enveloppe ; `parseResult` reste le parseur
+v1 et refuse explicitement le résultat v2.
+
+Fastify, son handshake de catalogue et React Flow ne sont pas intégrés en 7C.
+Le contrat partagé sait valider v3, mais l'adaptateur HTTP de processus utilise
+encore les limites et résultats v1/v2 : l'exécution v3 se fait directement par
+stdin du runner jusqu'au Test 7D. Celui-ci devra adapter transport, clamp des
+limites, codes d'erreur, négociation de capacités et publication du journal.
+
+Reproduction : `npm --prefix web ci` si nécessaire, puis
+`powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-v3.ps1 -Configuration Release`
+(ou `Debug`). Le script réutilise les builds moteur/historiques 7B de même
+configuration et reconstruit tous les clients du runner ; exécuter au préalable
+`tests-wrapper/run.ps1` pour créer ces builds sur une machine neuve.

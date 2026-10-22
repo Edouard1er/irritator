@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "wrapper-affine",
+    "definitions": [
+      {
+        "id": "Prospectif",
+        "name": "Integrale prospective",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "u",
+            "type": "constant",
+            "parameters": {
+              "value": 0,
+              "offset": 0
+            }
+          },
+          {
+            "id": "X",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 1,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "u",
+              "port": 0
+            },
+            "to": {
+              "component": "X",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "decision",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Prospectif",
+          "simulation": {
+            "start": 0,
+            "end": 2
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "rate",
+              "name": "Debit",
+              "target": "u",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                -1,
+                0,
+                1
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "terminal",
+              "target": "X",
+              "criteria": "max-last"
+            },
+            {
+              "id": "minimum",
+              "target": "X",
+              "criteria": "min"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "terminal"
+          }
+        }
+      },
+      {
+        "id": "terminal",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "minimum",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "rate",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "decision",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 0
+        },
+        "to": {
+          "component": "terminal",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 1
+        },
+        "to": {
+          "component": "minimum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 2
+        },
+        "to": {
+          "component": "rate",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "terminal",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "minimum",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "rate",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

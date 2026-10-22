@@ -1,0 +1,172 @@
+import { ApiError, catalog, parseResult, validateHierarchy, type Component, type CoupledDefinition, type RunRequest, type RunResult } from './index.js';
+
+export const wrapperCaps = { maxWrappers: 8, maxScenarios: 128, maxTotalScenarios: 256, maxTotalModels: 8192, maxTotalConnections: 32768, maxInternalPoints: 200000, maxResultEvents: 20000 };
+export type FactorPlan = { id: string } & ({ type: 'single'; value: number } | { type: 'fixed'; values: number[] });
+export type WrapperFactor = FactorPlan & { name?: string; target: string; parameter: 'value' | 'X' };
+export interface WrapperSelection { id: string; name?: string; target: string; criteria: 'min' | 'max' | 'min-last' | 'max-last' }
+export interface WrapperExperiment {
+  definition: string; simulation: { start: number; end: number }; run: 'complete';
+  factors: WrapperFactor[]; selections: WrapperSelection[];
+  objective: { method: 'simple'; type: 'maximize' | 'minimize'; primary: string };
+}
+// Relative to a coupled occurrence; only factor values/types can change.
+export interface ExperimentOverride { target: string; factors: FactorPlan[] }
+export interface WrapperOccurrence { component: string; experiment: WrapperExperiment }
+export interface WrapperEvent { component: string; time: number; port: number; bag: number; value: [number, number, number] }
+export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; outputs: { port: number; kind: 'selection' | 'factor'; id: string }[] }
+export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[] }
+const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
+type Scope = Pick<CoupledDefinition, 'components' | 'connections'>;
+function context(r: RunRequest) {
+  const defs = new Map<string, CoupledDefinition>();
+  for (const d of r.model.definitions ?? []) {
+    if (defs.has(d.id)) fail('INVALID_MODEL', 'Duplicate definition');
+    defs.set(d.id, d);
+  }
+  const definition = (id: string) => defs.get(id) ?? fail('DEFINITION_NOT_FOUND', `Unknown definition: ${id}`);
+  function target(scope: Scope, path: string, code: string): Component {
+    const parts = path.split('/'); let current = scope;
+    for (let i = 0; i < parts.length; ++i) {
+      const c = current.components.find(x => x.id === parts[i]) ?? fail(code, `Unknown instance path: ${path}`);
+      if (i === parts.length - 1) return c;
+      if (c.type !== 'coupled') fail(code, 'Instance path traverses an atomic model');
+      current = definition(c.definition!);
+    }
+    return fail(code, 'Empty target path');
+  }
+  return { defs, definition, target };
+}
+function cardinality(e: WrapperExperiment, max: number): number {
+  let count = 1;
+  for (const f of e.factors) {
+    const n = f.type === 'single' ? 1 : f.values.length;
+    if (!n || count > Math.floor(max / n)) fail('LIMIT_EXCEEDED', 'Cartesian scenario product exceeds maxScenarios');
+    count *= n;
+  }
+  return count;
+}
+function values(f: FactorPlan) { return f.type === 'single' ? [f.value] : f.values; }
+function factorValues(f: FactorPlan, atom: Component) {
+  const spec = catalog.components.find(c => c.type === atom.type) ?? fail('INVALID_FACTOR', 'Unsupported factor model');
+  const p = atom.type === 'constant' ? 'value' : 'X';
+  const b = (spec.parameters as Record<string, { minimum: number; maximum: number }>)[p]!;
+  if (!b || values(f).some(v => !Number.isFinite(v) || v < b.minimum || v > b.maximum)) fail('INVALID_FACTOR', 'Factor value outside target parameter bounds');
+}
+export function wrapperOccurrences(r: RunRequest, scope: Scope = r.model): WrapperOccurrence[] {
+  const { definition } = context(r);
+  const max = r.limits?.maxWrappers ?? wrapperCaps.maxWrappers;
+  function expand(scope: Scope, prefix = ''): WrapperOccurrence[] {
+    const out: WrapperOccurrence[] = []; const overrides = new Map<string, ExperimentOverride>();
+    for (const c of scope.components) {
+      const path = prefix + c.id;
+      if (c.type === 'simulation_wrapper') out.push({ component: path, experiment: c.experiment! });
+      else if (c.type === 'coupled') {
+        out.push(...expand(definition(c.definition!), path + '/'));
+        for (const o of c.experimentOverrides ?? []) {
+          const dest = path + '/' + o.target;
+          if (overrides.has(dest)) fail('INVALID_EXPERIMENT', 'Duplicate occurrence override');
+          overrides.set(dest, o);
+        }
+      }
+      if (out.length > max) fail('LIMIT_EXCEEDED', 'Expanded wrapper budget exceeded');
+    }
+    for (const [path, override] of overrides) {
+      const o = out.find(o => o.component === path) ?? fail('INVALID_REFERENCE', 'Override target is not a wrapper instance');
+      if (override.factors.length !== o.experiment.factors.length || override.factors.some((f, i) => f.id !== o.experiment.factors[i]!.id)) fail('INVALID_FACTOR', 'Override must preserve factor ids/count/order');
+      o.experiment = { ...o.experiment, factors: o.experiment.factors.map((f, i) => {
+        const plan = override.factors[i]!;
+        // Do not retain stale value/values fields from the original union arm.
+        return { target: f.target, parameter: f.parameter, ...plan };
+      }) };
+    }
+    return out;
+  }
+  return expand(scope);
+}
+export function validateWrapperRequest(r: RunRequest): void {
+  const { defs, definition, target } = context(r);
+  const limits = { ...wrapperCaps, ...r.limits };
+  const active = new Set<string>(), done = new Set<string>();
+  function dependency(id: string) {
+    if (active.has(id)) fail('RECURSIVE_DEFINITION', `Recursive prospective/coupled definition: ${id}`);
+    if (done.has(id)) return;
+    active.add(id);
+    if (active.size > 16) fail('HIERARCHY_DEPTH', 'Combined dependency depth exceeds 16');
+    for (const c of definition(id).components) {
+      if (c.type === 'coupled') dependency(c.definition!);
+      else if (c.type === 'simulation_wrapper') dependency(c.experiment!.definition);
+    }
+    active.delete(id); done.add(id);
+  }
+  for (const id of defs.keys()) dependency(id);
+  function hasWrapper(s: Scope): boolean { return s.components.some(c => c.type === 'simulation_wrapper' || (c.type === 'coupled' && hasWrapper(definition(c.definition!)))); }
+  const declared = [r.model, ...defs.values()].flatMap(s => s.components.filter(c => c.type === 'simulation_wrapper').map(c => c.experiment!));
+  for (const e of declared) {
+    const f = e.factors.length, s = e.selections.length;
+    if (f < 1 || f > 10 || s < 1 || f + s < 3 || f + s > 12) fail('INVALID_EXPERIMENT', 'Require 1<=F<=10, S>=1, 3<=F+S<=12');
+  }
+  const sizes = validateHierarchy(r);
+  if (declared.length > limits.maxWrappers) fail('LIMIT_EXCEEDED', 'Declared wrapper budget exceeded');
+  function validate(e: WrapperExperiment) {
+    const { start, end } = e.simulation;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start) || end - start > 1e9 || !(start + .1 > start) || !(end + .1 > end)) fail('INVALID_TIME', 'Invalid prospective horizon');
+    const scope = definition(e.definition), f = e.factors.length, s = e.selections.length;
+    if (f < 1 || f > 10 || s < 1 || f + s < 3 || f + s > 12) fail('INVALID_EXPERIMENT', 'Require 1<=F<=10, S>=1, 3<=F+S<=12');
+    if (hasWrapper(scope)) fail('UNSUPPORTED_EXPERIMENT', 'Prospective wrappers are outside the validated single-level domain');
+    if (new Set(e.factors.map(f => f.id)).size !== f || new Set(e.factors.map(f => f.target)).size !== f) fail('INVALID_FACTOR', 'Duplicate factor id or target');
+    for (const f of e.factors) {
+      const atom = target(scope, f.target, 'INVALID_FACTOR');
+      if (!((atom.type === 'constant' && f.parameter === 'value') || (['qss1_integrator', 'qss2_integrator', 'qss3_integrator'].includes(atom.type) && f.parameter === 'X'))) fail('INVALID_FACTOR', 'Factor parameter must map to a validated reals[0]');
+      factorValues(f, atom);
+    }
+    if (new Set(e.selections.map(s => s.id)).size !== s || !e.selections.some(s => s.id === e.objective.primary)) fail('INVALID_SELECTION', 'Duplicate selection id or unknown primary');
+    for (const s of e.selections) {
+      const atom = target(scope, s.target, 'INVALID_SELECTION');
+      if (!catalog.components.some(c => c.type === atom.type)) fail('INVALID_SELECTION', 'Selection must target an observable catalogue atom');
+    }
+    cardinality(e, limits.maxScenarios);
+  }
+  for (const e of declared) validate(e);
+  function budget(list: WrapperOccurrence[], graph: { atoms: number; connections: number }) {
+    let scenarios = 0, models = graph.atoms, edges = graph.connections, points = 0;
+    for (const e of declared) { const g = sizes.get(e.definition)!; models += 2 * g.atoms; edges += 2 * g.connections; }
+    for (const o of list) {
+      const e = o.experiment; validate(e);
+      const n = cardinality(e, limits.maxScenarios), g = sizes.get(e.definition)!, ports = e.factors.length + e.selections.length;
+      scenarios += n; models += (n + 1) * g.atoms + ports; edges += (n + 1) * g.connections + ports;
+      points += n * new Set(e.selections.map(s => s.target)).size * (Math.ceil((e.simulation.end - e.simulation.start) / .1) + 2);
+    }
+    if (scenarios > limits.maxTotalScenarios || models > limits.maxTotalModels || edges > limits.maxTotalConnections || points > limits.maxInternalPoints) fail('LIMIT_EXCEEDED', 'Cumulative prospective/scenario resource budget exceeded');
+  }
+  for (const d of defs.values()) budget(wrapperOccurrences(r, d), sizes.get(d.id)!);
+  budget(wrapperOccurrences(r), sizes.get('$root')!);
+}
+
+// Explicit opt-in for Test 7D. The HTTP process adapter still uses parseResult
+// (result v1), so it cannot silently reinterpret the new event envelope.
+export function parseWrapperResult(input: unknown, request: RunRequest): RunResultV2 {
+  const bad = (): never => { throw new ApiError('RUNNER_PROTOCOL_ERROR', 'Invalid wrapper result v2', 502); };
+  if (request.schemaVersion !== 3 || typeof input !== 'object' || !input) return bad();
+  const r = input as RunResultV2;
+  if (r.schemaVersion !== 2 || !Array.isArray(r.resultEvents) || !Array.isArray(r.wrappers)) return bad();
+  parseResult({ ...r, schemaVersion: 1 }, request);
+  const expected = wrapperOccurrences(request);
+  if (r.wrappers.length !== expected.length) return bad();
+  const layouts = new Map<string, number>();
+  for (let i = 0; i < expected.length; ++i) {
+    const o = expected[i]!, w = r.wrappers[i], e = o.experiment;
+    const ports = [...e.selections.map(s => ({ kind: 'selection', id: s.id })), ...e.factors.map(f => ({ kind: 'factor', id: f.id }))].map((p, port) => ({ port, ...p }));
+    if (!w || w.component !== o.component || w.inputs !== e.factors.length + 2 || w.scenarioCount !== cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios) || !Array.isArray(w.outputs) || w.outputs.length !== ports.length || w.outputs.some((p, j) => !p || p.port !== ports[j]!.port || p.kind !== ports[j]!.kind || p.id !== ports[j]!.id)) return bad();
+    layouts.set(w.component, ports.length);
+  }
+  if (r.resultEvents.length > (request.limits?.maxResultEvents ?? wrapperCaps.maxResultEvents)) return bad();
+  let previousBag = 0, previousTime = -Infinity;
+  const seen = new Set<string>();
+  for (const event of r.resultEvents) {
+    if (!event || !layouts.has(event.component) || !Number.isInteger(event.port) || event.port < 0 || event.port >= layouts.get(event.component)! || !Number.isSafeInteger(event.bag) || event.bag < 1 || event.bag > r.simulation.runCalls || event.bag < previousBag || !Number.isFinite(event.time) || event.time < request.simulation.start || event.time >= request.simulation.end || event.time < previousTime || !Array.isArray(event.value) || event.value.length !== 3 || event.value.some(v => !Number.isFinite(v))) return bad();
+    const key = JSON.stringify([event.component, event.port, event.bag]);
+    if (seen.has(key)) return bad();
+    seen.add(key); previousBag = event.bag; previousTime = event.time;
+  }
+  return r;
+}

@@ -2,3 +2,4 @@
 inline constexpr char catalog_json[] = R"contracts(@CATALOG_JSON@)contracts";
 inline constexpr char request_schema_json[] = R"contracts(@REQUEST_SCHEMA_JSON@)contracts";
 inline constexpr char request_v2_schema_json[] = R"contracts(@REQUEST_V2_SCHEMA_JSON@)contracts";
+inline constexpr char request_v3_schema_json[] = R"contracts(@REQUEST_V3_SCHEMA_JSON@)contracts";

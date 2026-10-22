@@ -1,0 +1,698 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model",
+    "simulation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "enum": [
+        3
+      ]
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "components",
+        "connections",
+        "observations",
+        "definitions"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/definitions/component"
+          }
+        },
+        "connections": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "$ref": "#/definitions/endpoint"
+              },
+              "to": {
+                "$ref": "#/definitions/endpoint"
+              }
+            }
+          }
+        },
+        "observations": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "component",
+              "samplingInterval"
+            ],
+            "properties": {
+              "component": {
+                "$ref": "#/definitions/path"
+              },
+              "samplingInterval": {
+                "type": "number",
+                "minimum": 0.000001,
+                "maximum": 1000000000
+              }
+            }
+          }
+        },
+        "definitions": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "inputs",
+              "outputs",
+              "components",
+              "connections"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "inputs": {
+                "$ref": "#/definitions/ports"
+              },
+              "outputs": {
+                "$ref": "#/definitions/ports"
+              },
+              "components": {
+                "type": "array",
+                "maxItems": 128,
+                "items": {
+                  "$ref": "#/definitions/component"
+                }
+              },
+              "connections": {
+                "type": "array",
+                "maxItems": 512,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "from",
+                    "to"
+                  ],
+                  "properties": {
+                    "from": {
+                      "$ref": "#/definitions/endpoint"
+                    },
+                    "to": {
+                      "$ref": "#/definitions/endpoint"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "simulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        "end": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxComponents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "maxConnections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 512
+        },
+        "maxRunCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "maxInstances": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
+        },
+        "maxWrappers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "maxScenarios": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "maxTotalScenarios": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "maxTotalModels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "maxTotalConnections": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        },
+        "maxInternalPoints": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000
+        },
+        "maxResultEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        }
+      }
+    }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component",
+        "port"
+      ],
+      "properties": {
+        "component": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/id"
+            },
+            {
+              "enum": [
+                "$input",
+                "$output"
+              ]
+            }
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        }
+      }
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 600,
+      "pattern": "^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$"
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 8,
+          "additionalProperties": {
+            "type": "number",
+            "minimum": -1000000000000,
+            "maximum": 1000000000000
+          }
+        },
+        "definition": {
+          "$ref": "#/definitions/id"
+        },
+        "experiment": {
+          "$ref": "#/definitions/experiment"
+        },
+        "experimentOverrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "target",
+              "factors"
+            ],
+            "properties": {
+              "target": {
+                "$ref": "#/definitions/path"
+              },
+              "factors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/factorPlan"
+                },
+                "minItems": 1,
+                "maxItems": 10
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "coupled"
+              ]
+            }
+          },
+          "required": [
+            "definition"
+          ],
+          "not": {
+            "required": [
+              "experiment"
+            ]
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "simulation_wrapper"
+              ]
+            }
+          },
+          "required": [
+            "experiment"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "definition"
+                ]
+              },
+              {
+                "required": [
+                  "experimentOverrides"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "not": {
+                "enum": [
+                  "coupled",
+                  "simulation_wrapper"
+                ]
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "definition"
+                ]
+              },
+              {
+                "required": [
+                  "experiment"
+                ]
+              },
+              {
+                "required": [
+                  "experimentOverrides"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ports": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "port",
+          "name"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 15
+          },
+          "name": {
+            "$ref": "#/definitions/id"
+          }
+        }
+      }
+    },
+    "shortId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 31,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "factorPlan": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "value"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "type": {
+              "enum": [
+                "single"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "values"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "type": {
+              "enum": [
+                "fixed"
+              ]
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          }
+        }
+      ]
+    },
+    "factor": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "target",
+            "parameter",
+            "type",
+            "value"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "target": {
+              "$ref": "#/definitions/path"
+            },
+            "parameter": {
+              "enum": [
+                "value",
+                "X"
+              ]
+            },
+            "type": {
+              "enum": [
+                "single"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "target",
+            "parameter",
+            "type",
+            "values"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "target": {
+              "$ref": "#/definitions/path"
+            },
+            "parameter": {
+              "enum": [
+                "value",
+                "X"
+              ]
+            },
+            "type": {
+              "enum": [
+                "fixed"
+              ]
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          }
+        }
+      ]
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "target",
+        "criteria"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/shortId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "target": {
+          "$ref": "#/definitions/path"
+        },
+        "criteria": {
+          "enum": [
+            "min",
+            "max",
+            "min-last",
+            "max-last"
+          ]
+        }
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition",
+        "simulation",
+        "run",
+        "factors",
+        "selections",
+        "objective"
+      ],
+      "properties": {
+        "definition": {
+          "$ref": "#/definitions/id"
+        },
+        "simulation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "number",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            },
+            "end": {
+              "type": "number",
+              "minimum": -1000000000,
+              "maximum": 1000000000
+            }
+          }
+        },
+        "run": {
+          "enum": [
+            "complete"
+          ]
+        },
+        "factors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/factor"
+          },
+          "minItems": 1,
+          "maxItems": 10
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/selection"
+          },
+          "minItems": 1,
+          "maxItems": 11
+        },
+        "objective": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "type",
+            "primary"
+          ],
+          "properties": {
+            "method": {
+              "enum": [
+                "simple"
+              ]
+            },
+            "type": {
+              "enum": [
+                "maximize",
+                "minimize"
+              ]
+            },
+            "primary": {
+              "$ref": "#/definitions/shortId"
+            }
+          }
+        }
+      }
+    }
+  }
+}

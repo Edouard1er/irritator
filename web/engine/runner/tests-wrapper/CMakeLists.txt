@@ -1,0 +1,11 @@
+# Configured through the runner so native tests and JSON paths link the same
+# libirritator archive, runtime, adapter and Debug settings.
+add_executable(runner-wrapper-tests main.cpp fixtures.cpp test_cases.cpp)
+target_link_libraries(runner-wrapper-tests PRIVATE irritator-native-wrapper)
+if(MSVC)
+  target_compile_options(runner-wrapper-tests PRIVATE /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd5030)
+endif()
+foreach(case flat coupled creation pair reset criteria single atomic ports invalid resources)
+  add_test(NAME native-wrapper-${case} COMMAND runner-wrapper-tests ${case})
+  set_tests_properties(native-wrapper-${case} PROPERTIES TIMEOUT 30)
+endforeach()
