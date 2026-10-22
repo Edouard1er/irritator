@@ -3,6 +3,8 @@ import path from 'node:path';
 
 const config: NextConfig = {
   reactStrictMode: true,
+  // Shared contracts use NodeNext .js specifiers and ship TypeScript sources.
+  experimental: { extensionAlias: { '.js': ['.ts', '.tsx', '.js'] } },
   outputFileTracingRoot: path.resolve(import.meta.dirname, '../..'),
   turbopack: { root: path.resolve(import.meta.dirname, '../..') },
   async rewrites() {

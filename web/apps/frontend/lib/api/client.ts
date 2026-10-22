@@ -1,10 +1,10 @@
-import { catalog, parseResult, type RunRequest, type RunResult } from '@contracts';
+import { catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2 } from '@contracts';
 import type { Catalog } from '@/lib/modeling/model';
 
 export class ClientError extends Error {
   constructor(public code: string, message: string, public httpStatus = 0, public engine?: { engineCategory?: number; engineCode?: number }) { super(message); }
 }
-export type HttpResult = RunResult & { runId: string };
+export type HttpResult = (RunResult | RunResultV2) & { runId: string };
 function canonicalJson(value: unknown): string {
   const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v !== null && typeof v === 'object'
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, normalize(item)])) : v;
@@ -26,10 +26,10 @@ export async function apiJson(path: string, init?: RequestInit, fetcher: typeof 
   }
   return body;
 }
-export async function getHealth(): Promise<{ engineVersion: string; adapterVersion: string }> {
-  const body = await apiJson('health') as { schemaVersion?: number; status?: string; backend?: string; runner?: { available?: boolean; engineVersion?: string; adapterVersion?: string } } | null;
+export async function getHealth(): Promise<{ engineVersion: string; adapterVersion: string; wrapperAvailable: boolean }> {
+  const body = await apiJson('health') as { schemaVersion?: number; status?: string; backend?: string; runner?: { available?: boolean; engineVersion?: string; adapterVersion?: string; capabilities?: unknown } } | null;
   if (body?.schemaVersion !== 1 || body.status !== 'ok' || body.backend !== 'fastify' || body.runner?.available !== true || body.runner.engineVersion !== catalog.engineVersion || body.runner.adapterVersion !== catalog.adapterVersion) throw new ClientError('ENGINE_UNAVAILABLE', 'Le handshake du moteur n’a pas été confirmé.');
-  return { engineVersion: body.runner.engineVersion, adapterVersion: body.runner.adapterVersion };
+  return { engineVersion: body.runner.engineVersion, adapterVersion: body.runner.adapterVersion, wrapperAvailable: canonicalJson(body.runner.capabilities) === canonicalJson(runnerCapabilities) };
 }
 export async function getCatalog(): Promise<Catalog> {
   const body = await apiJson('components');
@@ -38,9 +38,10 @@ export async function getCatalog(): Promise<Catalog> {
   return body as Catalog;
 }
 export async function runSimulation(request: RunRequest): Promise<HttpResult> {
+  validateRequest(request);
   const body = await apiJson('simulations/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
   try {
-    const result = parseResult(body, request);
+    const result = request.schemaVersion === 3 ? parseWrapperResult(body, request) : parseResult(body, request);
     const runId = (body as { runId?: unknown }).runId;
     if (typeof runId !== 'string' || !runId) throw new Error('runId');
     return { ...result, runId };

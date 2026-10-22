@@ -14,6 +14,9 @@ import { Inspector } from '@/components/panels/inspector';
 import { NumberField } from '@/components/panels/number-field';
 import { ResultsPanel } from '@/components/panels/results-panel';
 import { IrritatorNodeView, type IrritatorNode } from '@/components/nodes/irritator-node';
+import { assertCanRemove, componentSpec, newWrapperExperiment, promoteToV3, renameExperimentPaths, updateExperiment, validateDependencies, wrapperPaletteSpec } from '@/lib/modeling/wrapper';
+import { WrapperInspector } from '@/components/panels/wrapper-inspector';
+import { ExperimentOverridesEditor } from '@/components/panels/experiment-overrides';
 
 const nodeTypes = { irritator: IrritatorNodeView };
 type Status = 'Prêt' | 'Validation' | 'Exécution' | 'Terminé' | 'Échec';
@@ -30,6 +33,7 @@ function Editor() {
   }), []);
   const [loaded, setLoaded] = useState(false);
   const [nativeCatalog, setCatalog] = useState<Catalog>();
+  const [wrapperAvailable, setWrapperAvailable] = useState(false);
   const [catalogError, setCatalogError] = useState<string>();
   const catalog = useMemo(() => scopeCatalog(document.request, nativeCatalog, scopeId), [document.request.model.definitions, nativeCatalog, scopeId]);
   const [health, setHealth] = useState<'checking' | 'ready' | 'unavailable'>('checking');
@@ -88,8 +92,8 @@ function Editor() {
     setHealth('checking'); setHealthError(undefined); setCatalogError(undefined);
     try {
       const [h, c] = await Promise.allSettled([getHealth(), getCatalog()]);
-      if (h.status === 'fulfilled') setHealth('ready');
-      else { setHealth('unavailable'); setHealthError(errorText(h.reason)); }
+      if (h.status === 'fulfilled') { setHealth('ready'); setWrapperAvailable(h.value.wrapperAvailable); }
+      else { setHealth('unavailable'); setWrapperAvailable(false); setHealthError(errorText(h.reason)); }
       if (c.status === 'fulfilled') setCatalog(c.value);
       else setCatalogError(errorText(c.reason));
     } finally { backendChecking.current = false; }
@@ -105,7 +109,7 @@ function Editor() {
   const createDefinition = (id: string, name: string): string | undefined => {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || !name.trim()) return 'Identifiant et nom valides requis.';
     if (definitions(document.request).some(d => d.id === id)) return 'Cette définition existe déjà.';
-    const request: RunRequest = { ...document.request, schemaVersion: 2, model: { ...document.request.model, definitions: [...definitions(document.request), { id, name, inputs: [], outputs: [], components: [], connections: [] }] } };
+    const request: RunRequest = { ...document.request, schemaVersion: document.request.schemaVersion === 3 ? 3 : 2, model: { ...document.request.model, definitions: [...definitions(document.request), { id, name, inputs: [], outputs: [], components: [], connections: [] }] } };
     try { validateEditorDocument(request); } catch (e) { return errorText(e); }
     setDocument(s => ({ ...s, request, activeScope: id, scopeTrail: [id] }));
     setSelected(undefined); setSelectedEdge(undefined); setNotice('Définition partagée créée. Ajoutez ses ports et ses enfants.');
@@ -114,7 +118,7 @@ function Editor() {
   };
   const nodes: IrritatorNode[] = useMemo(() => state.request.model.components.map(component => ({
     id: component.id, type: 'irritator', position: state.positions[component.id] ?? { x: 0, y: 0 }, selected: selected === component.id, deletable: !component.id.startsWith('$'), measured: nodeDimensions[component.id],
-    data: { component, spec: catalog?.components.find(c => c.type === component.type), observed: state.request.model.observations.some(o => o.component === component.id), onOpen: component.type.startsWith('coupled:') ? () => navigate(component.type.slice(8), [...(document.scopeTrail ?? []), component.type.slice(8)]) : undefined },
+    data: { component, spec: componentSpec(component, catalog), observed: state.request.model.observations.some(o => o.component === component.id), prospectiveName: definitions(document.request).find(d => d.id === component.experiment?.definition)?.name, onOpen: component.experiment ? () => navigate(component.experiment!.definition, [...(document.scopeTrail ?? []), component.experiment!.definition]) : component.type.startsWith('coupled:') ? () => navigate(component.type.slice(8), [...(document.scopeTrail ?? []), component.type.slice(8)]) : undefined },
   })), [state.request.model.components, state.request.model.observations, state.positions, selected, catalog, nodeDimensions, document.scopeTrail]);
   const edges: Edge[] = useMemo(() => state.request.model.connections.map(c => ({
     id: edgeId(c), source: c.from.component, target: c.to.component, sourceHandle: handleId('out', c.from.port), targetHandle: handleId('in', c.to.port),
@@ -125,27 +129,30 @@ function Editor() {
   const addComponent = (spec: ComponentSpec, position?: { x: number; y: number }) => {
     if (state.request.model.components.length >= (state.request.limits?.maxComponents ?? 128)) { setError('LIMIT_EXCEEDED · Limite de composants atteinte.'); return; }
     const id = uniqueId(spec, state.request.model.components);
-    if (spec.type.startsWith('coupled:') && scopeId !== rootScope) {
-      const trial = applyScopeView(document, scopeId, { ...state, request: { ...state.request, model: { ...state.request.model, components: [...state.request.model.components, { id, type: spec.type, parameters: {} }] } } });
-      try { validateEditorDocument(trial.request); } catch (e) { setError(errorText(e)); return; }
-    }
+    const wrapper = spec.type === 'simulation_wrapper';
+    if (wrapper && !wrapperAvailable) { setError('RUNNER_INCOMPATIBLE · Capacités v3 non confirmées.'); return; }
+    if (wrapper && document.request.schemaVersion !== 3 && !window.confirm('Ajouter ce wrapper convertit explicitement le document en JSON v3. Tous les composants, définitions et connexions sont conservés. Continuer ?')) return;
     const count = state.request.model.components.length;
-    setState(s => ({ ...s, positions: { ...s.positions, [id]: position ?? { x: Math.floor(count / 3) * 285, y: (count % 3) * 165 } }, request: { ...s.request, model: { ...s.request.model, components: [...s.request.model.components, { id, type: spec.type, parameters: defaultParameters(spec) }] } } }));
+    const component = { id, type: spec.type, parameters: defaultParameters(spec), ...(wrapper ? { experiment: newWrapperExperiment(document.request, scopeId) } : {}) };
+    const trial = applyScopeView(document, scopeId, { ...state, positions: { ...state.positions, [id]: position ?? { x: Math.floor(count / 3) * 285, y: (count % 3) * 165 } }, request: { ...state.request, model: { ...state.request.model, components: [...state.request.model.components, component] } } });
+    if (wrapper) trial.request = promoteToV3(trial.request);
+    try { if (wrapper || spec.type.startsWith('coupled:')) validateEditorDocument(trial.request); else validateDependencies(trial.request, true); } catch (e) { setError(errorText(e)); return; }
+    setDocument(trial); setError(undefined);
     setSelected(id); setSelectedEdge(undefined); setNotice(undefined);
   };
-  const onNodesChange = useCallback((changes: NodeChange<IrritatorNode>[]) => {
+  const onNodesChange = (changes: NodeChange<IrritatorNode>[]) => {
     const dimensions = changes.flatMap(c => c.type === 'dimensions' && c.dimensions ? [[c.id, c.dimensions] as const] : []);
     if (dimensions.length) setNodeDimensions(previous => {
       const modified = dimensions.filter(([id, size]) => previous[id]?.width !== size.width || previous[id]?.height !== size.height);
       return modified.length ? { ...previous, ...Object.fromEntries(modified) } : previous;
     });
     const removed = new Set(changes.filter(c => c.type === 'remove').filter(c => !c.id.startsWith('$')).map(c => c.id));
-    if (removed.size) { setState(s => removeComponents(s, removed)); setSelected(undefined); }
+    if (removed.size) { try { assertCanRemove(document.request, scopeId, removed); setState(s => removeComponents(s, removed)); setSelected(undefined); } catch (e) { setError(errorText(e)); } }
     const moves = changes.flatMap(c => c.type === 'position' && c.position ? [[c.id, c.position] as const] : []);
     if (moves.length) setState(s => ({ ...s, positions: { ...s.positions, ...Object.fromEntries(moves) } }));
     const selection = changes.find(c => c.type === 'select' && c.selected);
     if (selection?.type === 'select') { setSelected(selection.id); setSelectedEdge(undefined); }
-  }, []);
+  };
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const removed = new Set(changes.filter(c => c.type === 'remove').map(c => c.id));
     if (removed.size) setState(s => ({ ...s, request: { ...s.request, model: { ...s.request.model, connections: s.request.model.connections.filter(c => !removed.has(edgeId(c))) } } }));
@@ -160,11 +167,12 @@ function Editor() {
   };
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
-    const spec = catalog?.components.find(c => c.type === e.dataTransfer.getData('application/irritator-component'));
+    const type = e.dataTransfer.getData('application/irritator-component');
+    const spec = type === 'simulation_wrapper' ? wrapperPaletteSpec : catalog?.components.find(c => c.type === type);
     if (spec) addComponent(spec, flow.screenToFlowPosition({ x: e.clientX, y: e.clientY }));
   };
   const selectedComponent = state.request.model.components.find(c => c.id === selected && !c.id.startsWith('$'));
-  const selectedSpec = catalog?.components.find(c => c.type === selectedComponent?.type);
+  const selectedSpec = selectedComponent ? componentSpec(selectedComponent, catalog) : undefined;
   const selectedObservation = state.request.model.observations.find(o => o.component === selected);
   const deleteEdge = () => { editRequest(r => ({ ...r, model: { ...r.model, connections: r.model.connections.filter(c => edgeId(c) !== selectedEdge) } })); setSelectedEdge(undefined); };
   const confirmReplace = () => !dirty || window.confirm('Ce modèle contient des modifications non exportées. Remplacer le modèle courant ?');
@@ -193,6 +201,7 @@ function Editor() {
     running.current = true; setError(undefined); setStatus('Validation');
     try {
       const request = serializeModel(document);
+      if (request.schemaVersion === 3 && !wrapperAvailable) throw new ClientError('RUNNER_INCOMPATIBLE', 'Reconnectez le moteur pour confirmer les capacités v3.');
       if (!request.model.observations.length) setNotice('Aucune observation sélectionnée : cette exécution ne produira pas de trajectoire.');
       setStatus('Exécution');
       const data = await runSimulation(request);
@@ -210,17 +219,18 @@ function Editor() {
       <div className="header-right"><button className={`engine-status ${health}`} title={healthError ?? 'Handshake du runner vérifié ; les tests numériques vérifient les calculs.'} onClick={() => void connectBackend()}><span />{health === 'ready' ? 'Moteur connecté' : health === 'checking' ? 'Vérification…' : 'Moteur indisponible'}<RefreshCw size={12} /></button><button className="primary run-header" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Exécution…' : 'Simuler'}</button><button className="icon-button" aria-label="Aide" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button></div>
     </header>
     <input type="file" ref={fileInput} accept=".json,application/json" className="sr-only" aria-label="Ouvrir un modèle JSON" onChange={e => void openFile(e)} />
-    <div className="model-toolbar"><div><span className="active-view"><Network size={14} />Éditeur de modèle</span><span className="toolbar-subtitle">{document.request.schemaVersion === 2 ? 'Hiérarchie DEVS / QSS' : 'Graphe atomique · DEVS / QSS'}</span></div><div><span>{nodes.length} composants</span><span className="separator">/</span><span>{edges.length} connexions</span><button className="text-button" onClick={() => setShowConnection(v => !v)} aria-expanded={showConnection}><ArrowRight size={14} />Relier des ports</button><button className="icon-button" aria-label="Ajuster la vue" onClick={() => void flow.fitView({ padding: 0.16, maxZoom: 1 })}><Maximize size={15} /></button></div></div>
-    {document.request.schemaVersion === 2 && <HierarchyTools request={document.request} active={scopeId} trail={document.scopeTrail ?? []} onNavigate={navigate} onRequest={request => setDocument(s => ({ ...s, request }))} onNotice={setNotice} />}
+    <div className="model-toolbar"><div><span className="active-view"><Network size={14} />Éditeur de modèle</span><span className="toolbar-subtitle">{document.request.schemaVersion >= 2 ? 'Hiérarchie DEVS / QSS' : 'Graphe atomique · DEVS / QSS'}</span></div><div><span>{nodes.length} composants</span><span className="separator">/</span><span>{edges.length} connexions</span><button className="text-button" onClick={() => setShowConnection(v => !v)} aria-expanded={showConnection}><ArrowRight size={14} />Relier des ports</button><button className="icon-button" aria-label="Ajuster la vue" onClick={() => void flow.fitView({ padding: 0.16, maxZoom: 1 })}><Maximize size={15} /></button></div></div>
+    {document.request.schemaVersion >= 2 && <HierarchyTools request={document.request} active={scopeId} trail={document.scopeTrail ?? []} onNavigate={navigate} onRequest={request => setDocument(s => ({ ...s, request }))} onNotice={setNotice} />}
     {showConnection && <form className="connection-form" onSubmit={e => { e.preventDefault(); const [source, sourceHandle] = from.split('|'), [target, targetHandle] = to.split('|'); connect({ source: source ?? null, target: target ?? null, sourceHandle, targetHandle }); }}>
-      <label>Sortie<select aria-label="Port de sortie" value={from} onChange={e => setFrom(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => catalog?.components.find(s => s.type === c.type)?.outputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('out', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><ArrowRight size={16} /><label>Entrée<select aria-label="Port d’entrée" value={to} onChange={e => setTo(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => catalog?.components.find(s => s.type === c.type)?.inputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('in', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><button type="submit" disabled={!from || !to}>Créer la connexion</button><button type="button" className="icon-button" aria-label="Fermer les connexions" onClick={() => setShowConnection(false)}><X size={16} /></button>
+      <label>Sortie<select aria-label="Port de sortie" value={from} onChange={e => setFrom(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => componentSpec(c, catalog)?.outputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('out', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><ArrowRight size={16} /><label>Entrée<select aria-label="Port d’entrée" value={to} onChange={e => setTo(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => componentSpec(c, catalog)?.inputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('in', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><button type="submit" disabled={!from || !to}>Créer la connexion</button><button type="button" className="icon-button" aria-label="Fermer les connexions" onClick={() => setShowConnection(false)}><X size={16} /></button>
     </form>}
     {notice && <div className="notice" role="status">{notice}<button aria-label="Fermer le message" onClick={() => setNotice(undefined)}><X size={13} /></button></div>}
     {healthError && <div className="error-banner" role="alert">{healthError} · L’édition reste disponible.</div>}
     <div className="workspace">
-      <ComponentLibrary catalog={nativeCatalog} error={catalogError} definitions={definitions(document.request)} onCreate={createDefinition} onOpen={id => navigate(id, [id])} onInstance={id => { const d = definitions(document.request).find(d => d.id === id); if (d) addComponent(coupledSpec(d)); }} onRetry={() => void connectBackend()} onAdd={addComponent} />
+      <ComponentLibrary catalog={nativeCatalog} wrapperAvailable={wrapperAvailable} error={catalogError} definitions={definitions(document.request)} onCreate={createDefinition} onOpen={id => navigate(id, [id])} onInstance={id => { const d = definitions(document.request).find(d => d.id === id); if (d) addComponent(coupledSpec(d)); }} onRetry={() => void connectBackend()} onAdd={addComponent} />
       <main className="canvas" aria-label="Éditeur graphique" onDrop={handleDrop} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>
         <ReactFlow<IrritatorNode> nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+          onBeforeDelete={async ({ nodes }) => { try { assertCanRemove(document.request, scopeId, new Set(nodes.map(n => n.id))); return true; } catch (e) { setError(errorText(e)); return false; } }}
           onConnect={(c: Connection) => connect(c)} isValidConnection={c => !!catalog && !connectionError(c, state.request, catalog)}
           onNodeClick={(_, node) => { setSelected(node.id); setSelectedEdge(undefined); }} onEdgeClick={(_, edge) => { setSelectedEdge(edge.id); setSelected(undefined); }} onPaneClick={() => { setSelected(undefined); setSelectedEdge(undefined); }}
           onMoveEnd={(_, viewport) => setState(s => ({ ...s, viewport }))} defaultViewport={state.viewport} minZoom={0.2} maxZoom={2}
@@ -233,15 +243,20 @@ function Editor() {
         {!nodes.length && <div className="canvas-empty"><span className="canvas-empty-symbol"><Network size={32} /></span><span className="eyebrow">VOTRE ESPACE DE MODÉLISATION</span><h1>De l’idée à la simulation.</h1><p>Ajoutez des composants, reliez leurs ports<br />et explorez la dynamique de votre modèle.</p><span className="empty-hint">← Choisissez un composant dans la bibliothèque</span></div>}
         <span className="canvas-label">{state.request.model.id} <ChevronDown size={11} /></span>
       </main>
-      <Inspector canObserve={scopeId === rootScope && !selectedComponent?.type.startsWith('coupled:')} onOpen={selectedComponent?.type.startsWith('coupled:') ? () => navigate(selectedComponent.type.slice(8), [...(document.scopeTrail ?? []), selectedComponent.type.slice(8)]) : undefined} component={selectedComponent} spec={selectedSpec} observation={selectedObservation} selectedEdge={selectedEdge} onDeleteEdge={deleteEdge}
+      {selectedComponent?.experiment ? <WrapperInspector key={`${scopeId}-${selectedComponent.id}`} component={selectedComponent} request={document.request} spec={selectedSpec!}
+        onExperiment={(experiment, identity) => { try { const request = updateExperiment(document.request, scopeId, selectedComponent.id, experiment, identity); setDocument(s => ({ ...s, request })); setFrom(''); setTo(''); setError(undefined); } catch (e) { return errorText(e); } }}
+        onOpen={id => navigate(id, [...(document.scopeTrail ?? []), id])}
+        onRename={next => { try { const renamed = applyScopeView(document, scopeId, renameComponent(state, selectedComponent.id, next)); renamed.request = renameExperimentPaths(document.request, renamed.request, scopeId, selectedComponent.id, next); setDocument(renamed); setSelected(next); } catch (e) { return errorText(e); } }}
+        onDelete={() => { try { assertCanRemove(document.request, scopeId, new Set([selectedComponent.id])); setState(s => removeComponents(s, new Set([selectedComponent.id]))); setSelected(undefined); } catch (e) { setError(errorText(e)); } }} /> : <Inspector canObserve={scopeId === rootScope && !selectedComponent?.type.startsWith('coupled:')} onOpen={selectedComponent?.type.startsWith('coupled:') ? () => navigate(selectedComponent.type.slice(8), [...(document.scopeTrail ?? []), selectedComponent.type.slice(8)]) : undefined} component={selectedComponent} spec={selectedSpec} observation={selectedObservation} selectedEdge={selectedEdge} onDeleteEdge={deleteEdge}
         onParameter={(key, value) => editRequest(r => ({ ...r, model: { ...r.model, components: r.model.components.map(c => c.id === selected ? { ...c, parameters: { ...c.parameters, [key]: value } } : c) } }))}
-        onRename={next => { if (!selected) return; try { const renamed = applyScopeView(document, scopeId, renameComponent(state, selected, next)); renamed.request = renameObservationPaths(document.request, renamed.request, scopeId, selected, next); setDocument(renamed); setSelected(next); } catch (e) { return errorText(e); } }}
+        onRename={next => { if (!selected) return; try { const renamed = applyScopeView(document, scopeId, renameComponent(state, selected, next)); renamed.request = renameExperimentPaths(document.request, renameObservationPaths(document.request, renamed.request, scopeId, selected, next), scopeId, selected, next); setDocument(renamed); setSelected(next); } catch (e) { return errorText(e); } }}
         onObserve={(enabled, interval) => editRequest(r => ({ ...r, model: { ...r.model, observations: [...r.model.observations.filter(o => o.component !== selected), ...(enabled && selected ? [{ component: selected, samplingInterval: interval }] : [])] } }))}
-        onDelete={() => { if (selected) setState(s => removeComponents(s, new Set([selected]))); setSelected(undefined); }} />
+        onDelete={() => { if (selected) { try { assertCanRemove(document.request, scopeId, new Set([selected])); setState(s => removeComponents(s, new Set([selected]))); setSelected(undefined); } catch (e) { setError(errorText(e)); } } }}
+        extra={selectedComponent?.type.startsWith('coupled:') && document.request.schemaVersion === 3 ? <ExperimentOverridesEditor component={selectedComponent} request={document.request} onChange={experimentOverrides => editRequest(r => ({ ...r, model: { ...r.model, components: r.model.components.map(c => { if (c.id !== selected) return c; const { experimentOverrides: old, ...rest } = c; return experimentOverrides.length ? { ...rest, experimentOverrides } : rest; }) } }))} /> : undefined} />}
     </div>
     <div className="simulation-bar"><div className="simulation-label"><Settings2 size={16} /><strong>Simulation</strong><span className="muted small">Temps simulé</span></div><NumberField label="Début" value={state.request.simulation.start} minimum={-1e9} maximum={1e9} onChange={start => setDocument(s => ({ ...s, request: { ...s.request, simulation: { ...s.request.simulation, start } } }))} /><ArrowRight size={14} className="muted" /><NumberField label="Fin" value={state.request.simulation.end} minimum={-1e9} maximum={1e9} onChange={end => setDocument(s => ({ ...s, request: { ...s.request, simulation: { ...s.request.simulation, end } } }))} /><span className="simulation-observations"><Activity size={14} />{document.request.model.observations.length} observé{document.request.model.observations.length > 1 ? 's' : ''}</span><div className={`simulation-status ${status === 'Échec' ? 'failed' : ''}`} role="status">{status === 'Terminé' && <Check size={14} />}{status}</div><button className="primary" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Calcul en cours…' : 'Exécuter la simulation'}</button></div>
     <ResultsPanel result={result?.data} stale={!!result && result.fingerprint !== currentFingerprint} status={status} error={error} />
     <footer className="app-footer"><span><span className="footer-dot" />{saveStatus}</span><span>libirritator {catalog?.engineVersion ?? '—'}<span className="separator">·</span>Calcul natif C++<span className="separator">·</span>Contrat JSON v{document.request.schemaVersion}</span></footer>
-    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><div className="help-dialog" role="dialog" aria-modal="true" aria-label="Utiliser l’atelier" onClick={e => e.stopPropagation()}><button autoFocus className="icon-button modal-close" aria-label="Fermer l’aide" onClick={() => setShowHelp(false)}><X size={18} /></button><h2>Construire. Relier. Simuler.</h2><ol><li>Ajoutez un composant depuis la bibliothèque.</li><li>Sélectionnez-le pour régler ses paramètres et activer son observation.</li><li>Cliquez une sortie puis une entrée, ou utilisez « Relier des ports ».</li><li>Réglez les bornes temporelles puis exécutez.</li><li>Explorez les trajectoires, les points exacts et les détails du calcul.</li></ol><p>Suppr / Retour arrière supprime la sélection. Déplacez les nœuds et utilisez la molette pour zoomer. Les boutons du canevas ajustent la vue.</p><p>Enregistrer exporte le JSON scientifique v1 ou v2 selon le modèle. La disposition est conservée séparément dans ce navigateur. Ouvrir accepte notamment <code>web/examples/sum3.json</code>.</p><p className="muted small">Les événements à la borne finale sont exclus. Le moteur peut publier un état terminal lors de la fermeture des observations.</p><button onClick={() => setShowHelp(false)}>Fermer l’aide</button></div></div>}
+    {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><div className="help-dialog" role="dialog" aria-modal="true" aria-label="Utiliser l’atelier" onClick={e => e.stopPropagation()}><button autoFocus className="icon-button modal-close" aria-label="Fermer l’aide" onClick={() => setShowHelp(false)}><X size={18} /></button><h2>Construire. Relier. Simuler.</h2><ol><li>Ajoutez un composant depuis la bibliothèque.</li><li>Sélectionnez-le pour régler ses paramètres et activer son observation.</li><li>Cliquez une sortie puis une entrée, ou utilisez « Relier des ports ».</li><li>Réglez les bornes temporelles puis exécutez.</li><li>Explorez les trajectoires, les points exacts et les détails du calcul.</li></ol><p>Suppr / Retour arrière supprime la sélection. Déplacez les nœuds et utilisez la molette pour zoomer. Les boutons du canevas ajustent la vue.</p><p>Enregistrer exporte le JSON scientifique v1, v2 ou v3 selon le modèle. La disposition est conservée séparément dans ce navigateur. Ouvrir accepte notamment <code>web/examples/sum3.json</code>.</p><p className="muted small">Les événements à la borne finale sont exclus. Le moteur peut publier un état terminal lors de la fermeture des observations.</p><button onClick={() => setShowHelp(false)}>Fermer l’aide</button></div></div>}
   </div>;
 }

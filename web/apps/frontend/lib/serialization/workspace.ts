@@ -9,7 +9,7 @@ export function saveWorkspace(state: EditorState): string {
 export function loadWorkspace(text: string): EditorState {
   const parsed = JSON.parse(text) as Record<string, unknown>;
   if (parsed.workspaceVersion !== 1 && parsed.workspaceVersion !== 2) throw new Error('Version de sauvegarde locale inconnue.');
-  const editor = deserializeModel(parsed.request);
+  const editor = deserializeModel(parsed.request, true);
   if (parsed.positions && typeof parsed.positions === 'object') {
     for (const c of editor.request.model.components) {
       const p = (parsed.positions as Record<string, { x?: unknown; y?: unknown }>)[c.id];

@@ -26,7 +26,7 @@ export function scopeView(state: EditorState, id: string): EditorState {
 }
 export function applyScopeView(state: EditorState, id: string, view: EditorState): EditorState {
   const components = view.request.model.components.filter(c => !c.id.startsWith('$')).map(scientificComponent);
-  if (id === rootScope) return { ...state, positions: view.positions, viewport: view.viewport, request: { ...view.request, model: { ...view.request.model, ...(state.request.schemaVersion === 2 ? { definitions: state.request.model.definitions } : {}), components,
+  if (id === rootScope) return { ...state, positions: view.positions, viewport: view.viewport, request: { ...view.request, model: { ...view.request.model, ...(state.request.schemaVersion >= 2 ? { definitions: state.request.model.definitions } : {}), components,
     observations: [...view.request.model.observations, ...state.request.model.observations.filter(o => o.component.includes('/') && components.some(c => c.id === o.component.split('/')[0]))],
   } } };
   const next = { ...state, scopes: { ...state.scopes, [id]: { positions: view.positions, viewport: view.viewport } }, request: { ...state.request, model: { ...state.request.model,
@@ -57,8 +57,8 @@ export function atomicPaths(r: RunRequest): string[] {
   function visit(components: Component[], prefix: string, stack: Set<string>) {
     if (result.length > 128 || stack.size > 8) return;
     for (const c of components) {
-      if (c.type !== 'coupled') result.push(prefix + c.id);
-      else if (!stack.has(c.definition!)) {
+      if (c.type !== 'coupled' && c.type !== 'simulation_wrapper') result.push(prefix + c.id);
+      else if (c.type === 'coupled' && !stack.has(c.definition!)) {
         const d = definitions(r).find(d => d.id === c.definition);
         if (d) visit(d.components, prefix + c.id + '/', new Set(stack).add(d.id));
       }

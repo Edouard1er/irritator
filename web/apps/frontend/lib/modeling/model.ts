@@ -1,6 +1,7 @@
 import { Ajv } from 'ajv';
-import { ApiError, requestSchema, requestV2Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
+import { ApiError, requestSchema, requestV2Schema, requestV3Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
 import { validateHierarchy } from '@contracts';
+import { componentSpec, validateDependencies } from './wrapper';
 import type { catalog } from '@contracts';
 
 export type Catalog = typeof catalog;
@@ -28,15 +29,22 @@ const checkEditor = new Ajv({ strict: true, strictNumbers: true }).compile<RunRe
 const v2EditorSchema = structuredClone(requestV2Schema);
 v2EditorSchema.properties.model.properties.components.minItems = 0;
 const checkEditorV2 = new Ajv({ strict: false, strictNumbers: true }).compile<RunRequest>(v2EditorSchema);
+// Local drafts can have an unfinished plan. Scientific import/export/run remain strict.
+const v3EditorSchema = structuredClone(requestV3Schema);
+v3EditorSchema.properties.model.properties.components.minItems = 0;
+v3EditorSchema.definitions.experiment.properties.factors.minItems = 0;
+v3EditorSchema.definitions.experiment.properties.selections.minItems = 0;
+const checkEditorV3 = new Ajv({ strict: false, strictNumbers: true }).compile<RunRequest>(v3EditorSchema);
 export function validateEditorDocument(input: unknown): asserts input is RunRequest {
-  const check = (input as RunRequest | null)?.schemaVersion === 2 ? checkEditorV2 : checkEditor;
+  const version = (input as RunRequest | null)?.schemaVersion;
+  const check = version === 3 ? checkEditorV3 : version === 2 ? checkEditorV2 : checkEditor;
   if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON : ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
-  if (input.schemaVersion === 2) validateHierarchy(input, true); else validateGraph(input);
+  if (input.schemaVersion >= 2) { validateHierarchy(input, true); if (input.schemaVersion === 3) validateDependencies(input, true); } else validateGraph(input);
 }
 
 export function serializeModel(state: EditorState): RunRequest {
   const r = state.request;
-  if (r.schemaVersion === 2) { const result = structuredClone(r); validateRequest(result); return result; }
+  if (r.schemaVersion >= 2) { const result = structuredClone(r); validateRequest(result); return result; }
   const result: RunRequest = {
     schemaVersion: 1,
     model: {
@@ -53,8 +61,9 @@ export function serializeModel(state: EditorState): RunRequest {
   return result;
 }
 
-export function deserializeModel(input: unknown): EditorState {
+export function deserializeModel(input: unknown, draft = false): EditorState {
   validateEditorDocument(input);
+  if (input.schemaVersion === 3 && !draft) validateRequest(input);
   const request = structuredClone(input);
   const positions: Record<string, Position> = {};
   // Deterministic layout, including cyclic graphs: each branch is visited only once.
@@ -86,7 +95,7 @@ export function connectionError(connection: FlowConnection, request: RunRequest,
   const output = portIndex(connection.sourceHandle, 'out'), input = portIndex(connection.targetHandle, 'in');
   if (!from || !to) return 'Composant introuvable.';
   if (from.id === to.id) return 'Le moteur refuse les auto-connexions.';
-  const a = metadata.components.find(s => s.type === from.type), b = metadata.components.find(s => s.type === to.type);
+  const a = componentSpec(from, metadata), b = componentSpec(to, metadata);
   if (output === undefined || input === undefined || !a?.outputs.some(p => p.port === output) || !b?.inputs.some(p => p.port === input)) return 'Relier une sortie existante à une entrée existante.';
   if (request.model.connections.some(c => c.from.component === from.id && c.to.component === to.id && c.from.port === output && c.to.port === input)) return 'Cette connexion existe déjà.';
   if (request.model.connections.length >= (request.limits?.maxConnections ?? 512)) return 'Limite de connexions atteinte.';

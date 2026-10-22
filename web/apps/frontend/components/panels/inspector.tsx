@@ -1,15 +1,15 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Eye, MousePointer2, Trash2 } from 'lucide-react';
 import type { Component, RunRequest } from '@contracts';
 import type { ComponentSpec } from '@/lib/modeling/model';
 import { NumberField } from './number-field';
 
-export function Inspector({ component, spec, observation, onParameter, onRename, onObserve, onDelete, selectedEdge, onDeleteEdge, canObserve = true, onOpen }: {
+export function Inspector({ component, spec, observation, onParameter, onRename, onObserve, onDelete, selectedEdge, onDeleteEdge, canObserve = true, onOpen, extra }: {
   component?: Component; spec?: ComponentSpec; observation?: RunRequest['model']['observations'][number];
   onParameter: (key: string, value: number) => void; onRename: (id: string) => string | undefined;
   onObserve: (enabled: boolean, interval: number) => void; onDelete: () => void; selectedEdge?: string; onDeleteEdge: () => void;
-  canObserve?: boolean; onOpen?: () => void;
+  canObserve?: boolean; onOpen?: () => void; extra?: ReactNode;
 }) {
   const [id, setId] = useState(component?.id ?? '');
   const [idError, setIdError] = useState<string>();
@@ -23,6 +23,7 @@ export function Inspector({ component, spec, observation, onParameter, onRename,
       <section className="inspector-section"><h3><Eye size={14} /> Observation</h3>{canObserve ? <label className="checkbox"><input type="checkbox" checked={!!observation} onChange={e => onObserve(e.target.checked, observation?.samplingInterval ?? 1)} /> Observer ce composant</label> : <p className="small">Sélectionnez le chemin d’instance dans « Observations hiérarchiques ».</p>}
         {observation && <NumberField key={`${component.id}-sampling`} label="Pas d’observation" value={observation.samplingInterval} minimum={1e-6} maximum={1e9} onChange={value => onObserve(true, value)} hint="Rééchantillonnage effectué par le moteur." />}
       </section>
+      {extra}
       <section className="inspector-section"><h3>Ports Irritator</h3><div className="port-list">{spec?.inputs.map(p => <p key={`i${p.port}`}><span>Entrée {p.port}</span><code>{p.name}</code></p>)}{spec?.outputs.map(p => <p key={`o${p.port}`}><span>Sortie {p.port}</span><code>{p.name}</code></p>)}</div></section>
       <button className="danger-button" onClick={onDelete}><Trash2 size={14} /> Supprimer le composant</button>
     </> : selectedEdge ? <div className="inspector-section"><h3>Connexion sélectionnée</h3><p className="mono small break">{selectedEdge}</p><button className="danger-button" onClick={onDeleteEdge}><Trash2 size={14} /> Supprimer la connexion</button></div> : <div className="inspector-empty"><MousePointer2 size={26} /><h3>Explorez votre modèle</h3><p>Sélectionnez un composant pour modifier ses paramètres et observer sa trajectoire.</p></div>}

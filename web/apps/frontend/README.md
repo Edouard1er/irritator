@@ -1,4 +1,4 @@
-# Irritator Web — éditeur graphique et hiérarchique (Tests 5–6)
+# Irritator Web — éditeur graphique et hiérarchique (Tests 5–7E)
 
 Éditeur local Next.js / React Flow connecté au **véritable runner C++ Irritator**.
 Les composants, paramètres et ports viennent de `GET /api/v1/components`.
@@ -10,10 +10,8 @@ Premier terminal, depuis la racine du dépôt :
 
 ```powershell
 Set-Location D:\these\irritator
-# Si le runner n’est pas déjà construit :
-powershell -NoProfile -ExecutionPolicy Bypass -File web/build-runner.ps1
-# Sur ce poste, variante avec l’archive stabilisée existante :
-# powershell -NoProfile -ExecutionPolicy Bypass -File web/build-runner.ps1 -SkipEngineBuild -EngineBuildDir build-wrapper-test3
+# Pour les wrappers : construire le runner 7D selon web/engine/runner/tests-wrapper/README.md.
+$env:IRRITATOR_RUNNER=(Resolve-Path build-web-test7d/Release/runner/irritator-runner.exe).Path
 Set-Location web
 npm.cmd ci
 npm.cmd run build
@@ -37,8 +35,8 @@ En cas de port occupé : `npm.cmd run dev -- --port 3002`.
 Les packages API et frontend sont indépendants : pas de workspaces ni de
 changement aux commandes, dépendances ou verrou npm du Test 4. Le frontend
 importe le contrat partagé par l’alias TypeScript `@contracts` ; le schéma,
-les types, validations et parseur de résultats sont communs aux contrats v1/v2.
-Le catalogue partagé sert à vérifier le protocole ; la bibliothèque affiche
+les types, validations et parseurs de résultats sont communs aux contrats v1/v2/v3.
+Le catalogue partagé sert à vérifier le protocole ; la bibliothèque atomique affiche
 seulement les métadonnées effectivement reçues de l’API, sans repli fictif.
 
 ## Construire et exécuter un modèle
@@ -85,7 +83,7 @@ les auto-connexions et doublons exacts sont refusés.
 - **Ouvrir** : sélectionner par exemple `D:\these\irritator\web\examples\sum3.json`.
   Les positions sont reconstruites de façon déterministe. Les fichiers sont
   limités à 1 Mio et vérifiés avec le schéma partagé ; aucun import `.irt/.pirt`.
-- **Enregistrer** : télécharger un JSON scientifique v1 ou v2 directement accepté
+- **Enregistrer** : télécharger un JSON scientifique v1, v2 ou v3 directement accepté
   par le backend. Les paramètres, observations et limites facultatives importées
   sont conservés. Aucun champ graphique n’est ajouté à ce fichier.
 - La sauvegarde automatique du navigateur stocke séparément modèle, positions
@@ -136,7 +134,9 @@ Non-régression et hiérarchie, depuis `web` : `npm.cmd run test:all`.
 Voir le [rapport Test 5](../../../reports/frontend-test-5.md) pour le détail des
 exécutions, y compris les tests natifs Release/Debug et les limites de validation.
 
-Next.js utilise Turbopack. `predev` et `prebuild` copient le bundle et la licence
+Next.js utilise webpack avec `experimental.extensionAlias` pour résoudre les imports
+NodeNext `.js` des sources TypeScript partagées (`index.ts` / `wrapper-v3.ts`).
+Cela évite de modifier les contrats exécutés par Node et le runner. `predev` et `prebuild` copient le bundle et la licence
 Plotly installés dans `public/vendor` (généré et ignoré). L’adaptateur React le
 charge uniquement côté client et depuis cette origine locale. Après installation
 et compilation, aucun CDN, police distante ou service Internet n’est requis.
@@ -192,10 +192,75 @@ $env:IRRITATOR_BROWSER_SCREENSHOTS='../../../build-web-test6/logs/screenshots-re
 npm.cmd run test:e2e
 ```
 
+## Simulation prospective — Test 7E
+
+Le catalogue natif reste à treize composants. La catégorie **Expérimental · JSON v3**
+propose `simulation_wrapper` après vérification exacte des capacités annoncées par
+le health 7D. L’ajout à un document v1/v2 demande sa conversion explicite en v3 ;
+les composants, connexions, limites et définitions sont conservés. Créer ensuite
+une définition conserve v3. Un wrapper peut être ajouté dans le modèle principal
+ou une définition couplée.
+
+Pour reproduire 3/1/1 sans JSON :
+
+1. Créer la définition `Prospectif`. Ajouter `constant` nommée `u`, puis
+   `qss3_integrator` nommé `X`, avec X=1 et dQ=.01. Relier u:0 à X:0.
+2. Revenir au modèle principal. Ajouter le wrapper et choisir `Prospectif`.
+3. Ajouter un facteur ciblant `u.value`, type fixed, valeurs `-1,0,1`.
+4. Ajouter deux sélections sur X : `terminal` / max-last et `minimum` / min.
+   Choisir simple, maximize, primaire terminal, complete, horizon enfant [0,2[.
+5. Ajouter une constante parent, value=0 et offset=1, et connecter sa sortie à
+   l’entrée **run** (1) du wrapper. Garder l’horizon parent [0,3[ et simuler.
+6. **Décisions natives** affiche les trois émissions à t=1 : terminal=3,
+   minimum=1, facteur=1, pour trois scénarios. Enregistrer, ouvrir le JSON exporté
+   et relancer reproduit les mêmes événements.
+
+`web/examples/wrapper-affine-v3.json` fournit également ce modèle avec trois
+récepteurs observés dans Plotly. Les observations parent rééchantillonnées et les
+émissions réelles du wrapper sont présentées dans des vues distinctes. Le journal
+conserve l’ordre, les temps répétés, le port, le triplet entier et le sac local
+`bag`. Il ne déduit ni gagnant ni score global. Sans commande run, l’état vide
+est explicite. React ne simule pas les scénarios et ne calcule aucun critère.
+
+L’inspecteur expérimental propose les chemins atomiques, uniquement
+constant.value et qss1/2/3_integrator.X pour les facteurs, les quatre critères,
+les horizons et la navigation vers le prospectif. Réordonner ou renommer des
+facteurs/sélections remappe les connexions par identité. Un port connecté ne peut
+pas être supprimé avant le retrait explicite de ses connexions. Le renommage des
+enfants/instances prospectifs remappe les chemins ; leur suppression est bloquée
+s’ils restent ciblés. Les références récursives et wrappers prospectifs imbriqués
+sont rejetés. Les brouillons incomplets sont sauvegardés localement, signalés dans
+l’inspecteur et refusés à l’export scientifique et à l’exécution.
+
+Une occurrence couplée contenant un wrapper expose **Plans de cette occurrence** :
+cocher Personnaliser permet de modifier seulement single/fixed et les valeurs.
+Les `experimentOverrides` restent privés à l’occurrence ; le nombre et l’ordre des
+facteurs suivent la définition. Les renommages/réorganisations partagés mettent
+également à jour les overrides. Toutes les données scientifiques v3 sont conservées
+à l’import/export et dans le workspace v2 existant, avec les dispositions par portée.
+
+Tests spécifiques et preuves, après démarrage des vrais serveurs :
+
+```powershell
+$env:IRRITATOR_BROWSER_EVIDENCE='../../../build-web-test7e/logs/browser-regression'
+$env:IRRITATOR_BROWSER_SCREENSHOTS='../../../build-web-test7e/logs/screenshots-regression'
+$env:IRRITATOR_PLAYWRIGHT_REPORT='../../../build-web-test7e/logs/playwright.json'
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run test:e2e
+```
+
+Les parcours wrapper enregistrent requêtes/réponses et captures sous
+`build-web-test7e/logs/browser/`. La création manuelle compare aussi la réponse HTTP
+à l’exécution directe du runner 7D et enregistre son SHA-256. Arrêter l’API de test
+avant les régressions backend, dont l’oracle HTTP réserve le port 3001.
+Voir le [rapport 7E](../../../reports/simulation-wrapper-test-7E.md).
+
 ## Périmètre
 
-Treize types atomiques et hiérarchie native jusqu’à huit niveaux, sans wrapper graphique, plans
-d’expériences, modèle halieutique, base de données, authentification ou calcul
+Treize types atomiques et hiérarchie native jusqu’à huit niveaux, wrapper natif
+simple/complete avec facteurs single/fixed, sans facteurs aléatoires, méthodes
+multicritères supplémentaires, B*, modèle halieutique, base de données, authentification ou calcul
 distribué. Interface prioritairement desktop (largeur minimale 1000 px), panneau
 de résultats redimensionnable verticalement. Pas encore d’annuler/rétablir ni de
 sauvegarde de workspace dans un fichier portable. Le serveur reste local.
