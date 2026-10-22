@@ -207,6 +207,59 @@
           "name": "product"
         }
       ]
+    },
+    {
+      "type": "qss3_multiplier",
+      "name": "QSS3 multiplier",
+      "parameters": {},
+      "required": [],
+      "inputs": [{ "port": 0, "name": "x0" }, { "port": 1, "name": "x1" }],
+      "outputs": [{ "port": 0, "name": "product" }]
+    },
+    {
+      "type": "qss3_wsum_2",
+      "name": "QSS3 weighted sum (2)",
+      "parameters": {
+        "coeff-0": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 },
+        "coeff-1": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 }
+      },
+      "required": ["coeff-0", "coeff-1"],
+      "inputs": [{ "port": 0, "name": "x0" }, { "port": 1, "name": "x1" }],
+      "outputs": [{ "port": 0, "name": "sum" }]
+    },
+    {
+      "type": "qss3_power",
+      "name": "QSS3 power",
+      "parameters": {
+        "n": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 }
+      },
+      "required": ["n"],
+      "inputs": [{ "port": 0, "name": "x" }],
+      "outputs": [{ "port": 0, "name": "power" }]
+    },
+    {
+      "type": "qss3_inverse",
+      "name": "QSS3 inverse",
+      "parameters": {},
+      "required": [],
+      "inputs": [{ "port": 0, "name": "x" }],
+      "outputs": [{ "port": 0, "name": "inverse" }]
+    },
+    {
+      "type": "qss3_square",
+      "name": "QSS3 square",
+      "parameters": {},
+      "required": [],
+      "inputs": [{ "port": 0, "name": "x" }],
+      "outputs": [{ "port": 0, "name": "square" }]
+    },
+    {
+      "type": "qss3_sqrt",
+      "name": "QSS3 square root",
+      "parameters": {},
+      "required": [],
+      "inputs": [{ "port": 0, "name": "x" }],
+      "outputs": [{ "port": 0, "name": "sqrt" }]
     }
   ]
 }

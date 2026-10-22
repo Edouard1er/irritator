@@ -172,8 +172,12 @@ Un port déclaré sans couplage atomique bloque l’exécution/export scientifiq
 Supprimer un port retire ses connexions internes et celles de toutes ses
 instances ; le message indique leur nombre. Les autres indices ne changent pas.
 
-Le catalogue atomique comporte sept types, dont `qss2_integrator` et
-`qss1_multiplier`. Leurs paramètres passent par le même inspecteur générique.
+Le catalogue atomique comporte treize types, dont `qss2_integrator`,
+`qss1_multiplier` et les six opérateurs QSS3 du Test 6.1 : `qss3_multiplier`,
+`qss3_wsum_2`, `qss3_power`, `qss3_inverse`, `qss3_square`, `qss3_sqrt`.
+Leurs ports et paramètres passent par les mêmes nœuds et inspecteur génériques.
+Les nouveaux coefficients et l’exposant sont initialisés à 1. Les exemples
+`qss3-operators.json` et `qss3-operators-coupled.json` sont importables.
 Pour QSS2 (X=5,dQ=.25,dérivée 2,pas .1), l’interpolation native initiale publie
 5.192 à .1 au lieu de 5.2 ; la réponse reste intacte. Tolérance analytique .01
 dans ces tests ; les références plates et hiérarchiques sont identiques.
@@ -190,7 +194,7 @@ npm.cmd run test:e2e
 
 ## Périmètre
 
-Sept types atomiques et hiérarchie native jusqu’à huit niveaux, sans wrapper graphique, plans
+Treize types atomiques et hiérarchie native jusqu’à huit niveaux, sans wrapper graphique, plans
 d’expériences, modèle halieutique, base de données, authentification ou calcul
 distribué. Interface prioritairement desktop (largeur minimale 1000 px), panneau
 de résultats redimensionnable verticalement. Pas encore d’annuler/rétablir ni de

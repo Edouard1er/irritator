@@ -1,0 +1,267 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "qss3-operators",
+    "components": [
+      {
+        "id": "x",
+        "type": "constant",
+        "parameters": {
+          "value": 4,
+          "offset": 0
+        }
+      },
+      {
+        "id": "y",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0
+        }
+      },
+      {
+        "id": "updateX",
+        "type": "constant",
+        "parameters": {
+          "value": 9,
+          "offset": 1
+        }
+      },
+      {
+        "id": "updateY",
+        "type": "constant",
+        "parameters": {
+          "value": 2,
+          "offset": 2
+        }
+      },
+      {
+        "id": "product",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "weighted",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 2,
+          "coeff-1": -0.5
+        }
+      },
+      {
+        "id": "power",
+        "type": "qss3_power",
+        "parameters": {
+          "n": 3
+        }
+      },
+      {
+        "id": "inverse",
+        "type": "qss3_inverse",
+        "parameters": {}
+      },
+      {
+        "id": "square",
+        "type": "qss3_square",
+        "parameters": {}
+      },
+      {
+        "id": "sqrt",
+        "type": "qss3_sqrt",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "product",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "product",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "y",
+          "port": 0
+        },
+        "to": {
+          "component": "product",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "updateY",
+          "port": 0
+        },
+        "to": {
+          "component": "product",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "weighted",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "weighted",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "y",
+          "port": 0
+        },
+        "to": {
+          "component": "weighted",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "updateY",
+          "port": 0
+        },
+        "to": {
+          "component": "weighted",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "power",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "power",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "inverse",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "inverse",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "square",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "square",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "x",
+          "port": 0
+        },
+        "to": {
+          "component": "sqrt",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "updateX",
+          "port": 0
+        },
+        "to": {
+          "component": "sqrt",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "product",
+        "samplingInterval": 1
+      },
+      {
+        "component": "weighted",
+        "samplingInterval": 1
+      },
+      {
+        "component": "power",
+        "samplingInterval": 1
+      },
+      {
+        "component": "inverse",
+        "samplingInterval": 1
+      },
+      {
+        "component": "square",
+        "samplingInterval": 1
+      },
+      {
+        "component": "sqrt",
+        "samplingInterval": 1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

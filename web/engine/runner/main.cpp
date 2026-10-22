@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -60,11 +61,24 @@ void unique_keys(const V& v, unsigned depth=0) {
 }
 template<class T> irt::model& allocate(irt::simulation& sim) { return irt::get_model(sim.alloc<T>()); }
 using constructor = irt::model& (*)(irt::simulation&);
-const std::map<std::string,constructor> registry{
-    {"constant",allocate<irt::constant>}, {"qss1_sum_2",allocate<irt::qss1_sum_2>},
-    {"qss1_sum_3",allocate<irt::qss1_sum_3>}, {"qss1_integrator",allocate<irt::qss1_integrator>},
-    {"qss3_integrator",allocate<irt::qss3_integrator>}, {"qss2_integrator",allocate<irt::qss2_integrator>}, {"qss1_multiplier",allocate<irt::qss1_multiplier>}
+struct atomic_type { constructor make; irt::dynamics_type dynamics; };
+template<class T> constexpr atomic_type atomic() { return {allocate<T>,irt::dynamics_typeof<T>()}; }
+const std::map<std::string,atomic_type> registry{
+    {"constant",atomic<irt::constant>()}, {"qss1_sum_2",atomic<irt::qss1_sum_2>()},
+    {"qss1_sum_3",atomic<irt::qss1_sum_3>()}, {"qss1_integrator",atomic<irt::qss1_integrator>()},
+    {"qss3_integrator",atomic<irt::qss3_integrator>()}, {"qss2_integrator",atomic<irt::qss2_integrator>()},
+    {"qss1_multiplier",atomic<irt::qss1_multiplier>()}, {"qss3_multiplier",atomic<irt::qss3_multiplier>()},
+    {"qss3_wsum_2",atomic<irt::qss3_wsum_2>()}, {"qss3_power",atomic<irt::qss3_power>()},
+    {"qss3_inverse",atomic<irt::qss3_inverse>()}, {"qss3_square",atomic<irt::qss3_square>()},
+    {"qss3_sqrt",atomic<irt::qss3_sqrt>()}
 };
+// Flat and coupled models use exactly the same native parameter setters.
+void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
+    if(type=="constant") target.set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
+    else if(type=="qss1_integrator" || type=="qss2_integrator" || type=="qss3_integrator") target.set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
+    else if(type=="qss3_wsum_2") target.set_wsum2(p["coeff-0"].GetDouble(),p["coeff-1"].GetDouble());
+    else if(type=="qss3_power") target.set_power(p["n"].GetDouble());
+}
 const V& descriptor(const D& catalog,const std::string& type) {
     for(const auto& c:catalog["components"].GetArray()) if(str(c["type"])==type) return c;
     fail("UNKNOWN_COMPONENT","Unsupported component type: "+type);
@@ -150,12 +164,10 @@ D execute(const D& doc,const D& catalog) {
     else {
     for(const auto& c:components.GetArray()) {
         const auto type=str(c["type"]);
-        auto& native=registry.at(type)(sim);
+        auto& native=registry.at(type).make(sim);
         const auto id=sim.get_id(native);
         ids.emplace(str(c["id"]),id);
-        const auto& p=c["parameters"];
-        if(type=="constant") sim.parameters[id].set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
-        else if(type=="qss1_integrator" || type=="qss2_integrator" || type=="qss3_integrator") sim.parameters[id].set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
+        set_parameters(sim.parameters[id],type,c["parameters"]);
     }
     for(const auto& e:model["connections"].GetArray())
         check(sim.connect(sim.models.get(ids.at(str(e["from"]["component"]))),e["from"]["port"].GetInt(),
@@ -222,6 +234,12 @@ D execute(const D& doc,const D& catalog) {
 }
 }
 int main(int argc,char** argv) {
+#ifdef _MSC_VER
+    // This executable is an unattended child process. A native abort must
+    // terminate it, never wait for a CRT dialog or Windows fault reporting.
+    (void)_set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0,_WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
     try {
         D catalog; catalog.Parse(catalog_json);
         if(argc==2 && std::string(argv[1])=="--describe") { emit(catalog); return 0; }

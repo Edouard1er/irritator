@@ -1,0 +1,499 @@
+{
+  "schemaVersion": 2,
+  "model": {
+    "id": "qss3-operators-coupled",
+    "definitions": [
+      {
+        "id": "Operators",
+        "name": "Six opérateurs QSS3",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "x"
+          },
+          {
+            "port": 1,
+            "name": "y"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "product"
+          },
+          {
+            "port": 1,
+            "name": "weighted"
+          },
+          {
+            "port": 2,
+            "name": "power"
+          },
+          {
+            "port": 3,
+            "name": "inverse"
+          },
+          {
+            "port": 4,
+            "name": "square"
+          },
+          {
+            "port": 5,
+            "name": "sqrt"
+          }
+        ],
+        "components": [
+          {
+            "id": "product",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "weighted",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 2,
+              "coeff-1": -0.5
+            }
+          },
+          {
+            "id": "power",
+            "type": "qss3_power",
+            "parameters": {
+              "n": 3
+            }
+          },
+          {
+            "id": "inverse",
+            "type": "qss3_inverse",
+            "parameters": {}
+          },
+          {
+            "id": "square",
+            "type": "qss3_square",
+            "parameters": {}
+          },
+          {
+            "id": "sqrt",
+            "type": "qss3_sqrt",
+            "parameters": {}
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "product",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "product",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "product",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "weighted",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "weighted",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "weighted",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "power",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "power",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "inverse",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "inverse",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "square",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "square",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "sqrt",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sqrt",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          }
+        ]
+      },
+      {
+        "id": "Shell",
+        "name": "Couplé QSS3 imbriqué",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "x"
+          },
+          {
+            "port": 1,
+            "name": "y"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "product"
+          },
+          {
+            "port": 1,
+            "name": "weighted"
+          },
+          {
+            "port": 2,
+            "name": "power"
+          },
+          {
+            "port": 3,
+            "name": "inverse"
+          },
+          {
+            "port": 4,
+            "name": "square"
+          },
+          {
+            "port": 5,
+            "name": "sqrt"
+          }
+        ],
+        "components": [
+          {
+            "id": "ops",
+            "type": "coupled",
+            "definition": "Operators",
+            "parameters": {}
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "ops",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "ops",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 4
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "ops",
+              "port": 5
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "xA",
+        "type": "constant",
+        "parameters": {
+          "value": 4,
+          "offset": 0
+        }
+      },
+      {
+        "id": "yA",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0
+        }
+      },
+      {
+        "id": "xB",
+        "type": "constant",
+        "parameters": {
+          "value": 9,
+          "offset": 0
+        }
+      },
+      {
+        "id": "yB",
+        "type": "constant",
+        "parameters": {
+          "value": 2,
+          "offset": 0
+        }
+      },
+      {
+        "id": "a",
+        "type": "coupled",
+        "definition": "Shell",
+        "parameters": {}
+      },
+      {
+        "id": "b",
+        "type": "coupled",
+        "definition": "Shell",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "xA",
+          "port": 0
+        },
+        "to": {
+          "component": "a",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "yA",
+          "port": 0
+        },
+        "to": {
+          "component": "a",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "xB",
+          "port": 0
+        },
+        "to": {
+          "component": "b",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "yB",
+          "port": 0
+        },
+        "to": {
+          "component": "b",
+          "port": 1
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "a/ops/product",
+        "samplingInterval": 1
+      },
+      {
+        "component": "a/ops/weighted",
+        "samplingInterval": 1
+      },
+      {
+        "component": "a/ops/power",
+        "samplingInterval": 1
+      },
+      {
+        "component": "a/ops/inverse",
+        "samplingInterval": 1
+      },
+      {
+        "component": "a/ops/square",
+        "samplingInterval": 1
+      },
+      {
+        "component": "a/ops/sqrt",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/product",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/weighted",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/power",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/inverse",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/square",
+        "samplingInterval": 1
+      },
+      {
+        "component": "b/ops/sqrt",
+        "samplingInterval": 1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

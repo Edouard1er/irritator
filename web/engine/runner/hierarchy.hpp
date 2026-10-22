@@ -185,13 +185,7 @@ struct native_hierarchy {
         scopes.emplace(name,std::move(s));
     }
     static irt::dynamics_type dynamics(const std::string& type) {
-        if(type=="constant") return irt::dynamics_type::constant;
-        if(type=="qss1_sum_2") return irt::dynamics_type::qss1_sum_2;
-        if(type=="qss1_sum_3") return irt::dynamics_type::qss1_sum_3;
-        if(type=="qss1_integrator") return irt::dynamics_type::qss1_integrator;
-        if(type=="qss2_integrator") return irt::dynamics_type::qss2_integrator;
-        if(type=="qss3_integrator") return irt::dynamics_type::qss3_integrator;
-        if(type=="qss1_multiplier") return irt::dynamics_type::qss1_multiplier;
+        if(const auto it=registry.find(type);it!=registry.end()) return it->second.dynamics;
         fail("UNKNOWN_COMPONENT","Missing native dynamics");
     }
     irt::connection::port port(const V& s,const V& e,bool input) {
@@ -214,9 +208,7 @@ struct native_hierarchy {
             scope.children.emplace(str(c["id"]),id);
             // Generated short names avoid native name_str truncation of JSON ids.
             gen.children_names[id]="n"+std::to_string(irt::get_index(id));
-            const auto& p=c["parameters"];
-            if(type=="constant") gen.children_parameters[id].set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
-            else if(type.find("integrator")!=std::string::npos) gen.children_parameters[id].set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
+            set_parameters(gen.children_parameters[id],type,c["parameters"]);
         }
         const auto n=s["connections"].Size();
         gen.connections.reserve(n); gen.input_connections.reserve(n); gen.output_connections.reserve(n);

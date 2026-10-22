@@ -1,8 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-const evidence = path.resolve('../../../build-web-test6/logs/browser');
-const screenshots = path.resolve('../../../reports/hierarchy-test-6');
+const evidence = path.resolve(process.env.IRRITATOR_BROWSER_EVIDENCE ?? '../../../build-web-test6/logs/browser');
+const screenshots = path.resolve(process.env.IRRITATOR_BROWSER_SCREENSHOTS ?? '../../../reports/hierarchy-test-6');
 async function start(page: Page) {
   page.on('dialog', d => d.accept());
   await page.goto('/'); await expect(page.getByRole('button', { name: /Moteur connecté/ })).toBeVisible();

@@ -7,6 +7,17 @@ liste de **types atomiques natifs** ; les définitions couplées appartiennent
 uniquement au document. Les enveloppes HTTP et résultats restent en version 1,
 y compris pour une requête scientifique v2.
 
+Le catalogue contient 13 types atomiques depuis le Test 6.1. Les schémas v1/v2
+acceptent déjà des noms de types et des paramètres numériques génériques :
+l’extension est portée par `catalog.json` et sa validation sémantique commune,
+sans changement de forme ni de version des documents existants.
+`qss3_multiplier`, `qss3_inverse`, `qss3_square` et `qss3_sqrt` exigent
+`parameters: {}`. `qss3_wsum_2` exige `coeff-0` et `coeff-1` ; `qss3_power`
+exige `n`. Ces trois paramètres sont des nombres finis dans ±1e12.
+La métadonnée `default: 1` sert à la création dans l’éditeur ; la validation
+n’insère aucun paramètre absent. Les six types ont une sortie 0 ; multiplier
+et wsum ont les entrées 0/1, les quatre autres une seule entrée 0.
+
 ## Racine et définitions
 
 La requête v2 conserve `model.id`, `model.components`, `model.connections`,

@@ -125,6 +125,12 @@ modification des contrats. Aucun schéma utilisateur n'est compilé.
 | qss3_integrator | X, dQ | 0 : dérivée, 1 : reset | 0 : X |
 | qss2_integrator | X, dQ | 0 : dérivée, 1 : reset | 0 : X |
 | qss1_multiplier | aucun | 0 et 1 : facteurs | 0 : produit |
+| qss3_multiplier | aucun | 0 et 1 : facteurs | 0 : produit |
+| qss3_wsum_2 | coeff-0, coeff-1 | 0 et 1 : termes | 0 : somme pondérée |
+| qss3_power | n | 0 : signal | 0 : puissance |
+| qss3_inverse | aucun | 0 : signal non nul | 0 : inverse |
+| qss3_square | aucun | 0 : signal | 0 : carré |
+| qss3_sqrt | aucun | 0 : signal strictement positif | 0 : racine carrée |
 
 `offset` est un délai non négatif depuis le début de simulation. `X` est la
 condition initiale, `dQ` le quantum strictement positif. Les valeurs numériques
@@ -297,3 +303,20 @@ wrapper sont dans `architecture.md`. Le contrat constitue les données nécessai
 à l’éditeur React Flow : types, paramètres, contraintes et ports. Les imports
 .irt/.pirt, plans d’expérience et simulation_wrapper web restent à intégrer.
 `simulation_wrapper`, son architecture et le moteur restent inchangés.
+
+## Extension QSS3 (Test 6.1)
+
+Le catalogue comporte **13 types atomiques**. Les six nouveaux opérateurs
+fonctionnent en v1 et dans les définitions couplées v2, via les mêmes API natives.
+`coeff-0`, `coeff-1` et `n` sont explicites et obligatoires dans une requête ;
+l’éditeur les initialise à 1, conformément aux défauts natifs. Les bornes web
+sont ±1e12 et les valeurs doivent être finies. Aucun entier n’est imposé à `n`.
+
+Exemples : `examples/qss3-operators.json` (six opérateurs et entrées mises à jour)
+et `examples/qss3-operators-coupled.json` (deux instances, deux niveaux couplés).
+L’inverse refuse zéro ; la racine native refuse aussi zéro. Une puissance
+fractionnaire d’une base négative peut arrêter le processus natif ; le serveur
+l’isole et répond `502 RUNNER_PROTOCOL_ERROR`, sans résultat réussi.
+Les observations gardent les dates du rééchantillonneur natif QSS3, qui peuvent
+différer des dates de changements des messages. Voir le
+[compte rendu](../reports/qss-catalog-test-6-1.md) et ses commandes de reproduction.

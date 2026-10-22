@@ -99,14 +99,17 @@ export function toConnection(c: FlowConnection): RunRequest['model']['connection
 }
 export const edgeId = (c: RunRequest['model']['connections'][number]) => `${c.from.component}:${c.from.port}>${c.to.component}:${c.to.port}`;
 export function uniqueId(spec: ComponentSpec, components: Component[]): string {
-  const base = spec.type.startsWith('coupled:') ? spec.type.slice(8) : spec.inputs.length === 0 ? 'c' : spec.type.includes('sum') ? 'sum' : spec.type.includes('multiplier') ? 'product' : 'integrator';
+  const base = spec.type.startsWith('coupled:') ? spec.type.slice(8) : spec.inputs.length === 0 ? 'c' : spec.type.includes('sum') ? 'sum' : spec.type.includes('multiplier') ? 'product' : spec.type.includes('integrator') ? 'integrator' : spec.type.replace(/^qss[123]_/, '');
   if (base !== 'c' && !components.some(c => c.id === base)) return base;
   let n = 1;
   while (components.some(c => c.id === `${base}${n}`)) n++;
   return `${base}${n}`;
 }
 export function defaultParameters(spec: ComponentSpec): Record<string, number> {
-  return Object.fromEntries(Object.entries(spec.parameters).map(([name, bounds]) => [name, Math.min(bounds.maximum, Math.max(bounds.minimum, name === 'dQ' ? 0.1 : 0))]));
+  return Object.fromEntries(Object.entries(spec.parameters).map(([name, bounds]) => {
+    const initial = (bounds as { default?: number }).default ?? (name === 'dQ' ? 0.1 : 0);
+    return [name, Math.min(bounds.maximum, Math.max(bounds.minimum, initial))];
+  }));
 }
 export function parameterError(value: number, bounds: { minimum: number; maximum: number }): string | undefined {
   if (!Number.isFinite(value)) return 'Saisir un nombre fini.';
