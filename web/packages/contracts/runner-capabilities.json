@@ -1,0 +1,22 @@
+{
+  "protocolVersion": 1,
+  "requestVersions": [1, 2, 3],
+  "resultVersions": { "1": 1, "2": 1, "3": 2 },
+  "wrapper": {
+    "implementation": "native-wrapper-7C",
+    "runModes": ["complete"],
+    "factorTypes": ["single", "fixed"],
+    "objectiveMethods": ["simple"],
+    "maxNesting": 1,
+    "resultEvents": "ordered-parent-bags-triplets",
+    "limits": {
+      "maxWrappers": 8,
+      "maxScenarios": 128,
+      "maxTotalScenarios": 256,
+      "maxTotalModels": 8192,
+      "maxTotalConnections": 32768,
+      "maxInternalPoints": 200000,
+      "maxResultEvents": 20000
+    }
+  }
+}

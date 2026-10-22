@@ -142,8 +142,7 @@ export function validateWrapperRequest(r: RunRequest): void {
   budget(wrapperOccurrences(r), sizes.get('$root')!);
 }
 
-// Explicit opt-in for Test 7D. The HTTP process adapter still uses parseResult
-// (result v1), so it cannot silently reinterpret the new event envelope.
+// Request v3 explicitly selects this result-v2 parser in the HTTP adapter.
 export function parseWrapperResult(input: unknown, request: RunRequest): RunResultV2 {
   const bad = (): never => { throw new ApiError('RUNNER_PROTOCOL_ERROR', 'Invalid wrapper result v2', 502); };
   if (request.schemaVersion !== 3 || typeof input !== 'object' || !input) return bad();

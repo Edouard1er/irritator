@@ -7,7 +7,9 @@ stdout, stderr, le code de sortie et la réponse. Aucun calcul DEVS n'est effect
 dans TypeScript. L’éditeur graphique Next.js est maintenant disponible dans
 [`apps/frontend`](apps/frontend/README.md), sur le port 3000. Le Test 6 ajoute
 les définitions couplées partagées, leurs interfaces, la navigation hiérarchique
-et l’exécution native via `project::set`. Le contrat plat v1 reste accepté.
+et l’exécution native via `project::set`. Le Test 7D accepte aussi les simulations
+imbriquées JSON v3 sur la même route HTTP et publie leurs événements natifs.
+Le contrat plat v1 reste accepté.
 
 Dans un second terminal, après le démarrage du backend décrit ci-dessous :
 
@@ -39,6 +41,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File web/build-runner.ps1 -SkipEn
 Set-Location web
 npm.cmd ci
 npm.cmd run build
+$env:IRRITATOR_RUNNER=(Resolve-Path ../build-web-test4/runner/irritator-runner.exe).Path
 npm.cmd start
 ```
 
@@ -102,9 +105,9 @@ Les trois routes :
 
 | Route | Comportement |
 |---|---|
-| GET `/api/v1/health` | Lance `--describe` et vérifie version/catalogue ; 200 si vérifié, erreur avec available=false sinon. Ce n'est pas un test numérique complet du moteur. |
+| GET `/api/v1/health` | Vérifie `--describe` et `--capabilities` ; expose les capacités vérifiées, ou available=false en cas d'erreur. |
 | GET `/api/v1/components` | Catalogue embarqué dans le runner, comparé au contrat serveur. |
-| POST `/api/v1/simulations/run` | Validation, processus natif isolé, résultat avec runId et trajectoires. |
+| POST `/api/v1/simulations/run` | Requêtes v1/v2 → résultat v1 ; requête v3 → résultat v2 avec observations parent, resultEvents, wrappers et runId. |
 
 ## Contrats
 
@@ -150,7 +153,7 @@ native ajoute engineCategory/engineCode, sans résultat partiel réussi.
 | 400 | INVALID_JSON, INVALID_MODEL, UNKNOWN_COMPONENT, INVALID_PARAMETER, INVALID_REFERENCE, INVALID_TIME, INVALID_CONNECTION, OBSERVATION_ERROR, LIMIT_EXCEEDED détecté avant lancement |
 | 413 | BODY_TOO_LARGE |
 | 422 | Erreur native de connexion/initialisation/exécution/observation ou budget atteint par le runner |
-| 502 | RUNNER_PROTOCOL_ERROR, OUTPUT_LIMIT, erreur interne native |
+| 502 | RUNNER_PROTOCOL_ERROR, RUNNER_INCOMPATIBLE, OUTPUT_LIMIT, erreur interne native |
 | 503 | ENGINE_UNAVAILABLE, ENGINE_BUSY |
 | 504 | ENGINE_TIMEOUT |
 
@@ -166,7 +169,7 @@ Seul le serveur peut définir le chemin de l'exécutable ; il ne vient jamais du
 
 | Variable | Défaut et plafond |
 |---|---|
-| IRRITATOR_RUNNER | ../build-web-test4/runner/irritator-runner.exe (sans .exe sur Unix) |
+| IRRITATOR_RUNNER | ../build-web-test7d/Release/runner/irritator-runner.exe sur Windows ; ../build-web-test7d/runner/irritator-runner sur Unix |
 | HOST / PORT | 127.0.0.1 / 3001 ; HOST restreint à la boucle locale |
 | API_BODY_LIMIT | 1 MiB maximum |
 | ENGINE_TIMEOUT_MS | 10 s, maximum 60 s |
@@ -174,7 +177,11 @@ Seul le serveur peut définir le chemin de l'exécutable ; il ne vient jamais du
 | ENGINE_MAX_STDOUT_BYTES / ENGINE_MAX_STDERR_BYTES | 4 MiB / 64 KiB, plafonds identiques |
 | ENGINE_MAX_COMPONENTS / ENGINE_MAX_CONNECTIONS | 128 / 512 |
 | ENGINE_MAX_RUN_CALLS / ENGINE_MAX_POINTS | 100000 / 20000 |
-| ENGINE_MAX_DEPTH / ENGINE_MAX_INSTANCES | 8 / 512 (v2) |
+| ENGINE_MAX_DEPTH / ENGINE_MAX_INSTANCES | 8 / 512 (v2/v3) |
+| ENGINE_MAX_WRAPPERS / ENGINE_MAX_SCENARIOS | 8 / 128 |
+| ENGINE_MAX_TOTAL_SCENARIOS / ENGINE_MAX_TOTAL_MODELS | 256 / 8192 |
+| ENGINE_MAX_TOTAL_CONNECTIONS / ENGINE_MAX_INTERNAL_POINTS | 32768 / 200000 |
+| ENGINE_MAX_RESULT_EVENTS | 20000 |
 
 Le JSON peut seulement **réduire** les budgets de calcul via `limits`.
 Maximum 32 observations, identifiants ASCII de 64 caractères, horizon <=1e9,
@@ -202,7 +209,9 @@ ctest --test-dir build-web-test4/runner --output-on-failure
 Runner : un document JSON sur stdin ; un document JSON sur stdout ; diagnostics
 techniques sur stderr ; code 0 si succès, 2 pour erreur contrôlée, 3 pour exception
 interne. Un appel direct a des budgets internes mais pas le timeout mural du backend.
-En Debug, la trace mémoire native est redirigée vers stderr par le runner.
+En Debug, le runner dirige la trace détaillée des allocations vers le périphérique
+nul ; les assertions et les erreurs stderr restent actives. Cela conserve le
+plafond stderr de 64 Kio, également pour les copies de scénarios v3.
 Le moteur ouvre toujours un fichier irt-mem.txt, normalement vide après cette
 redirection et ignoré par Git ; le dossier courant doit être accessible en écriture.
 
@@ -301,7 +310,7 @@ les captures historiques du Test 5.
 La décision entre format natif et format intermédiaire et la préparation du
 wrapper sont dans `architecture.md`. Le contrat constitue les données nécessaires
 à l’éditeur React Flow : types, paramètres, contraintes et ports. Les imports
-.irt/.pirt, plans d’expérience et simulation_wrapper web restent à intégrer.
+.irt/.pirt et l'édition graphique des plans d'expérience restent à intégrer.
 `simulation_wrapper`, son architecture et le moteur restent inchangés.
 
 ## Extension QSS3 (Test 6.1)
@@ -320,3 +329,66 @@ l’isole et répond `502 RUNNER_PROTOCOL_ERROR`, sans résultat réussi.
 Les observations gardent les dates du rééchantillonneur natif QSS3, qui peuvent
 différer des dates de changements des messages. Voir le
 [compte rendu](../reports/qss-catalog-test-6-1.md) et ses commandes de reproduction.
+
+## Simulations imbriquées HTTP (Test 7D)
+
+Le backend réutilise le compilateur JSON v3 du Test 7C et le véritable wrapper
+natif. `experiment`, définitions couplées et overrides transitent sur stdin
+sans transformation scientifique. `parseWrapperResult` contrôle le résultat v2 ;
+les requêtes v1/v2 conservent `parseResult` et leur enveloppe v1 exacte.
+L'éditeur React Flow ne propose pas encore la configuration du wrapper (Test 7E).
+
+Le catalogue atomique historique reste identique. `--capabilities` expose
+séparément `packages/contracts/runner-capabilities.json` : versions de requêtes
+et résultats, modes, facteurs, méthodes, journal et plafonds v3. Pour chaque
+requête v3, le backend compare exactement cette description et le catalogue aux
+contrats embarqués. Un ancien binaire peut encore exécuter v1/v2, mais une
+requête v3 ou son contrôle de santé renvoie `RUNNER_INCOMPATIBLE` (502), sans
+annoncer de capacités v3. Recompiler le runner avec les contrats actuels.
+
+Campagne complète sur ce poste (moteur/historiques 7B déjà construits dans les
+deux configurations, Node installé dans `web/`) :
+
+```powershell
+Set-Location D:\these\irritator
+powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Release
+powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Debug
+Set-Location web
+$env:IRRITATOR_RUNNER=(Resolve-Path ../build-web-test7d/Release/runner/irritator-runner.exe).Path
+npm.cmd start
+```
+
+Sur une machine neuve, créer les builds moteur/historiques avec
+`engine/runner/tests-wrapper/run.ps1` en Release et Debug. Le test de rejet
+d'un ancien binaire exige aussi un runner historique 4–6 : configurer
+`IRRITATOR_LEGACY_RUNNER` si les binaires 6.1 locaux sont absents. Le script
+utilise par défaut `build-web-test6-1/runner` (Release) ou `runner-debug` (Debug).
+Les preuves sont dans `build-web-test7d/<Configuration>/logs/` ; `-SkipBuild`
+réexécute les tests sans compilation native. Pour seulement les essais HTTP,
+depuis `web/`, utiliser `npm.cmd run test:wrapper-http` avec le runner configuré.
+Le port 3001 doit être libre pour l'oracle affine ; les autres essais utilisent
+des ports TCP attribués par le système.
+
+Appel reproductible depuis un second PowerShell à la racine du dépôt :
+
+```powershell
+$body=Get-Content -LiteralPath web/examples/wrapper-affine-v3.json -Raw
+$result=Invoke-RestMethod 'http://127.0.0.1:3001/api/v1/simulations/run' -Method Post -ContentType 'application/json' -Body $body
+$result.resultEvents | Format-Table component,time,port,bag,@{Name='value';Expression={$_.value -join ','}}
+$result.wrappers | ConvertTo-Json -Depth 12
+```
+
+Résultat : `schemaVersion:2`, `status:completed`, trois scénarios et trois ports ;
+à t=1 les triplets sont `[3,0,0]`, `[1,0,0]`, `[1,0,0]`. Les observations parent
+sont conservées. Le journal garde le chemin d'occurrence, le temps parent, le
+port, le sac local et l'ordre des émissions, y compris plusieurs sacs à la même
+date. Sans commande run, il reste vide. Il ne représente pas des trajectoires
+enfant et n'invente aucun identifiant de gagnant ni score global.
+
+Chaque limite effective est le minimum entre budget client et configuration
+serveur, sans dépasser le plafond partagé. Les validations communes vérifient
+aussi les occurrences des définitions et leurs plans effectifs. `maxRunCalls`
+borne le parent ; une boucle enfant est arrêtée par le timeout du processus.
+Déconnexion, timeout et arrêt du serveur tuent puis attendent le processus natif.
+Il n'y a pas d'annulation coopérative des scénarios enfants. Voir le
+[rapport 7D](../reports/simulation-wrapper-test-7D.md) pour les résultats et limites.

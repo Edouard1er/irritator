@@ -59,5 +59,10 @@ intégrateurs QSS. Les horizons sont finis et les cardinalités bornées avant
 l'initialisation native. Les projets se construisent une seule fois ; le reset
 utilise les commandes natives ou `initialize`, sans répéter `project::set`.
 
-Cette API est une entrée C++ réutilisable. Le protocole stdin JSON reste v1/v2,
-le catalogue reste inchangé et aucune version 3 n'est implémentée.
+Cette API est l'entrée C++ réutilisable du Test 7B. Le Test 7C ajoute le
+compilateur JSON v3 (`json_wrapper.hpp`) et `run-v3.ps1` pour ses tests.
+Le Test 7D ajoute le transport HTTP, la description CLI `--capabilities` et
+`web/test-wrapper-http.ps1` pour la campagne Release/Debug complète.
+Le catalogue atomique `--describe` conserve exactement son format historique.
+Voir [le README web](../../../README.md) pour l'appel HTTP reproductible et
+les prérequis des tests, dont le runner historique de compatibilité.

@@ -4,8 +4,9 @@ Les schémas JSON draft-04 sont exécutés par RapidJSON dans le runner et par A
 dans le service et l’éditeur. `request.schema.json` reste le schéma v1.
 `request-v2.schema.json` ajoute la composition. Le catalogue global reste une
 liste de **types atomiques natifs** ; les définitions couplées appartiennent
-uniquement au document. Les enveloppes HTTP et résultats restent en version 1,
-y compris pour une requête scientifique v2.
+uniquement au document. Les réussites des requêtes scientifiques v1/v2 gardent
+le résultat v1 ; les requêtes v3 utilisent explicitement le résultat v2.
+Les erreurs conservent l'enveloppe v1.
 
 Le catalogue contient 13 types atomiques depuis le Test 6.1. Les schémas v1/v2
 acceptent déjà des noms de types et des paramètres numériques génériques :
@@ -238,14 +239,28 @@ de références, construction et limites réutilisent les codes de l'adaptateur.
 `parseWrapperResult` valide la nouvelle enveloppe ; `parseResult` reste le parseur
 v1 et refuse explicitement le résultat v2.
 
-Fastify, son handshake de catalogue et React Flow ne sont pas intégrés en 7C.
-Le contrat partagé sait valider v3, mais l'adaptateur HTTP de processus utilise
-encore les limites et résultats v1/v2 : l'exécution v3 se fait directement par
-stdin du runner jusqu'au Test 7D. Celui-ci devra adapter transport, clamp des
-limites, codes d'erreur, négociation de capacités et publication du journal.
+Depuis le Test 7D, Fastify accepte v1/v2/v3 sur
+`POST /api/v1/simulations/run`. `ProcessEngine` applique les limites effectives
+v3 et sélectionne `parseWrapperResult` uniquement pour une requête v3. Les
+observations parent et le journal sont restitués sans changement ; seule
+l'enveloppe HTTP ajoute `runId`. Les erreurs restent des enveloppes v1.
+
+`runner-capabilities.json` est embarqué par CMake et exporté comme
+`runnerCapabilities` en TypeScript. Le runner l'émet avec `--capabilities`,
+séparément de `--describe`, qui conserve exactement les treize types historiques.
+La description annonce les requêtes 1/2/3, les résultats correspondants 1/1/2,
+le domaine natif 7C et ses plafonds. Le backend contrôle exactement catalogue
+et capacités avant chaque exécution v3 ; toute différence produit
+`RUNNER_INCOMPATIBLE` (502). La présence d'un nom de type ne prouve jamais ce
+support. Le contrôle de santé expose les capacités seulement après vérification.
+React Flow reste à intégrer au Test 7E.
 
 Reproduction : `npm --prefix web ci` si nécessaire, puis
 `powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-v3.ps1 -Configuration Release`
 (ou `Debug`). Le script réutilise les builds moteur/historiques 7B de même
 configuration et reconstruit tous les clients du runner ; exécuter au préalable
 `tests-wrapper/run.ps1` pour créer ces builds sur une machine neuve.
+La campagne HTTP et de non-régression complète est
+`powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Release`
+(ou `Debug`). Voir le README web pour le runner historique requis par le test
+de compatibilité et les variables `ENGINE_MAX_*` supplémentaires.

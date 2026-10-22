@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../src/app.js';
 import { readConfig } from '../src/config/index.js';
-import { ApiError, catalog, validateRequest, parseResult, type RunRequest } from '../../../packages/contracts/index.js';
+import { ApiError, catalog, runnerCapabilities, wrapperCaps, validateRequest, parseResult, type RunRequest } from '../../../packages/contracts/index.js';
 import type { Engine } from '../src/services/engine.js';
 import { reference, mockResult } from './fixtures.js';
 
@@ -64,6 +64,12 @@ test('strict finite numbers and server settings',()=>{
   m.model.components[0]!.parameters.value=Infinity;assert.throws(()=>validateRequest(m));
   for(const env of [{HOST:'0.0.0.0'},{ENGINE_MAX_CONCURRENT:'9'},{ENGINE_MAX_POINTS:'20001'},{ENGINE_TIMEOUT_MS:'abc'}]) assert.throws(()=>readConfig(env));
   assert.equal(readConfig({ENGINE_MAX_RUN_CALLS:'50'}).engineLimits.maxRunCalls,50);
+  assert.deepEqual(wrapperCaps, runnerCapabilities.wrapper.limits);
+  for (const [key, cap] of Object.entries(wrapperCaps)) {
+    const name = `ENGINE_${key.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`;
+    assert.equal(readConfig({ [name]: '1' }).wrapperLimits[key as keyof typeof wrapperCaps], 1);
+    for (const value of ['0', String(cap + 1), '1.5', '']) assert.throws(() => readConfig({ [name]: value }));
+  }
 });
 test('result validator rejects inconsistent or non-finite native output',()=>{
   const mutations: ((r:ReturnType<typeof mockResult>)=>void)[] = [r=>{r.modelId='other';},r=>{r.simulation.finalTime=2;},r=>{r.observations[0]!.samples[0]!.value=Infinity;},r=>{r.observations[0]!.samples[1]!.time=0;}];

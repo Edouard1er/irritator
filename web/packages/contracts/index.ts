@@ -3,10 +3,12 @@ import catalogData from './catalog.json' with { type: 'json' };
 import schemaData from './request.schema.json' with { type: 'json' };
 import schemaV2Data from './request-v2.schema.json' with { type: 'json' };
 import schemaV3Data from './request-v3.schema.json' with { type: 'json' };
+import capabilitiesData from './runner-capabilities.json' with { type: 'json' };
 import { validateWrapperRequest } from './wrapper-v3.js';
 export * from './wrapper-v3.js';
 
 export const catalog = catalogData;
+export const runnerCapabilities = capabilitiesData;
 // Both Ajv (draft 7) and RapidJSON (draft 4) support this common subset.
 const { $schema: _dialect, ...schema } = schemaData;
 export const requestSchema = schema;

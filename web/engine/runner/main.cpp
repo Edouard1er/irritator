@@ -18,13 +18,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#ifdef IRRITATOR_ENABLE_DEBUG
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
-#endif
 
 namespace {
 using V = rapidjson::Value;
@@ -90,16 +83,18 @@ int limit(const D& doc,const char* name,int cap) {
 void configure_debug_diagnostics() {
 #ifdef IRRITATOR_ENABLE_DEBUG
     // The native Debug allocator opens irt-mem.txt, with stdout as fallback.
-    // Keep that diagnostic stream out of the JSON protocol without changing
-    // engine code. Refuse its stdout fallback before any engine allocation.
+    // Allocation-by-allocation tracing grows with scenario copies and can
+    // exhaust the HTTP stderr budget even for small valid v3 graphs. Silence
+    // only this verbose trace; assertions and actual stderr errors stay active.
+    // Refuse the stdout fallback before any engine allocation.
     auto* stream=irt::debug::mem_file();
     if(stream==stdout) fail("INITIALIZATION_ERROR","Cannot open Debug diagnostic stream in working directory");
 #ifdef _WIN32
-    const int redirected=_dup2(_fileno(stderr),_fileno(stream));
+    const char* sink="NUL";
 #else
-    const int redirected=dup2(fileno(stderr),fileno(stream));
+    const char* sink="/dev/null";
 #endif
-    if(redirected<0) fail("INITIALIZATION_ERROR","Cannot redirect Debug diagnostics to stderr");
+    if(!std::freopen(sink,"w",stream)) fail("INITIALIZATION_ERROR","Cannot configure Debug allocation trace sink");
 #endif
 }
 #include "hierarchy.hpp"
@@ -254,7 +249,12 @@ int main(int argc,char** argv) {
     try {
         D catalog; catalog.Parse(catalog_json);
         if(argc==2 && std::string(argv[1])=="--describe") { emit(catalog); return 0; }
-        if(argc!=1) fail("INVALID_ARGUMENT","Only --describe is supported");
+        if(argc==2 && std::string(argv[1])=="--capabilities") {
+            rapidjson::Document capabilities;
+            capabilities.Parse(runner_capabilities_json);
+            emit(capabilities); return 0;
+        }
+        if(argc!=1) fail("INVALID_ARGUMENT","Only --describe and --capabilities are supported");
         std::string input; char buffer[4096];
         while(std::cin.read(buffer,sizeof buffer) || std::cin.gcount()) {
             input.append(buffer,static_cast<std::size_t>(std::cin.gcount()));

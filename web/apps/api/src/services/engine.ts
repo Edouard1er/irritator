@@ -1,12 +1,13 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
-import { ApiError, catalog, parseResult, validateRequest, type RunRequest, type RunResult } from '../../../../packages/contracts/index.js';
+import { ApiError, catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2 } from '../../../../packages/contracts/index.js';
 import type { Config } from '../config/index.js';
 
 // An interface boundary for future asynchronous jobs; no scientific logic here.
 export interface Engine {
   describe(signal?: AbortSignal): Promise<typeof catalog>;
-  run(request: RunRequest, signal?: AbortSignal): Promise<RunResult>;
+  capabilities?(signal?: AbortSignal): Promise<typeof runnerCapabilities>;
+  run(request: RunRequest, signal?: AbortSignal): Promise<RunResult | RunResultV2>;
   close(): Promise<void>;
 }
 export type LaunchProcess = (executable: string, args: string[]) => ChildProcessWithoutNullStreams;
@@ -22,7 +23,9 @@ export class ProcessEngine implements Engine {
     if (signal?.aborted) throw new ApiError('CANCELLED','Execution cancelled',499);
     const pending = new Promise<{ value: unknown; exitCode: number | null }>((resolve,reject) => {
       // The executable path comes only from trusted server configuration.
-      const child = this.launch(this.config.runnerPath,args);
+      let child: ChildProcessWithoutNullStreams;
+      try { child = this.launch(this.config.runnerPath,args); }
+      catch { throw new ApiError('ENGINE_UNAVAILABLE','Cannot start configured runner',503); }
       this.children.add(child);
       let error: ApiError | undefined;
       const out: Buffer[] = [];
@@ -66,29 +69,52 @@ export class ProcessEngine implements Engine {
     if(exitCode!==0 || !isDeepStrictEqual(value,catalog)) throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner catalogue/version mismatch; rebuild runner and API together',502);
     return catalog;
   }
-  async run(request: RunRequest, signal?: AbortSignal): Promise<RunResult> {
+  async capabilities(signal?: AbortSignal): Promise<typeof runnerCapabilities> {
+    try {
+      // The historical atomic catalogue remains a separate, exact handshake.
+      await this.describe(signal);
+      const { value, exitCode } = await this.invoke(['--capabilities'],'',signal);
+      if (exitCode !== 0 || !isDeepStrictEqual(value,runnerCapabilities)) {
+        throw new ApiError('RUNNER_INCOMPATIBLE','Runner lacks the matching JSON v3/result v2 capabilities; rebuild the Test 7C runner with the API',502);
+      }
+      return runnerCapabilities;
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'RUNNER_PROTOCOL_ERROR') {
+        throw new ApiError('RUNNER_INCOMPATIBLE','Runner catalogue or capability protocol does not match the API; rebuild runner and API together',502);
+      }
+      throw error;
+    }
+  }
+  async run(request: RunRequest, signal?: AbortSignal): Promise<RunResult | RunResultV2> {
+    validateRequest(request);
     const effective = structuredClone(request);
     effective.limits = { ...this.config.engineLimits };
     for(const key of Object.keys(this.config.engineLimits) as (keyof Config['engineLimits'])[]) {
       effective.limits[key] = Math.min(request.limits?.[key] ?? this.config.engineLimits[key],this.config.engineLimits[key]);
     }
-    if (effective.schemaVersion === 2) {
+    if (effective.schemaVersion >= 2) {
       effective.limits.maxDepth = Math.min(request.limits?.maxDepth ?? 8, this.config.maxDepth ?? 8);
       effective.limits.maxInstances = Math.min(request.limits?.maxInstances ?? 512, this.config.maxInstances ?? 512);
     }
+    if (effective.schemaVersion === 3) {
+      for (const key of Object.keys(this.config.wrapperLimits) as (keyof Config['wrapperLimits'])[]) {
+        effective.limits[key] = Math.min(request.limits?.[key] ?? this.config.wrapperLimits[key],this.config.wrapperLimits[key]);
+      }
+    }
     validateRequest(effective);
+    if (effective.schemaVersion === 3) await this.capabilities(signal);
     const { value, exitCode } = await this.invoke([],JSON.stringify(effective),signal);
     if(exitCode!==0) {
       const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown } } | null;
       if(!failure || failure.schemaVersion!==1 || failure.status!=='failed' || typeof failure.error?.code!=='string' || typeof failure.error.message!=='string') throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner failed without a valid error envelope',502);
-      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR','DEFINITION_NOT_FOUND','INVALID_EXTERNAL_PORT','INVALID_SCOPE','RECURSIVE_DEFINITION','HIERARCHY_DEPTH','EXPANSION_LIMIT','NATIVE_CONSTRUCTION_ERROR']);
+      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR','DEFINITION_NOT_FOUND','INVALID_EXTERNAL_PORT','INVALID_SCOPE','RECURSIVE_DEFINITION','HIERARCHY_DEPTH','EXPANSION_LIMIT','NATIVE_CONSTRUCTION_ERROR','INVALID_EXPERIMENT','UNSUPPORTED_EXPERIMENT','INVALID_FACTOR','INVALID_SELECTION']);
       const detail = failure.error;
       if(!allowed.has(detail.code as string) || (detail.message as string).length>1024) throw new ApiError('RUNNER_PROTOCOL_ERROR','Unknown runner error',502);
       const status = detail.code==='LIMIT_EXCEEDED' ? 422 : ['INTERNAL_ERROR','SERIALIZATION_ERROR'].includes(detail.code as string) ? 502 : 422;
       const engine = Number.isInteger(detail.engineCategory) && Number.isInteger(detail.engineCode) ? { engineCategory:Number(detail.engineCategory),engineCode:Number(detail.engineCode) } : undefined;
       throw new ApiError(detail.code as string,detail.message as string,status,engine);
     }
-    return parseResult(value,effective);
+    return effective.schemaVersion === 3 ? parseWrapperResult(value,effective) : parseResult(value,effective);
   }
   async close(): Promise<void> {
     this.closed=true;
