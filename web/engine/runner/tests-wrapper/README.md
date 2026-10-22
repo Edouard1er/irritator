@@ -92,3 +92,22 @@ sacs enfant à 10, 10.5, 11, 11.5 et une borne 12 : bag s’arrête à 10, time 
 10.5, until(10.75) et during(0.75) dépassent leur cible jusqu’à 11. La commande
 parent est à 5 et ses réponses sont à 5, 15.75 ou 5.75 selon son scalaire.
 Les tests affines et de commandes couvrent séparément les critères et facteurs.
+
+## Validation Schaefer 7G
+
+`run-7g.ps1 -Configuration Release` et `run-7g.ps1 -Configuration Debug`
+construisent les clients dans `build-web-test7g/<Configuration>/`, puis lancent
+les campagnes 7B–7F, les trois groupes natifs Schaefer et les 35 cas JSON/HTTP 7G.
+Les mêmes prérequis moteur/historiques 7B s'appliquent. Aucun commit n'est créé.
+
+`schaefer.cpp` lit les références JSON et CSV sans les modifier. Il compare les
+42 points N/C de chaque enfant avec une simulation plate indépendante, contrôle
+la solution logistique analytique, les décisions natives et le reset isolé.
+Les trajectoires enfants restent internes aux tests C++ ; le contrat public
+conserve uniquement les décisions et observations parent existantes.
+
+Dans React Flow, importer `web/examples/wrapper-schaefer-v3.json`. Le plan
+initial single E=260 reproduit N(2)=129.8069509703022 et C(2)=72.34097477635842.
+L'inspecteur permet de passer à fixed `[200,260,320]`, choisir N/C et les trois
+méthodes. `wrapper-7g.spec.ts` construit également le plan et la connexion run
+dans l'interface à partir du seul prospectif, puis vérifie l'export/réimport.

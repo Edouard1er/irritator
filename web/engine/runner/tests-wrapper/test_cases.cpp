@@ -7,6 +7,7 @@
 
 namespace wrapper_test {
 void advanced_case(const std::string&);
+void schaefer_case(const std::string&);
 namespace {
 void near(double value, double expected, const std::string& context)
 {
@@ -276,6 +277,7 @@ void run_case(const std::string& name)
             require(now.first - now.second == balance, "Native allocations leaked after occurrence destruction");
             std::cout << "MEMORY cycle=" << cycle << " outstanding=" << now.first - now.second << '\n';
         }
-    } else advanced_case(name);
+    } else if (name.starts_with("schaefer-")) schaefer_case(name);
+    else advanced_case(name);
 }
 } // namespace wrapper_test

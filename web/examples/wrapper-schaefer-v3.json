@@ -1,0 +1,425 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "wrapper-schaefer",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.003333,
+              "offset": 0
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 260,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "decision",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Schaefer",
+          "simulation": {
+            "start": 0,
+            "end": 2
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "effort",
+              "name": "Effort de pêche",
+              "target": "E",
+              "parameter": "value",
+              "type": "single",
+              "value": 260
+            }
+          ],
+          "selections": [
+            {
+              "id": "N",
+              "target": "N",
+              "criteria": "max-last"
+            },
+            {
+              "id": "C",
+              "target": "C",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "N"
+          }
+        }
+      },
+      {
+        "id": "biomass",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "capture",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "effort",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "decision",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 0
+        },
+        "to": {
+          "component": "biomass",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 1
+        },
+        "to": {
+          "component": "capture",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 2
+        },
+        "to": {
+          "component": "effort",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "biomass",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "capture",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "effort",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

@@ -50,3 +50,5 @@ set_tests_properties(runner-wrapper-v3 PROPERTIES FIXTURES_REQUIRED contracts-v3
 add_subdirectory(tests-wrapper)
 add_test(NAME runner-wrapper-7f COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/wrapper-7f-tests.mjs")
 set_tests_properties(runner-wrapper-7f PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
+add_test(NAME runner-wrapper-7g COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/wrapper-7g-tests.mjs")
+set_tests_properties(runner-wrapper-7g PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
