@@ -9,6 +9,28 @@ import { loadWorkspace, saveWorkspace } from '@/lib/serialization/workspace';
 import { affine, experiment, pair } from './wrapper-fixtures';
 
 describe('document v3, ports et identités expérimentales', () => {
+  it.each(['weighted-sum','epsilon-constrained'] as const)('remappe les tableaux %s avec les identités des sélections',method=>{
+    const r=affine(),e=experiment(r);e.objective=method==='weighted-sum'?{method,type:'maximize',weights:[2,7],types:['maximize','minimize'],norm:'z-score'}:{method,type:'maximize',primary:'terminal',epsilons:[3,9],operations:['equal','less-equal']};
+    let next=updateExperiment(r,rootScope,'decision',{...e,selections:[...e.selections].reverse()});
+    let o=experiment(next).objective;
+    if(o.method==='weighted-sum'){expect(o.weights).toEqual([7,2]);expect(o.types).toEqual(['minimize','maximize']);}
+    if(o.method==='epsilon-constrained'){expect(o.epsilons).toEqual([9,3]);expect(o.operations).toEqual(['less-equal','equal']);}
+    const n=experiment(next);next=updateExperiment(next,rootScope,'decision',{...n,selections:n.selections.map(s=>s.id==='minimum'?{...s,id:'low'}:s)},{selection:['minimum','low']});
+    expect(experiment(next).objective).toEqual(o);validateRequest(next);expect(serializeModel(loadWorkspace(saveWorkspace(deserializeModel(next))))).toEqual(next);
+  });
+  it('préserve les trois plans aléatoires, les tableaux et les u64 dans le workspace et les overrides',()=>{
+    const r=pair(),e=r.model.definitions![1]!.components[0]!.experiment!;
+    e.factors[0]={id:'rate',target:'u',parameter:'value',type:'random-mult',count:3,distribution:'normal',reals:[0,1],ints:[17,23]};
+    e.seed=['18446744073709551615','9007199254740993','3','2','4','5'];
+    r.model.components[2]!.experimentOverrides![0]!.factors=[{id:'rate',type:'random-add',count:2,distribution:'uniform-int',reals:[0,1],ints:[1,2]}];
+    expect(planOnly(e.factors[0])).toEqual({id:'rate',type:'random-mult',count:3,distribution:'normal',reals:[0,1],ints:[17,23]});
+    validateRequest(r);expect(serializeModel(loadWorkspace(saveWorkspace(deserializeModel(r))))).toEqual(r);expect(scenarioCount(e)).toBe(3);
+  });
+  it('conserve un brouillon weighted-sum avant l’ajout des sélections',()=>{
+    const r=affine(),e=experiment(r);e.selections=[];e.objective={method:'weighted-sum',type:'maximize',weights:[],types:[],norm:'min-max'};r.model.connections.length=1;
+    expect(()=>validateEditorDocument(r)).not.toThrow();expect(loadWorkspace(saveWorkspace({request:r,positions:{},viewport:{x:0,y:0,zoom:1}})).request).toEqual(r);
+    expect(()=>validateRequest(r)).toThrow();
+  });
   it('crée le brouillon indépendamment de l’ordre des définitions et évite les prospectifs contenant un wrapper', () => {
     const r = pair(); r.model.definitions!.reverse(); expect(newWrapperExperiment(r, rootScope).definition).toBe('Prospectif');
     const draft = newWrapperExperiment(r, 'Prospectif'); expect(r.model.definitions!.some(d => d.id === draft.definition)).toBe(false);

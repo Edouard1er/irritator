@@ -38,8 +38,8 @@ async function httpApp(overrides: Partial<Config> = {}, engine?: ProcessEngine, 
   return { app, send };
 }
 
-test('7D real HTTP on port 3001: affine and complete v2 envelope equal direct C++', { timeout: 20000 }, async () => {
-  const { app, send } = await httpApp({}, undefined, 3001);
+test('7D real HTTP: affine and complete v2 envelope equal direct C++', { timeout: 20000 }, async () => {
+  const { app, send } = await httpApp();
   try {
     const h = await fetch(`${app.listeningOrigin}/api/v1/health`);
     assert.equal(h.status, 200); assert.deepEqual((await h.json() as any).runner.capabilities, runnerCapabilities);
@@ -90,7 +90,7 @@ test('7D HTTP native scientific cases, lossless experiments, paths, bags and tri
 test('7D HTTP validation, effective server/client caps and native failures', { timeout: 30000 }, async () => {
   const { app, send } = await httpApp();
   const invalid: [string, (m: RunRequest) => void, string][] = [
-    ['schema', m => { (experiment(m) as any).run = 'bag'; }, 'INVALID_MODEL'],
+    ['schema', m => { (experiment(m) as any).run = 'step'; }, 'INVALID_MODEL'],
     ['version', m => { (m as any).schemaVersion = 4; }, 'INVALID_MODEL'],
     ['prospective reference', m => { experiment(m).definition = 'absent'; }, 'DEFINITION_NOT_FOUND'],
     ['factor', m => { experiment(m).factors[0]!.target = 'absent'; }, 'INVALID_FACTOR'],
@@ -140,12 +140,21 @@ test('7D real old runner or absent binary cannot advertise or execute v3', { tim
 
 test('7D real HTTP deadline bounds an internal child loop, despite parent run cap', { timeout: 15000 }, async () => {
   const children: ChildProcessWithoutNullStreams[] = [];
+  // Validate the real binary before starting the 500ms scientific deadline.
+  // A slow --describe must not masquerade as termination of a child simulation.
+  const preflight = new ProcessEngine(config);
+  const verifiedCapabilities = await preflight.capabilities();
+  await preflight.close();
+  class VerifiedEngine extends ProcessEngine {
+    override async capabilities() { return verifiedCapabilities; }
+  }
   const c = { ...config, timeoutMs: 500 };
-  const engine = new ProcessEngine(c, (exe, args) => { const child = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); if (!args.length) children.push(child); return child; });
+  const engine = new VerifiedEngine(c, (exe, args) => { const child = spawn(exe, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); if (!args.length) children.push(child); return child; });
   const { app, send } = await httpApp(c, engine);
   try {
     validateRequest(wrapperBusy()); const r = await send(wrapperBusy()); assert.equal(r.status, 504, JSON.stringify(r)); assert.equal(r.result.error.code, 'ENGINE_TIMEOUT'); assert.equal(r.result.status, 'failed');
     assert.equal(children.length, 1); assert.ok(children[0]!.exitCode !== null || children[0]!.signalCode !== null);
+    c.timeoutMs = config.timeoutMs; // Slot reuse is a separate assertion with the normal budget.
     assert.equal((await send(wrapperAffine())).status, 200);
   } finally { await app.close(); }
 });

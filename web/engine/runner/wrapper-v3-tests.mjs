@@ -106,10 +106,10 @@ test('v3 pure v1/v2 graphs preserve observations and use explicit result v2', ()
 const invalid = [
   ['empty fixed list', m => { experiment(m).factors[0].values = []; }, 'INVALID_MODEL'],
   ['unsupported random', m => { experiment(m).factors[0].type = 'random'; }, 'INVALID_MODEL'],
-  ['unsupported add', m => { experiment(m).factors[0].type = 'fixed-add'; }, 'INVALID_MODEL'],
+  ['unsupported factor operation', m => { experiment(m).factors[0].type = 'fixed-div'; }, 'INVALID_MODEL'],
   ['unsupported method', m => { experiment(m).objective.method = 'weighted-sum'; }, 'INVALID_MODEL'],
   ['unsupported constrained method', m => { experiment(m).objective.method = 'epsilon-constrained'; }, 'INVALID_MODEL'],
-  ['unsupported mode', m => { experiment(m).run = 'bag'; }, 'INVALID_MODEL'],
+  ['unsupported mode', m => { experiment(m).run = 'step'; }, 'INVALID_MODEL'],
   ['missing prospective definition', m => { experiment(m).definition = 'absent'; }, 'DEFINITION_NOT_FOUND'],
   ['factor path', m => { experiment(m).factors[0].target = 'absent'; }, 'INVALID_FACTOR'],
   ['traverse atom', m => { experiment(m).factors[0].target = 'X/u'; }, 'INVALID_FACTOR'],

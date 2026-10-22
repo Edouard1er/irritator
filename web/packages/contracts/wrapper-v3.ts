@@ -1,19 +1,61 @@
 import { ApiError, catalog, parseResult, validateHierarchy, type Component, type CoupledDefinition, type RunRequest, type RunResult } from './index.js';
 
 export const wrapperCaps = { maxWrappers: 8, maxScenarios: 128, maxTotalScenarios: 256, maxTotalModels: 8192, maxTotalConnections: 32768, maxInternalPoints: 200000, maxResultEvents: 20000 };
-export type FactorPlan = { id: string } & ({ type: 'single'; value: number } | { type: 'fixed'; values: number[] });
+export const randomDistributions = ['uniform-int','uniform-real','bernoulli','binomial','negative-binomial','geometric','poisson','exponential','gamma','weibull','extreme-value','normal','lognormal','chi-squared','cauchy','fisher-f','student-t'] as const;
+export type RandomDistribution = typeof randomDistributions[number];
+export type RandomPlan = { type: 'random' | 'random-add' | 'random-mult'; count: number; distribution: RandomDistribution; reals: [number, number]; ints: [number, number] };
+export type FactorPlan = { id: string } & ({ type: 'single' | 'single-add' | 'single-mult'; value: number } | { type: 'fixed' | 'fixed-add' | 'fixed-mult'; values: number[] } | RandomPlan);
+export const factorCardinality = (f: FactorPlan) => 'count' in f ? f.count : 'values' in f ? f.values.length : 1;
+export type WrapperSeed = [string,string,string,string,string,string];
+export const validU64 = (v: string) => v.trim() === v && /^(0|[1-9][0-9]{0,19})$/.test(v) && BigInt(v) <= 18446744073709551615n;
+// Names follow the actual random_factor::gen array positions. Unused slots persist.
+export const distributionParameters: Record<RandomDistribution, { reals: string[]; ints: string[] }> = {
+  'uniform-int': { reals: [], ints: ['borne inférieure','borne supérieure'] },
+  'uniform-real': { reals: ['borne inférieure','borne supérieure'], ints: [] },
+  bernoulli: { reals: ['probabilité p'], ints: [] }, binomial: { reals: ['probabilité p'], ints: ['nombre d’essais'] },
+  'negative-binomial': { reals: ['probabilité p'], ints: ['nombre de succès'] }, geometric: { reals: ['probabilité p'], ints: [] },
+  poisson: { reals: ['moyenne'], ints: [] }, exponential: { reals: ['taux λ'], ints: [] },
+  gamma: { reals: ['forme α','échelle β'], ints: [] }, weibull: { reals: ['forme a','échelle b'], ints: [] },
+  'extreme-value': { reals: ['position a','échelle b'], ints: [] }, normal: { reals: ['moyenne','écart-type'], ints: [] },
+  lognormal: { reals: ['moyenne du logarithme','écart-type du logarithme'], ints: [] },
+  'chi-squared': { reals: ['degrés de liberté'], ints: [] }, cauchy: { reals: ['position a','échelle b'], ints: [] },
+  'fisher-f': { reals: ['degrés de liberté m','degrés de liberté n'], ints: [] }, 'student-t': { reals: ['degrés de liberté'], ints: [] }
+};
+export function validateRandomPlan(f: RandomPlan): void {
+  const [a,b]=f.reals, [i,j]=f.ints;
+  let valid=false;
+  switch(f.distribution) {
+    case 'uniform-int': valid=i<=j; break;
+    case 'uniform-real': valid=a<=b; break;
+    case 'bernoulli': valid=a>=0&&a<=1; break;
+    case 'binomial': valid=i>=0&&a>=0&&a<=1; break;
+    case 'negative-binomial': valid=i>0&&a>0&&a<=1; break;
+    case 'geometric': valid=a>0&&a<1; break;
+    case 'poisson': case 'exponential': case 'chi-squared': case 'student-t': valid=a>0; break;
+    case 'gamma': case 'weibull': case 'fisher-f': valid=a>0&&b>0; break;
+    case 'extreme-value': case 'normal': case 'lognormal': case 'cauchy': valid=b>0; break;
+  }
+  if(!valid) fail('INVALID_FACTOR', `Invalid ${f.distribution} parameter domain`);
+}
 export type WrapperFactor = FactorPlan & { name?: string; target: string; parameter: 'value' | 'X' };
 export interface WrapperSelection { id: string; name?: string; target: string; criteria: 'min' | 'max' | 'min-last' | 'max-last' }
+export type OptimizationType = 'maximize' | 'minimize';
+export type ConstraintOperation = 'equal' | 'not-equal' | 'greater-equal' | 'less-equal';
+export type WrapperObjective = { type: OptimizationType } & (
+  { method: 'simple'; primary: string } |
+  { method: 'weighted-sum'; primary?: string; weights: number[]; types: OptimizationType[]; norm: 'min-max' | 'z-score' } |
+  { method: 'epsilon-constrained'; primary: string; epsilons: number[]; operations: ConstraintOperation[] });
 export interface WrapperExperiment {
-  definition: string; simulation: { start: number; end: number }; run: 'complete';
+  definition: string; simulation: { start: number; end: number }; run: 'complete' | 'bag' | 'time' | 'until' | 'during';
+  seed?: WrapperSeed;
   factors: WrapperFactor[]; selections: WrapperSelection[];
-  objective: { method: 'simple'; type: 'maximize' | 'minimize'; primary: string };
+  objective: WrapperObjective;
 }
 // Relative to a coupled occurrence; only factor values/types can change.
 export interface ExperimentOverride { target: string; factors: FactorPlan[] }
 export interface WrapperOccurrence { component: string; experiment: WrapperExperiment }
 export interface WrapperEvent { component: string; time: number; port: number; bag: number; value: [number, number, number] }
-export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; outputs: { port: number; kind: 'selection' | 'factor'; id: string }[] }
+export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; criteriaScale?: 'raw' | 'normalized'; outputs: { port: number; kind: 'selection' | 'factor'; id: string }[] }
 export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[] }
 const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
 type Scope = Pick<CoupledDefinition, 'components' | 'connections'>;
@@ -39,14 +81,15 @@ function context(r: RunRequest) {
 function cardinality(e: WrapperExperiment, max: number): number {
   let count = 1;
   for (const f of e.factors) {
-    const n = f.type === 'single' ? 1 : f.values.length;
+    const n = factorCardinality(f);
     if (!n || count > Math.floor(max / n)) fail('LIMIT_EXCEEDED', 'Cartesian scenario product exceeds maxScenarios');
     count *= n;
   }
   return count;
 }
-function values(f: FactorPlan) { return f.type === 'single' ? [f.value] : f.values; }
+function values(f: FactorPlan) { return 'value' in f ? [f.value] : 'values' in f ? f.values : []; }
 function factorValues(f: FactorPlan, atom: Component) {
+  if ('count' in f) validateRandomPlan(f);
   const spec = catalog.components.find(c => c.type === atom.type) ?? fail('INVALID_FACTOR', 'Unsupported factor model');
   const p = atom.type === 'constant' ? 'value' : 'X';
   const b = (spec.parameters as Record<string, { minimum: number; maximum: number }>)[p]!;
@@ -108,6 +151,7 @@ export function validateWrapperRequest(r: RunRequest): void {
   const sizes = validateHierarchy(r);
   if (declared.length > limits.maxWrappers) fail('LIMIT_EXCEEDED', 'Declared wrapper budget exceeded');
   function validate(e: WrapperExperiment) {
+    if(e.seed && !e.seed.every(validU64)) fail('INVALID_EXPERIMENT', 'Seed must contain six exact unsigned 64-bit decimal strings');
     const { start, end } = e.simulation;
     if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start) || end - start > 1e9 || !(start + .1 > start) || !(end + .1 > end)) fail('INVALID_TIME', 'Invalid prospective horizon');
     const scope = definition(e.definition), f = e.factors.length, s = e.selections.length;
@@ -119,7 +163,10 @@ export function validateWrapperRequest(r: RunRequest): void {
       if (!((atom.type === 'constant' && f.parameter === 'value') || (['qss1_integrator', 'qss2_integrator', 'qss3_integrator'].includes(atom.type) && f.parameter === 'X'))) fail('INVALID_FACTOR', 'Factor parameter must map to a validated reals[0]');
       factorValues(f, atom);
     }
-    if (new Set(e.selections.map(s => s.id)).size !== s || !e.selections.some(s => s.id === e.objective.primary)) fail('INVALID_SELECTION', 'Duplicate selection id or unknown primary');
+    if (new Set(e.selections.map(s => s.id)).size !== s || (e.objective.method !== 'weighted-sum' && !e.selections.some(s => s.id === e.objective.primary))) fail('INVALID_SELECTION', 'Duplicate selection id or unknown primary');
+    const o = e.objective;
+    if (o.method === 'weighted-sum' && (o.weights.length !== s || o.types.length !== s || o.weights.some(v => !Number.isFinite(v)))) fail('INVALID_EXPERIMENT', 'Weighted-sum arrays must match selections');
+    if (o.method === 'epsilon-constrained' && (o.epsilons.length !== s || o.operations.length !== s || o.epsilons.some(v => !Number.isFinite(v)))) fail('INVALID_EXPERIMENT', 'Epsilon arrays must cover all selections, including primary');
     for (const s of e.selections) {
       const atom = target(scope, s.target, 'INVALID_SELECTION');
       if (!catalog.components.some(c => c.type === atom.type)) fail('INVALID_SELECTION', 'Selection must target an observable catalogue atom');
@@ -156,6 +203,8 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
     const o = expected[i]!, w = r.wrappers[i], e = o.experiment;
     const ports = [...e.selections.map(s => ({ kind: 'selection', id: s.id })), ...e.factors.map(f => ({ kind: 'factor', id: f.id }))].map((p, port) => ({ port, ...p }));
     if (!w || w.component !== o.component || w.inputs !== e.factors.length + 2 || w.scenarioCount !== cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios) || !Array.isArray(w.outputs) || w.outputs.length !== ports.length || w.outputs.some((p, j) => !p || p.port !== ports[j]!.port || p.kind !== ports[j]!.kind || p.id !== ports[j]!.id)) return bad();
+    const scale=e.objective.method==='weighted-sum'?'normalized':'raw';
+    if((w.criteriaScale!==undefined || scale==='normalized') && w.criteriaScale!==scale) return bad();
     layouts.set(w.component, ports.length);
   }
   if (r.resultEvents.length > (request.limits?.maxResultEvents ?? wrapperCaps.maxResultEvents)) return bad();

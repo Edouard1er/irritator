@@ -38,7 +38,7 @@ describe('palette et inspecteur dédiés', () => {
     expect(screen.getByLabelText('Définition prospective')).toHaveValue('Prospectif'); expect(screen.getByLabelText('Début prospectif')).toHaveValue('0'); expect(screen.getByLabelText('Fin prospective')).toHaveValue('2');
     fireEvent.click(screen.getByRole('button', { name: 'Ouvrir le prospectif' })); expect(open).toHaveBeenCalledWith('Prospectif');
     expect(screen.queryByLabelText('experiment')).not.toBeInTheDocument(); expect(screen.queryByLabelText('dQ')).not.toBeInTheDocument(); expect(screen.queryByLabelText('offset')).not.toBeInTheDocument();
-    expect(screen.getByTestId('factor-rate').getElementsByTagName('option')).toHaveLength(4); // two target choices plus single/fixed
+    expect(screen.getByTestId('factor-rate').getElementsByTagName('option')).toHaveLength(11); // two target choices plus nine native factor types
   });
   it('édite single/fixed, valeurs et cardinalités sans calculer de critères', () => {
     render(<InspectorHarness />); const factor = screen.getByTestId('factor-rate');
@@ -67,8 +67,8 @@ describe('palette et inspecteur dédiés', () => {
     expect(within(screen.getByTestId('factor-rate')).getByLabelText('Cible du facteur')).toHaveAttribute('aria-invalid', 'true');
     input('Cible du facteur', 'u', screen.getByTestId('factor-rate')); expect(within(screen.getByTestId('factor-rate')).getByLabelText('Cible du facteur')).toHaveAttribute('aria-invalid', 'false'); expect(screen.queryByText(/Document à compléter/)).not.toBeInTheDocument();
   });
-  it('n’offre que simple et complete et refuse les identifiants dupliqués', () => {
-    render(<InspectorHarness />); expect(screen.getByLabelText('Méthode').querySelectorAll('option')).toHaveLength(1); expect(screen.getByLabelText('Mode d’exécution').querySelectorAll('option')).toHaveLength(1);
+  it('offre trois méthodes et cinq modes et refuse les identifiants dupliqués', () => {
+    render(<InspectorHarness />); expect(screen.getByLabelText('Méthode').querySelectorAll('option')).toHaveLength(3); expect(screen.getByLabelText('Mode d’exécution').querySelectorAll('option')).toHaveLength(5);
     input('Id de la sélection', 'minimum', screen.getByTestId('selection-terminal')); fireEvent.blur(within(screen.getByTestId('selection-terminal')).getByLabelText('Id de la sélection')); expect(screen.getByRole('alert')).toHaveTextContent('Cet identifiant existe déjà');
   });
   it('édite les plans par occurrence sans offrir de changement des dimensions ni des critères', () => {
@@ -80,6 +80,10 @@ describe('palette et inspecteur dédiés', () => {
   });
 });
 describe('journal natif distinct des observations parent', () => {
+  it('indique les critères normalisés sans les recalculer', () => {
+    const result=resultFixture();result.wrappers[0]!.criteriaScale='normalized';render(<WrapperResults result={result}/>);
+    expect(screen.getByTestId('wrapper-summary-decision')).toHaveTextContent('critères normalisés (weighted-sum)');
+  });
   it('préserve l’ordre, les sacs, les dates répétées et les trois valeurs du triplet', () => {
     const result = resultFixture(); result.resultEvents.push({ component: 'decision', time: 1, port: 2, bag: 4, value: [2, .01, 7] }); render(<WrapperResults result={result} />);
     const rows = within(screen.getByTestId('wrapper-events')).getAllByRole('row').slice(1); expect(rows).toHaveLength(4);
@@ -93,5 +97,26 @@ describe('journal natif distinct des observations parent', () => {
   it('présente les erreurs Fastify et conserve les décisions précédentes marquées obsolètes', () => {
     render(<ResultsPanel result={{ ...resultFixture(), runId: 'unit-only' }} stale status="Échec" error="EXECUTION_ERROR · commande négative (moteur 2/3)" />);
     expect(screen.getByRole('alert')).toHaveTextContent('EXECUTION_ERROR'); expect(screen.getByText(/version précédente/)).toBeVisible(); expect(screen.getByTestId('wrapper-events')).toBeVisible();
+  });
+});
+
+describe('configuration native 7F',()=>{
+  it('édite poids, directions et normalisation, puis toutes les contraintes',()=>{
+    render(<InspectorHarness/>);input('Méthode','weighted-sum');input('Poids terminal','2');input('Sens du critère minimum','minimize');input('Normalisation','z-score');
+    expect(screen.getByText(/Les critères émis sont normalisés/)).toBeVisible();expect(screen.queryByLabelText('Sélection primaire')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Monter sélection minimum'}));expect(screen.getByLabelText('Poids terminal')).toHaveValue('2');expect(screen.getByLabelText('Sens du critère minimum')).toHaveValue('minimize');
+    input('Id de la sélection','low',screen.getByTestId('selection-minimum'));fireEvent.blur(within(screen.getByTestId('selection-minimum')).getByLabelText('Id de la sélection'));
+    expect(screen.getByTestId('selection-terminal').querySelector('legend')).not.toHaveTextContent('primaire');
+    input('Méthode','epsilon-constrained');input('Opération terminal','less-equal');input('Epsilon terminal','1');
+    expect(screen.getByLabelText('Sélection primaire')).toHaveValue('low');
+    expect(screen.getByLabelText('Opération low')).toBeVisible();expect(screen.getByText(/y compris la primaire/)).toBeVisible();
+  });
+  it('édite les paramètres aléatoires, domaines et six entiers exacts',()=>{
+    render(<InspectorHarness/>);const factor=screen.getByTestId('factor-rate');input('Type du facteur','random-add',factor);input('Distribution','uniform-int',factor);input('Nombre de tirages','4',factor);
+    input('ints[0] · borne inférieure','2',factor);input('ints[1] · borne supérieure','2',factor);
+    fireEvent.click(screen.getByLabelText('Configurer la graine native'));input('seed[0]','18446744073709551615');fireEvent.blur(screen.getByLabelText('seed[0]'));
+    expect(screen.getByLabelText('seed[0]')).toHaveValue('18446744073709551615');expect(screen.getByText(/4 scénario/)).toBeVisible();
+    input('Distribution','normal',factor);input('reals[1] · écart-type','0',factor);expect(screen.getByText(/Invalid normal parameter domain/)).toBeVisible();
+    input('reals[1] · écart-type','1',factor);expect(screen.queryByText(/Document à compléter/)).not.toBeInTheDocument();
   });
 });

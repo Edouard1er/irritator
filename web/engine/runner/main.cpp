@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <charconv>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -18,6 +19,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 
 namespace {
 using V = rapidjson::Value;
@@ -245,6 +249,10 @@ int main(int argc,char** argv) {
     // terminate it, never wait for a CRT dialog or Windows fault reporting.
     (void)_set_error_mode(_OUT_TO_STDERR);
     _set_abort_behavior(0,_WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#ifdef _DEBUG
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
 #endif
     try {
         D catalog; catalog.Parse(catalog_json);

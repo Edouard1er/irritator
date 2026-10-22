@@ -253,7 +253,7 @@ le domaine natif 7C et ses plafonds. Le backend contrôle exactement catalogue
 et capacités avant chaque exécution v3 ; toute différence produit
 `RUNNER_INCOMPATIBLE` (502). La présence d'un nom de type ne prouve jamais ce
 support. Le contrôle de santé expose les capacités seulement après vérification.
-React Flow reste à intégrer au Test 7E.
+React Flow expose ces capacités depuis le Test 7E, puis les extensions ci-dessous depuis le Test 7F.
 
 Reproduction : `npm --prefix web ci` si nécessaire, puis
 `powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-v3.ps1 -Configuration Release`
@@ -264,3 +264,61 @@ La campagne HTTP et de non-régression complète est
 `powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Release`
 (ou `Debug`). Voir le README web pour le runner historique requis par le test
 de compatibilité et les variables `ENGINE_MAX_*` supplémentaires.
+
+## Extensions natives 7F (mêmes versions v3 / résultat v2)
+
+`objective` accepte les trois configurations suivantes ; les tableaux suivent
+l’ordre de `selections`, jamais celui des cibles distinctes :
+
+```json
+{"method":"simple","type":"maximize","primary":"terminal"}
+{"method":"weighted-sum","type":"maximize","weights":[2,1],"types":["maximize","minimize"],"norm":"min-max"}
+{"method":"epsilon-constrained","type":"maximize","primary":"terminal","epsilons":[1,1],"operations":["less-equal","greater-equal"]}
+```
+
+`weighted-sum` accepte aussi `z-score` (écart-type de population). Les poids
+restent tels que fournis. Le moteur émet les critères **normalisés** ; les autres
+méthodes émettent les critères bruts. `wrappers[].criteriaScale` indique `raw`
+ou `normalized` ; les anciens résultats simples sans ce champ restent lisibles.
+Les égalités epsilon sont exactes, la primaire est contrainte aussi, et un
+ensemble admissible vide produit un journal vide, jamais une valeur zéro.
+
+Les neuf `type` de facteurs sont `single`, `single-add`, `single-mult`,
+`fixed`, `fixed-add`, `fixed-mult`, `random`, `random-add`, `random-mult`.
+Single utilise `value`, fixed utilise `values`, random utilise :
+
+```json
+{"id":"rate","target":"u","parameter":"value","type":"random-add",
+ "count":4,"distribution":"normal","reals":[0,1],"ints":[0,0]}
+```
+
+Les tableaux ont exactement deux cases. Les noms et positions des paramètres
+réellement consommés sont exportés dans `distributionParameters` ; les 17 noms
+pris en charge figurent dans `randomDistributions` et les capacités du runner.
+`bernoulli` et `extreme-value` sont mappés explicitement vers les enums natifs
+`bernouilli` et `exterme_value`. Les domaines sont validés dans TS et C++, sans
+tirage côté web. Les valeurs natives générées ou transformées doivent rester
+finies et dans les bornes du paramètre cible, sinon l’exécution échoue.
+
+L’option `experiment.seed` contient **six chaînes décimales u64**, par exemple
+`["18446744073709551615","9007199254740993","0","0","0","0"]`.
+Ce sont clé, flux, compteur, position et deux cases de tampon de l’état natif.
+`init` fait évoluer le générateur courant ; il ne restaure pas cet état initial.
+Le moteur invalide son tampon à l’entrée de chaque génération. Une reproduction
+est garantie par les tests pour le même binaire, les mêmes paramètres et le même
+état initial ; aucune équivalence des distributions STL entre plateformes n’est promise.
+
+`run` accepte `complete`, `bag`, `time`, `until`, `during`. Les ports restent
+init=x[0], run=x[1], facteurs=x[2+i]. `bag` effectue un appel natif ; `time`
+avance tant que la date enfant reste celle du début de commande, et peut traiter
+le premier sac suivant. `until` vise une date enfant absolue ; `during` ajoute
+une durée à la date courante de l’enfant. Les cibles entre sacs peuvent être
+dépassées. Le scalaire run sert aussi de délai d’émission dans le parent.
+Les horloges sont indépendantes. Les modes partiels appliquent un facteur modifié
+après `init` ; complete le fait au prochain run. Les événements reçus, réponses
+différées et sacs distincts restent gérés par `simulation_wrapper`.
+
+Les overrides d’occurrences acceptent les neuf plans, sans changer cibles ni
+dimensions. Les limites, les ports logiques, les formats v1/v2 et le rejet des
+wrappers récursifs sont conservés. Campagne reproductible :
+`web/engine/runner/tests-wrapper/run-7f.ps1 -Configuration Release` (ou Debug).

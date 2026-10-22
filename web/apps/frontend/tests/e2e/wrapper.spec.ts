@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { runnerCapabilities } from '../../../../packages/contracts/index';
 import { affine, pair } from '../wrapper-fixtures';
 
-const evidence = path.resolve('../../../build-web-test7e/logs/browser');
+const evidence = path.resolve(process.env.IRRITATOR_BROWSER_EVIDENCE ?? '../../../build-web-test7f/logs/browser-regression');
 const fixture = path.resolve('../../examples/wrapper-affine-v3.json');
 async function start(page: Page) {
   page.on('dialog', dialog => dialog.accept());
@@ -84,10 +84,10 @@ test('construit le prospectif et son wrapper sans JSON puis exporte, réimporte 
   const exported = JSON.parse(await readFile(file, 'utf8')); expect(exported.schemaVersion).toBe(3); expect(exported.model.definitions[0].components.map((c: { id: string }) => c.id)).toEqual(['u', 'X']);
   await page.getByRole('button', { name: 'Nouveau', exact: true }).click(); await page.getByLabel('Ouvrir un modèle JSON', { exact: true }).setInputFiles(file);
   const restored = await execute(page, 'affine-built-reimported'); expect(restored.resultEvents).toEqual(initial.resultEvents); expect(restored.wrappers).toEqual(initial.wrappers); expect(restored.observations).toEqual(initial.observations);
-  const bytes = await readFile(path.resolve('../../../build-web-test7d/Release/runner/irritator-runner.exe'));
-  const direct = JSON.parse(execFileSync(path.resolve('../../../build-web-test7d/Release/runner/irritator-runner.exe'), [], { input: JSON.stringify(exported), windowsHide: true, encoding: 'utf8' }));
+  const bytes = await readFile(path.resolve(process.env.IRRITATOR_RUNNER ?? '../../../build-web-test7f/Release/runner/irritator-runner.exe'));
+  const direct = JSON.parse(execFileSync(path.resolve(process.env.IRRITATOR_RUNNER ?? '../../../build-web-test7f/Release/runner/irritator-runner.exe'), [], { input: JSON.stringify(exported), windowsHide: true, encoding: 'utf8' }));
   const { runId, ...native } = restored; expect(native).toEqual(direct);
-  await writeFile(path.join(evidence, 'native-proof.json'), JSON.stringify({ runner: 'build-web-test7d/Release/runner/irritator-runner.exe', sha256: createHash('sha256').update(bytes).digest('hex'), capabilities: runnerCapabilities, manualJson: false, directEqualsHttp: true, events: restored.resultEvents }, null, 2));
+  await writeFile(path.join(evidence, 'native-proof.json'), JSON.stringify({ runner: process.env.IRRITATOR_RUNNER ?? 'build-web-test7f/Release/runner/irritator-runner.exe', sha256: createHash('sha256').update(bytes).digest('hex'), capabilities: runnerCapabilities, manualJson: false, directEqualsHttp: true, events: restored.resultEvents }, null, 2));
   expect(errors).toEqual([]);
 });
 

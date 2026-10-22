@@ -1,30 +1,18 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { validateRequest, type Component, type FactorPlan, type RunRequest, type WrapperExperiment } from '@contracts';
+import { validU64, validateRequest, wrapperCaps, type Component, type RunRequest, type WrapperExperiment, type WrapperSeed } from '@contracts';
 import { errorText } from '@/lib/api/client';
 import type { ComponentSpec } from '@/lib/modeling/model';
 import { prospectiveAtoms, scenarioCount, type IdentityRename } from '@/lib/modeling/wrapper';
 import { NumberField } from './number-field';
+import { FactorPlanFields } from './wrapper-factor';
+import { WrapperObjectiveFields } from './wrapper-objective';
+export { FactorPlanFields } from './wrapper-factor';
 
 export function CommitText({ label, value, onCommit, maxLength = 64 }: { label: string; value: string; onCommit: (v: string) => string | undefined; maxLength?: number }) {
   const [raw, setRaw] = useState(value), [error, setError] = useState<string>();
   useEffect(() => { setRaw(value); setError(undefined); }, [value]);
   return <label className="field"><span>{label}</span><input aria-label={label} value={raw} maxLength={maxLength} aria-invalid={!!error} onChange={e => setRaw(e.target.value)} onBlur={() => { if (raw !== value) setError(onCommit(raw)); }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />{error && <small role="alert">{error}</small>}</label>;
-}
-export function FactorPlanFields({ plan, onChange }: { plan: FactorPlan; onChange: (plan: FactorPlan) => void }) {
-  return <>
-    <label className="field"><span>Type du facteur</span><select aria-label="Type du facteur" value={plan.type} onChange={e => onChange(e.target.value === 'single' ? { id: plan.id, type: 'single', value: plan.type === 'fixed' ? plan.values[0] ?? 0 : plan.value } : { id: plan.id, type: 'fixed', values: plan.type === 'single' ? [plan.value] : plan.values })}><option value="single">single</option><option value="fixed">fixed</option></select></label>
-    {plan.type === 'single' ? <NumberField label="Valeur unique" value={plan.value} onChange={value => onChange({ ...plan, value })} /> : <FixedValues key={plan.id} values={plan.values} onChange={values => onChange({ ...plan, values })} />}
-  </>;
-}
-function FixedValues({ values, onChange }: { values: number[]; onChange: (values: number[]) => void }) {
-  const [raw, setRaw] = useState(values.join(', '));
-  useEffect(() => { setRaw(previous => {
-    const parsed = previous.trim() ? previous.trim().split(/[,;\s]+/).map(token => token === '' ? NaN : Number(token)) : [];
-    return JSON.stringify(parsed) === JSON.stringify(values) ? previous : values.join(', ');
-  }); }, [values]);
-  const invalid = !values.length || values.length > 128 || values.some(v => !Number.isFinite(v) || Math.abs(v) > 1e12);
-  return <label className="field"><span>Valeurs fixes</span><textarea aria-label="Valeurs fixes" value={raw} rows={2} aria-invalid={invalid} onChange={e => { const text = e.target.value; setRaw(text); onChange(text.trim() ? text.trim().split(/[,;\s]+/).map(token => token === '' ? NaN : Number(token)) : []); }} /><small>{invalid ? 'Une à 128 valeurs numériques finies sont requises.' : 'Séparer les nombres par des virgules ou des espaces (point décimal).'} </small></label>;
 }
 const nextId = (base: string, items: { id: string }[]) => { let n = 1; while (items.some(i => i.id === `${base}${n}`)) n++; return `${base}${n}`; };
 const move = <T,>(items: T[], i: number, delta: number): T[] => { const next = [...items]; [next[i], next[i + delta]] = [next[i + delta]!, next[i]!]; return next; };
@@ -67,22 +55,30 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
       </fieldset>)}
       <button disabled={e.factors.length >= 10 || e.factors.length + e.selections.length >= 12 || !targets.some(a => !e.factors.some(f => f.target === a.path))} onClick={() => { const a = targets.find(a => !e.factors.some(f => f.target === a.path))!; edit({ ...e, factors: [...e.factors, { id: nextId('factor', e.factors), target: a.path, parameter: a.parameter!, type: 'single', value: a.component.parameters[a.parameter!] ?? 0 }] }); }}>Ajouter un facteur</button>
       <p className="small scenario-count" role="status">{scenarioCount(e)} scénario(s) configuré(s) · produit des cardinalités</p>
+      <p className="small">Plafonds : {request.limits?.maxScenarios ?? wrapperCaps.maxScenarios} scénarios par wrapper ; {request.limits?.maxTotalScenarios ?? wrapperCaps.maxTotalScenarios} scénarios cumulés ; {request.limits?.maxInternalPoints ?? wrapperCaps.maxInternalPoints} points internes. Une cible ne peut avoir qu’un facteur.</p>
     </section>
     <section className="inspector-section"><h3>Sélections et critères ({e.selections.length})</h3>
-      {e.selections.map((s, i) => <fieldset className="experiment-card" key={s.id} data-testid={`selection-${s.id}`}><legend>{s.name || s.id}{s.id === e.objective.primary ? ' · primaire' : ''}</legend>
-        <CommitText label="Id de la sélection" value={s.id} maxLength={31} onCommit={id => idError(id, e.selections, s.id) ?? edit({ ...e, selections: e.selections.map((x, j) => j === i ? { ...x, id } : x), objective: { ...e.objective, primary: e.objective.primary === s.id ? id : e.objective.primary } }, { selection: [s.id, id] })} />
+      {e.selections.map((s, i) => <fieldset className="experiment-card" key={s.id} data-testid={`selection-${s.id}`}><legend>{s.name || s.id}{e.objective.method !== 'weighted-sum' && s.id === e.objective.primary ? ' · primaire' : ''}</legend>
+        <CommitText label="Id de la sélection" value={s.id} maxLength={31} onCommit={id => idError(id, e.selections, s.id) ?? edit({ ...e, selections: e.selections.map((x, j) => j === i ? { ...x, id } : x), objective: { ...e.objective, primary: e.objective.primary === s.id ? id : e.objective.primary ?? e.selections[0]?.id ?? 'selection' } }, { selection: [s.id, id] })} />
         <CommitText label="Nom de la sélection (facultatif)" value={s.name ?? ''} onCommit={name => edit({ ...e, selections: e.selections.map((x, j) => { if (j !== i) return x; const { name: old, ...rest } = x; return name ? { ...rest, name } : rest; }) })} />
         <label className="field"><span>Cible observable</span><select aria-label="Cible observable" value={s.target} aria-invalid={!atoms.some(a => a.path === s.target)} onChange={event => edit({ ...e, selections: e.selections.map((x, j) => j === i ? { ...x, target: event.target.value } : x) })}>{!atoms.some(a => a.path === s.target) && <option value={s.target}>Cible absente : {s.target}</option>}{atoms.map(a => <option key={a.path} value={a.path}>{a.path} · {a.component.type}</option>)}</select></label>
         <label className="field"><span>Critère</span><select aria-label="Critère" value={s.criteria} onChange={event => edit({ ...e, selections: e.selections.map((x, j) => j === i ? { ...x, criteria: event.target.value as typeof s.criteria } : x) })}>{['min', 'max', 'min-last', 'max-last'].map(c => <option key={c}>{c}</option>)}</select></label>
-        <div className="experiment-actions"><button disabled={i === 0} aria-label={`Monter sélection ${s.id}`} onClick={() => edit({ ...e, selections: move(e.selections, i, -1) })}>↑</button><button disabled={i === e.selections.length - 1} aria-label={`Descendre sélection ${s.id}`} onClick={() => edit({ ...e, selections: move(e.selections, i, 1) })}>↓</button><button aria-label={`Supprimer sélection ${s.id}`} onClick={() => edit({ ...e, selections: e.selections.filter((_, j) => j !== i), objective: { ...e.objective, primary: e.objective.primary === s.id ? e.selections.find(x => x.id !== s.id)?.id ?? 'selection' : e.objective.primary } })}>Supprimer</button></div>
+        <div className="experiment-actions"><button disabled={i === 0} aria-label={`Monter sélection ${s.id}`} onClick={() => edit({ ...e, selections: move(e.selections, i, -1) })}>↑</button><button disabled={i === e.selections.length - 1} aria-label={`Descendre sélection ${s.id}`} onClick={() => edit({ ...e, selections: move(e.selections, i, 1) })}>↓</button><button aria-label={`Supprimer sélection ${s.id}`} onClick={() => edit({ ...e, selections: e.selections.filter((_, j) => j !== i), objective: { ...e.objective, primary: e.objective.primary === s.id ? e.selections.find(x => x.id !== s.id)?.id ?? 'selection' : e.objective.primary ?? e.selections[0]?.id ?? 'selection' } })}>Supprimer</button></div>
       </fieldset>)}
-      <button disabled={!atoms.length || e.factors.length + e.selections.length >= 12} onClick={() => { const id = nextId('selection', e.selections); edit({ ...e, selections: [...e.selections, { id, target: atoms.find(a => a.component.type.includes('integrator'))?.path ?? atoms[0]!.path, criteria: 'max-last' }], objective: { ...e.objective, primary: e.selections.length ? e.objective.primary : id } }); }}>Ajouter une sélection</button>
+      <button disabled={!atoms.length || e.factors.length + e.selections.length >= 12} onClick={() => { const id = nextId('selection', e.selections); edit({ ...e, selections: [...e.selections, { id, target: atoms.find(a => a.component.type.includes('integrator'))?.path ?? atoms[0]!.path, criteria: 'max-last' }], objective: { ...e.objective, primary: e.selections.length ? e.objective.primary ?? e.selections[0]?.id ?? id : id } }); }}>Ajouter une sélection</button>
     </section>
-    <section className="inspector-section"><h3>Objectif</h3><label className="field"><span>Méthode</span><select aria-label="Méthode" value="simple" disabled><option>simple</option></select></label>
-      <label className="field"><span>Sens de l’objectif</span><select aria-label="Sens de l’objectif" value={e.objective.type} onChange={event => edit({ ...e, objective: { ...e.objective, type: event.target.value as 'maximize' | 'minimize' } })}><option>maximize</option><option>minimize</option></select></label>
-      <label className="field"><span>Sélection primaire</span><select aria-label="Sélection primaire" value={e.selections.some(s => s.id === e.objective.primary) ? e.objective.primary : ''} onChange={event => edit({ ...e, objective: { ...e.objective, primary: event.target.value } })}><option value="">Choisir…</option>{e.selections.map(s => <option key={s.id} value={s.id}>{s.name || s.id} ({s.id})</option>)}</select></label>
+    <section className="inspector-section"><h3>Objectif</h3><WrapperObjectiveFields experiment={e} onChange={objective => edit({ ...e, objective })} /></section>
+    <section className="inspector-section"><h3>Exécution</h3>
+      <label className="field"><span>Mode d’exécution</span><select aria-label="Mode d’exécution" value={e.run} onChange={event => edit({ ...e, run: event.target.value as WrapperExperiment['run'] })}>{['complete','bag','time','until','during'].map(mode => <option key={mode}>{mode}</option>)}</select></label>
+      <p className="small">{e.run === 'complete' ? 'Exécute chaque enfant jusqu’à son horizon.' : e.run === 'bag' ? 'Exécute exactement un appel natif run() par enfant.' : e.run === 'time' ? 'Avance tant que le temps enfant reste égal au temps initial de la commande ; le premier sac à la date suivante peut être traité.' : e.run === 'until' ? 'Le scalaire run est une cible temporelle enfant absolue.' : 'Le scalaire run est une durée relative au temps enfant courant au début de la commande.'}</p>
+      <p className="small">Les horloges parent et enfant sont indépendantes. Le scalaire run est aussi le délai d’émission parent (0 : même date). Une cible entre deux sacs peut être dépassée. Prévoyez un horizon parent qui inclut la réponse.</p>
+      <p className="small muted">Sources DEVS : init sur x[0], run sur x[1], facteurs sur x[2+i]. Dans complete, un facteur changé est appliqué au prochain run ; les modes partiels nécessitent init pour l’appliquer en redémarrant l’enfant. init annule les réponses en attente, après l’éventuelle sortie déjà due à cette date.</p>
     </section>
-    <section className="inspector-section"><h3>Exécution</h3><label className="field"><span>Mode d’exécution</span><select aria-label="Mode d’exécution" value="complete" disabled><option>complete</option></select></label><p className="small muted">Connectez une source DEVS à run (entrée 1). init (entrée 0) réinitialise l’expérience. Les événements sont produits par le moteur C++.</p></section>
+    {e.factors.some(f => 'count' in f) && <section className="inspector-section"><h3>État aléatoire natif</h3>
+      <label className="checkbox"><input aria-label="Configurer la graine native" type="checkbox" checked={!!e.seed} onChange={event => { if (event.target.checked) edit({ ...e, seed: ['1393618426636810568','0','0','0','0','0'] }); else { const { seed, ...rest } = e; edit(rest); } }} />Configurer la graine native</label>
+      {e.seed?.map((value,i) => <CommitText key={i} label={'seed[' + i + ']'} value={value} maxLength={20} onCommit={v => { if (!validU64(v)) return 'Entier décimal entre 0 et 18446744073709551615.'; const seed = [...e.seed!] as WrapperSeed; seed[i] = v; return edit({ ...e, seed }); }} />)}
+      <p className="small">Six entiers u64 encodés en chaînes : clé, flux, compteur, position, deux cases de tampon. Le moteur fait évoluer cet état ; init ne restaure pas la graine initiale. Reproductibilité pour une nouvelle exécution avec le même moteur et le même état.</p>
+    </section>}
     <section className="inspector-section"><h3>Ports dynamiques</h3><p className="small">F={e.factors.length}, S={e.selections.length} · {spec.inputs.length} entrées · {spec.outputs.length} sorties</p><div className="port-list">{spec.inputs.map(p => <p key={`x${p.port}`}><span>x[{p.port}]</span><code>{p.name}</code></p>)}{spec.outputs.map(p => <p key={`y${p.port}`}><span>y[{p.port}]</span><code>{p.name}</code></p>)}</div><p className="small muted">1 ≤ F ≤ 10 ; S ≥ 1 ; 3 ≤ F+S ≤ 12. Retirez les connexions d’un port avant sa suppression.</p></section>
     {validation && <p className="inline-error" role="alert">Document à compléter avant export ou exécution : {validation}</p>}
     <button className="danger-button" onClick={onDelete}>Supprimer le composant</button>

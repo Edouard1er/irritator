@@ -1,11 +1,11 @@
-import { catalog, type Component, type FactorPlan, type RunRequest, type WrapperExperiment } from '@contracts';
+import { catalog, factorCardinality, type Component, type FactorPlan, type RunRequest, type WrapperExperiment } from '@contracts';
 import type { Catalog, ComponentSpec } from './model';
 
 export const wrapperPaletteSpec: ComponentSpec = {
   type: 'simulation_wrapper', name: 'Simulation prospective', parameters: {}, required: [],
   inputs: [{ port: 0, name: 'init' }, { port: 1, name: 'run' }], outputs: [],
 };
-export const scenarioCount = (e: { factors: FactorPlan[] }): number => e.factors.reduce((n, f) => n * (f.type === 'fixed' ? f.values.length : 1), 1);
+export const scenarioCount = (e: { factors: FactorPlan[] }): number => e.factors.reduce((n, f) => n * factorCardinality(f), 1);
 export function wrapperSpec(e?: WrapperExperiment): ComponentSpec {
   return { type: wrapperPaletteSpec.type, name: wrapperPaletteSpec.name, parameters: {}, required: [],
     inputs: [...wrapperPaletteSpec.inputs, ...(e?.factors ?? []).map((f, i) => ({ port: i + 2, name: f.name || f.id }))],
@@ -77,7 +77,7 @@ export function validateDependencies(r: RunRequest, draft = false): void {
 }
 
 export type IdentityRename = { factor?: [string, string]; selection?: [string, string] };
-const planOnly = (f: FactorPlan): FactorPlan => f.type === 'fixed' ? { id: f.id, type: 'fixed', values: [...f.values] } : { id: f.id, type: 'single', value: f.value };
+const planOnly = (f: FactorPlan): FactorPlan => 'values' in f ? { id: f.id, type: f.type, values: [...f.values] } : 'value' in f ? { id: f.id, type: f.type, value: f.value } : { id: f.id, type: f.type, count: f.count, distribution: f.distribution, reals: [...f.reals], ints: [...f.ints] };
 export { planOnly };
 function portKeys(e: WrapperExperiment, direction: 'in' | 'out', rename: IdentityRename = {}) {
   const factor = (id: string) => `factor:${id === rename.factor?.[0] ? rename.factor[1] : id}`;
@@ -91,7 +91,22 @@ export function updateExperiment(r: RunRequest, scopeId: string, componentId: st
   if (!old) throw new Error('Expérience introuvable.');
   const result = structuredClone(r);
   const scope = scopes(result).find(s => s.id === scopeId)!;
-  scope.components.find(c => c.id === componentId)!.experiment = structuredClone(experiment);
+  const next=structuredClone(experiment);
+  // Objective arrays follow selection identities too, including rename/add/remove.
+  // UI structural edits supply the arrays in the previous selection order.
+  if(old.objective.method===next.objective.method &&
+     (old.selections.length!==next.selections.length || old.selections.some((s,i)=>s.id!==next.selections[i]?.id))) {
+    const index=(id:string)=>old.selections.findIndex(s=>(s.id===rename.selection?.[0]?rename.selection[1]:s.id)===id);
+    const o=next.objective;
+    if(o.method==='weighted-sum') {
+      o.weights=next.selections.map(s=>o.weights[index(s.id)]??1);
+      o.types=next.selections.map(s=>o.types[index(s.id)]??'maximize');
+    } else if(o.method==='epsilon-constrained') {
+      o.epsilons=next.selections.map(s=>o.epsilons[index(s.id)]??0);
+      o.operations=next.selections.map(s=>o.operations[index(s.id)]??'greater-equal');
+    }
+  }
+  scope.components.find(c => c.id === componentId)!.experiment = next;
   for (const edge of scope.connections) for (const [endpoint, direction] of [[edge.from, 'out'], [edge.to, 'in']] as const) {
     if (endpoint.component !== componentId) continue;
     const key = portKeys(old, direction, rename)[endpoint.port];

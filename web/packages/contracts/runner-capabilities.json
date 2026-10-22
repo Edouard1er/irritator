@@ -3,10 +3,12 @@
   "requestVersions": [1, 2, 3],
   "resultVersions": { "1": 1, "2": 1, "3": 2 },
   "wrapper": {
-    "implementation": "native-wrapper-7C",
-    "runModes": ["complete"],
-    "factorTypes": ["single", "fixed"],
-    "objectiveMethods": ["simple"],
+    "implementation": "native-wrapper-7F",
+    "runModes": ["complete", "bag", "time", "until", "during"],
+    "factorTypes": ["single", "single-add", "single-mult", "fixed", "fixed-add", "fixed-mult", "random", "random-add", "random-mult"],
+    "objectiveMethods": ["simple", "weighted-sum", "epsilon-constrained"],
+    "randomDistributions": ["uniform-int", "uniform-real", "bernoulli", "binomial", "negative-binomial", "geometric", "poisson", "exponential", "gamma", "weibull", "extreme-value", "normal", "lognormal", "chi-squared", "cauchy", "fisher-f", "student-t"],
+    "seedEncoding": "six-uint64-decimal-strings",
     "maxNesting": 1,
     "resultEvents": "ordered-parent-bags-triplets",
     "limits": {

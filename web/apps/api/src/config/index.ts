@@ -18,7 +18,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const host = env.HOST ?? '127.0.0.1';
   if (!['127.0.0.1','::1','localhost'].includes(host)) throw new Error('This version binds only to loopback');
   return {
-    runnerPath: resolve(env.IRRITATOR_RUNNER ?? `../build-web-test7d/${process.platform === 'win32' ? 'Release/' : ''}runner/irritator-runner${process.platform === 'win32' ? '.exe' : ''}`),
+    runnerPath: resolve(env.IRRITATOR_RUNNER ?? `../build-web-test7f/${process.platform === 'win32' ? 'Release/' : ''}runner/irritator-runner${process.platform === 'win32' ? '.exe' : ''}`),
     host, port: integer('PORT',3001,0,65535), bodyLimit: integer('API_BODY_LIMIT',1048576,1024,1048576),
     timeoutMs: integer('ENGINE_TIMEOUT_MS',10000,10,60000), maxConcurrent: integer('ENGINE_MAX_CONCURRENT',2,1,8),
     maxStdoutBytes: integer('ENGINE_MAX_STDOUT_BYTES',4*1024*1024,128,4*1024*1024),

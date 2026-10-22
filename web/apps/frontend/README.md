@@ -1,4 +1,4 @@
-# Irritator Web — éditeur graphique et hiérarchique (Tests 5–7E)
+# Irritator Web — éditeur graphique et hiérarchique (Tests 5–7F)
 
 Éditeur local Next.js / React Flow connecté au **véritable runner C++ Irritator**.
 Les composants, paramètres et ports viennent de `GET /api/v1/components`.
@@ -10,8 +10,8 @@ Premier terminal, depuis la racine du dépôt :
 
 ```powershell
 Set-Location D:\these\irritator
-# Pour les wrappers : construire le runner 7D selon web/engine/runner/tests-wrapper/README.md.
-$env:IRRITATOR_RUNNER=(Resolve-Path build-web-test7d/Release/runner/irritator-runner.exe).Path
+# Pour les wrappers : construire le runner 7F selon web/engine/runner/tests-wrapper/README.md.
+$env:IRRITATOR_RUNNER=(Resolve-Path build-web-test7f/Release/runner/irritator-runner.exe).Path
 Set-Location web
 npm.cmd ci
 npm.cmd run build
@@ -264,3 +264,27 @@ multicritères supplémentaires, B*, modèle halieutique, base de données, auth
 distribué. Interface prioritairement desktop (largeur minimale 1000 px), panneau
 de résultats redimensionnable verticalement. Pas encore d’annuler/rétablir ni de
 sauvegarde de workspace dans un fichier portable. Le serveur reste local.
+
+## Inspecteur natif complet (Test 7F)
+
+L’inspecteur propose simple, weighted-sum (poids, sens locaux, min-max/z-score)
+et epsilon-constrained (primaire et contraintes sur toutes les sélections).
+Les critères normalisés sont explicitement signalés dans les décisions natives.
+
+Les neuf plans single/fixed/random avec remplacement, addition et multiplication
+sont disponibles. Les distributions et leurs paramètres natifs sont conditionnels.
+La graine optionnelle est un état de six chaînes u64 ; sa sauvegarde ne passe
+jamais par Number. Réordonner les sélections remappe aussi poids et contraintes.
+Les imports, exports et workspaces conservent tous ces champs.
+
+Les cinq modes complete/bag/time/until/during utilisent les commandes DEVS du
+graphe. L’inspecteur décrit les horloges indépendantes, dépassements entre sacs,
+délai parent du scalaire run et réinitialisations nécessaires aux modes partiels.
+Aucun bouton de mutation d’état courant ni optimiseur JavaScript n’est ajouté.
+
+Les parcours réels 7F sont dans tests/e2e/wrapper-7f.spec.ts. Ils comparent chaque
+réponse Fastify à l’exécution directe du même binaire C++ et couvrent les trois
+méthodes, les trois familles et les cinq modes. FRONTEND_URL et IRRITATOR_RUNNER
+permettent de choisir les serveurs et le binaire testés ; les preuves sont dans
+build-web-test7f/logs/browser. Pour isoler une campagne des serveurs existants,
+IRRITATOR_API_URL doit être défini avant le build ou le démarrage dev de Next.js.

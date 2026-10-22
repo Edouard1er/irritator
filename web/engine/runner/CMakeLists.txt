@@ -25,6 +25,10 @@ file(READ "${CONTRACTS}/request-v2.schema.json" REQUEST_V2_SCHEMA_JSON)
 file(READ "${CONTRACTS}/request-v3.schema.json" REQUEST_V3_SCHEMA_JSON)
 configure_file(contracts.hpp.in contracts.hpp @ONLY)
 add_executable(irritator-runner main.cpp)
+# MSVC's localized /showIncludes prefix can omit header dependencies on Windows.
+# Keep the scientific compiler and embedded contracts explicit in the build DAG.
+set_source_files_properties(main.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/json_wrapper.hpp;${CMAKE_CURRENT_SOURCE_DIR}/hierarchy.hpp;${CMAKE_CURRENT_SOURCE_DIR}/native_wrapper.hpp;${CMAKE_CURRENT_SOURCE_DIR}/native_graph.hpp;${CMAKE_CURRENT_BINARY_DIR}/contracts.hpp")
+set_source_files_properties(native_wrapper.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/native_wrapper.hpp;${CMAKE_CURRENT_SOURCE_DIR}/native_graph.hpp")
 target_include_directories(irritator-runner PRIVATE "${IRRITATOR_ROOT}/lib/include" "${IRRITATOR_ROOT}/external/rapidjson/include" "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(irritator-runner PRIVATE irritator-native-wrapper)
 target_compile_definitions(irritator-runner PRIVATE $<$<CONFIG:Debug>:IRRITATOR_ENABLE_DEBUG>)
@@ -44,3 +48,5 @@ set_tests_properties(runner-contracts-build PROPERTIES FIXTURES_SETUP contracts-
 add_test(NAME runner-wrapper-v3 COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/wrapper-v3-tests.mjs")
 set_tests_properties(runner-wrapper-v3 PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
 add_subdirectory(tests-wrapper)
+add_test(NAME runner-wrapper-7f COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/wrapper-7f-tests.mjs")
+set_tests_properties(runner-wrapper-7f PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)

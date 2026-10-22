@@ -169,7 +169,7 @@ Seul le serveur peut définir le chemin de l'exécutable ; il ne vient jamais du
 
 | Variable | Défaut et plafond |
 |---|---|
-| IRRITATOR_RUNNER | ../build-web-test7d/Release/runner/irritator-runner.exe sur Windows ; ../build-web-test7d/runner/irritator-runner sur Unix |
+| IRRITATOR_RUNNER | ../build-web-test7f/Release/runner/irritator-runner.exe sur Windows ; ../build-web-test7f/runner/irritator-runner sur Unix |
 | HOST / PORT | 127.0.0.1 / 3001 ; HOST restreint à la boucle locale |
 | API_BODY_LIMIT | 1 MiB maximum |
 | ENGINE_TIMEOUT_MS | 10 s, maximum 60 s |
@@ -354,7 +354,7 @@ Set-Location D:\these\irritator
 powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Release
 powershell -NoProfile -ExecutionPolicy Bypass -File web/test-wrapper-http.ps1 -Configuration Debug
 Set-Location web
-$env:IRRITATOR_RUNNER=(Resolve-Path ../build-web-test7d/Release/runner/irritator-runner.exe).Path
+$env:IRRITATOR_RUNNER=(Resolve-Path ../build-web-test7f/Release/runner/irritator-runner.exe).Path
 npm.cmd start
 ```
 
@@ -392,3 +392,12 @@ borne le parent ; une boucle enfant est arrêtée par le timeout du processus.
 Déconnexion, timeout et arrêt du serveur tuent puis attendent le processus natif.
 Il n'y a pas d'annulation coopérative des scénarios enfants. Voir le
 [rapport 7D](../reports/simulation-wrapper-test-7D.md) pour les résultats et limites.
+
+## Extension native complète — Test 7F
+
+Le runner courant est construit par `web/engine/runner/tests-wrapper/run-7f.ps1`
+(Release et Debug). Il expose trois objectifs, neuf types de facteurs, les
+17 distributions natives et les cinq modes, dans le même contrat v3/résultat v2.
+Voir `packages/contracts/README.md` pour le contrat scientifique et
+`apps/frontend/README.md` pour l’inspecteur, les horloges et les tests réels.
+Le catalogue atomique et les protections de ressources restent inchangés.

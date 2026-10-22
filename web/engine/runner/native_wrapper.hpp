@@ -8,13 +8,13 @@
 #include <vector>
 
 namespace irt_web {
-// Deliberately bounded first integration: deterministic single/fixed factors,
-// all four native criteria, simple optimization, complete execution.
+// Configuration only: optimization and DEVS execution belong to libirritator.
 struct factor_spec {
     std::string id, target;
     std::vector<double> values;
     int real_slot = 0;
     irt::factor_type type = irt::factor_type::fixed;
+    irt::random_factor random;
 };
 struct selection_spec {
     std::string id, target;
@@ -26,9 +26,18 @@ struct experiment_spec {
     std::string primary;
     irt::optimization_method method = irt::optimization_method::simple;
     irt::optimization_type direction = irt::optimization_type::maximize;
+    std::vector<double> weights, epsilons;
+    std::vector<irt::optimization_type> types;
+    std::vector<irt::operation_type> operations;
+    irt::norm_type norm = irt::norm_type::min_max;
+    std::optional<std::array<irt::u64, 6>> seed;
     irt::simulation_wrapper::run_type mode = irt::simulation_wrapper::run_type::complete;
     std::size_t max_scenarios = 128;
 };
+bool single_type(irt::factor_type);
+bool random_type(irt::factor_type);
+std::size_t factor_cardinality(const factor_spec&);
+void validate_random_factor(const irt::random_factor&);
 
 std::size_t validate_experiment(const irt::project&, const target_table&,
                                 const experiment_spec&);

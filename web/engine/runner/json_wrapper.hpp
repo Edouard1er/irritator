@@ -45,8 +45,24 @@ struct json_wrappers {
     }
     void factor_values(const V& f,const V& atomic,irt_web::factor_spec& native) const {
         native.values.clear();
-        native.type=str(f["type"])=="single"?irt::factor_type::single:irt::factor_type::fixed;
-        if(native.type==irt::factor_type::single) native.values.push_back(f["value"].GetDouble());
+        using F=irt::factor_type;
+        const std::map<std::string,F> types{{"single",F::single},{"single-add",F::single_add},{"single-mult",F::single_mult},
+            {"fixed",F::fixed},{"fixed-add",F::fixed_add},{"fixed-mult",F::fixed_mult},
+            {"random",F::random},{"random-add",F::random_add},{"random-mult",F::random_mult}};
+        native.type=types.at(str(f["type"]));
+        if(irt_web::single_type(native.type)) native.values.push_back(f["value"].GetDouble());
+        else if(irt_web::random_type(native.type)) {
+            using D=irt::distribution_type;
+            const std::map<std::string,D> distributions{
+                {"uniform-int",D::uniform_int},{"uniform-real",D::uniform_real},{"bernoulli",D::bernouilli},{"binomial",D::binomial},
+                {"negative-binomial",D::negative_binomial},{"geometric",D::geometric},{"poisson",D::poisson},{"exponential",D::exponential},
+                {"gamma",D::gamma},{"weibull",D::weibull},{"extreme-value",D::exterme_value},{"normal",D::normal},{"lognormal",D::lognormal},
+                {"chi-squared",D::chi_squared},{"cauchy",D::cauchy},{"fisher-f",D::fisher_f},{"student-t",D::student_t}};
+            native.random.count=f["count"].GetUint(); native.random.dist=distributions.at(str(f["distribution"]));
+            for(unsigned i=0;i<2;++i) { native.random.reals[i]=f["reals"][i].GetDouble(); native.random.ints[i]=f["ints"][i].GetInt(); }
+            try { irt_web::validate_random_factor(native.random); }
+            catch(const std::exception& e) { fail("INVALID_FACTOR",e.what()); }
+        }
         else for(const auto& value:f["values"].GetArray()) native.values.push_back(value.GetDouble());
         const auto& bounds=descriptor(catalog,str(atomic["type"]))["parameters"];
         const char* parameter=str(atomic["type"])=="constant"?"value":"X";
@@ -57,15 +73,28 @@ struct json_wrappers {
     std::size_t scenarios(const irt_web::experiment_spec& spec) const {
         std::size_t n=1;
         for(const auto& f:spec.factors) {
-            if(f.values.empty() || n>std::size_t(limit(doc,"maxScenarios",128))/f.values.size())
+            const auto count=irt_web::factor_cardinality(f);
+            if(!count || n>std::size_t(limit(doc,"maxScenarios",128))/count)
                 fail("LIMIT_EXCEEDED","Cartesian scenario product exceeds maxScenarios");
-            n*=f.values.size();
+            n*=count;
         }
         return n;
     }
     irt_web::experiment_spec experiment(const V& e) const {
         horizon(e["simulation"]);
         irt_web::experiment_spec spec;
+        using R=irt::simulation_wrapper::run_type;
+        const std::map<std::string,R> modes{{"complete",R::complete},{"bag",R::bag},{"time",R::time},{"until",R::until},{"during",R::during}};
+        spec.mode=modes.at(str(e["run"]));
+        if(e.HasMember("seed")) {
+            std::array<irt::u64,6> seed{};
+            for(unsigned i=0;i<6;++i) {
+                const auto value=str(e["seed"][i]);
+                const auto [end,ec]=std::from_chars(value.data(),value.data()+value.size(),seed[i]);
+                if(ec!=std::errc{}||end!=value.data()+value.size()) fail("INVALID_EXPERIMENT","Invalid uint64 seed string");
+            }
+            spec.seed=seed;
+        }
         const auto& scope=definition(str(e["definition"]));
         const auto f=e["factors"].Size(),s=e["selections"].Size();
         if(f<1||f>10||s<1||f+s<3||f+s>12) fail("INVALID_EXPERIMENT","Require 1<=F<=10, S>=1, 3<=F+S<=12");
@@ -92,9 +121,24 @@ struct json_wrappers {
             if(!registry.contains(str(atom["type"]))) fail("INVALID_SELECTION","Selection must target an observable catalogue atom");
             spec.selections.push_back({id,path,criteria.at(str(item["criteria"]))});
         }
-        spec.primary=str(e["objective"]["primary"]);
-        if(!names.contains(spec.primary)) fail("INVALID_SELECTION","Unknown primary selection");
-        spec.direction=str(e["objective"]["type"])=="maximize"?irt::optimization_type::maximize:irt::optimization_type::minimize;
+        const auto& o=e["objective"];
+        const auto method=str(o["method"]);
+        spec.method=method=="simple"?irt::optimization_method::simple:method=="weighted-sum"?irt::optimization_method::weighted_sum:irt::optimization_method::epsilon_constrained;
+        if(o.HasMember("primary")) spec.primary=str(o["primary"]);
+        if(spec.method!=irt::optimization_method::weighted_sum&&!names.contains(spec.primary)) fail("INVALID_SELECTION","Unknown primary selection");
+        spec.direction=str(o["type"])=="maximize"?irt::optimization_type::maximize:irt::optimization_type::minimize;
+        if(spec.method==irt::optimization_method::weighted_sum) {
+            if(o["weights"].Size()!=s||o["types"].Size()!=s) fail("INVALID_EXPERIMENT","Weighted-sum arrays must match selections");
+            for(const auto& v:o["weights"].GetArray()) spec.weights.push_back(v.GetDouble());
+            for(const auto& v:o["types"].GetArray()) spec.types.push_back(str(v)=="maximize"?irt::optimization_type::maximize:irt::optimization_type::minimize);
+            spec.norm=str(o["norm"])=="min-max"?irt::norm_type::min_max:irt::norm_type::z_score;
+        }
+        if(spec.method==irt::optimization_method::epsilon_constrained) {
+            if(o["epsilons"].Size()!=s||o["operations"].Size()!=s) fail("INVALID_EXPERIMENT","Epsilon arrays must cover all selections, including primary");
+            const std::map<std::string,irt::operation_type> ops{{"equal",irt::operation_type::equal},{"not-equal",irt::operation_type::not_equal},{"greater-equal",irt::operation_type::greater_equal},{"less-equal",irt::operation_type::less_equal}};
+            for(const auto& v:o["epsilons"].GetArray()) spec.epsilons.push_back(v.GetDouble());
+            for(const auto& v:o["operations"].GetArray()) spec.operations.push_back(ops.at(str(v)));
+        }
         spec.max_scenarios=limit(doc,"maxScenarios",128);
         (void)scenarios(spec);
         return spec;
@@ -254,6 +298,7 @@ struct json_wrappers {
           catch(const std::exception& error) { fail("NATIVE_CONSTRUCTION_ERROR",error.what()); }
     }
     void collect(std::size_t bag) {
+        audit_parameters();
         const auto first=events.size();
         try { irt_web::collect_outputs(parent->project->sim,bindings,bag,events); }
         catch(const std::exception& error) { fail("EXECUTION_ERROR",error.what()); }
@@ -264,7 +309,23 @@ struct json_wrappers {
             for(double value:event.value) if(!std::isfinite(value)) fail("EXECUTION_ERROR","Non-finite wrapper output");
         }
     }
+    void audit_parameters() const {
+        const auto& parent_sim=parent->project->sim;
+        for(const auto& b:bindings) {
+            const auto& resource=parent_sim.sims.get(b.resource);
+            for(const auto& input:resource.input_parameters)
+                if(input.value && !std::isfinite(*input.value)) fail("INVALID_FACTOR","Non-finite external factor input");
+            for(const auto sub:resource.embedded_sims) {
+                const auto& sim=resource.embedded_sims.get<irt::simulation>(sub);
+                for(const auto factor:resource.factors) {
+                    const auto value=sim.parameters[resource.factors.get<irt::model_id>(factor)].reals[0];
+                    if(!std::isfinite(value)||std::abs(value)>1e12) fail("INVALID_FACTOR","Generated or transformed factor outside target parameter bounds");
+                }
+            }
+        }
+    }
     void audit_initialized() const {
+        audit_parameters();
         auto& sim=parent->project->sim;
         std::set<irt::embedded_simulation_id> resources;
         for(std::size_t i=0;i<bindings.size();++i) {
@@ -299,7 +360,8 @@ struct json_wrappers {
             for(const auto& s:o.plan.selections) add(s.id,"selection");
             for(const auto& f:o.plan.factors) add(f.id,"factor");
             item.AddMember("component",V(o.path.c_str(),a),a).AddMember("inputs",static_cast<unsigned>(o.plan.factors.size()+2),a)
-                .AddMember("outputs",outputs,a).AddMember("scenarioCount",static_cast<unsigned>(scenarios(o.plan)),a);
+                .AddMember("outputs",outputs,a).AddMember("scenarioCount",static_cast<unsigned>(scenarios(o.plan)),a)
+                .AddMember("criteriaScale",V(o.plan.method==irt::optimization_method::weighted_sum?"normalized":"raw",a),a);
             layouts.PushBack(item,a);
         }
         result["schemaVersion"].SetInt(2);

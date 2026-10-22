@@ -451,7 +451,9 @@
             },
             "type": {
               "enum": [
-                "single"
+                "single",
+                "single-add",
+                "single-mult"
               ]
             },
             "value": {
@@ -475,7 +477,9 @@
             },
             "type": {
               "enum": [
-                "fixed"
+                "fixed",
+                "fixed-add",
+                "fixed-mult"
               ]
             },
             "values": {
@@ -487,6 +491,76 @@
               },
               "minItems": 1,
               "maxItems": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "type",
+            "count",
+            "distribution",
+            "reals",
+            "ints"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "type": {
+              "enum": [
+                "random",
+                "random-add",
+                "random-mult"
+              ]
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "distribution": {
+              "enum": [
+                "uniform-int",
+                "uniform-real",
+                "bernoulli",
+                "binomial",
+                "negative-binomial",
+                "geometric",
+                "poisson",
+                "exponential",
+                "gamma",
+                "weibull",
+                "extreme-value",
+                "normal",
+                "lognormal",
+                "chi-squared",
+                "cauchy",
+                "fisher-f",
+                "student-t"
+              ]
+            },
+            "reals": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "ints": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "minItems": 2,
+              "maxItems": 2
             }
           }
         }
@@ -524,7 +598,9 @@
             },
             "type": {
               "enum": [
-                "single"
+                "single",
+                "single-add",
+                "single-mult"
               ]
             },
             "value": {
@@ -564,7 +640,9 @@
             },
             "type": {
               "enum": [
-                "fixed"
+                "fixed",
+                "fixed-add",
+                "fixed-mult"
               ]
             },
             "values": {
@@ -576,6 +654,92 @@
               },
               "minItems": 1,
               "maxItems": 128
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "target",
+            "parameter",
+            "type",
+            "count",
+            "distribution",
+            "reals",
+            "ints"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/shortId"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "target": {
+              "$ref": "#/definitions/path"
+            },
+            "parameter": {
+              "enum": [
+                "value",
+                "X"
+              ]
+            },
+            "type": {
+              "enum": [
+                "random",
+                "random-add",
+                "random-mult"
+              ]
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            },
+            "distribution": {
+              "enum": [
+                "uniform-int",
+                "uniform-real",
+                "bernoulli",
+                "binomial",
+                "negative-binomial",
+                "geometric",
+                "poisson",
+                "exponential",
+                "gamma",
+                "weibull",
+                "extreme-value",
+                "normal",
+                "lognormal",
+                "chi-squared",
+                "cauchy",
+                "fisher-f",
+                "student-t"
+              ]
+            },
+            "reals": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "ints": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "minItems": 2,
+              "maxItems": 2
             }
           }
         }
@@ -648,7 +812,11 @@
         },
         "run": {
           "enum": [
-            "complete"
+            "complete",
+            "bag",
+            "time",
+            "until",
+            "during"
           ]
         },
         "factors": {
@@ -668,28 +836,145 @@
           "maxItems": 11
         },
         "objective": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "method",
-            "type",
-            "primary"
-          ],
-          "properties": {
-            "method": {
-              "enum": [
-                "simple"
-              ]
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "type",
+                "primary"
+              ],
+              "properties": {
+                "method": {
+                  "enum": [
+                    "simple"
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "maximize",
+                    "minimize"
+                  ]
+                },
+                "primary": {
+                  "$ref": "#/definitions/shortId"
+                }
+              }
             },
-            "type": {
-              "enum": [
-                "maximize",
-                "minimize"
-              ]
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "type",
+                "weights",
+                "types",
+                "norm"
+              ],
+              "properties": {
+                "method": {
+                  "enum": [
+                    "weighted-sum"
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "maximize",
+                    "minimize"
+                  ]
+                },
+                "primary": {
+                  "$ref": "#/definitions/shortId"
+                },
+                "weights": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": -1000000000000,
+                    "maximum": 1000000000000
+                  },
+                  "minItems": 1,
+                  "maxItems": 11
+                },
+                "types": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "maximize",
+                      "minimize"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 11
+                },
+                "norm": {
+                  "enum": [
+                    "min-max",
+                    "z-score"
+                  ]
+                }
+              }
             },
-            "primary": {
-              "$ref": "#/definitions/shortId"
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "type",
+                "primary",
+                "epsilons",
+                "operations"
+              ],
+              "properties": {
+                "method": {
+                  "enum": [
+                    "epsilon-constrained"
+                  ]
+                },
+                "type": {
+                  "enum": [
+                    "maximize",
+                    "minimize"
+                  ]
+                },
+                "primary": {
+                  "$ref": "#/definitions/shortId"
+                },
+                "epsilons": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": -1000000000000,
+                    "maximum": 1000000000000
+                  },
+                  "minItems": 1,
+                  "maxItems": 11
+                },
+                "operations": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "equal",
+                      "not-equal",
+                      "greater-equal",
+                      "less-equal"
+                    ]
+                  },
+                  "minItems": 1,
+                  "maxItems": 11
+                }
+              }
             }
+          ]
+        },
+        "seed": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]{0,19})$"
           }
         }
       }

@@ -51,9 +51,8 @@ possèdent des projets avec des liens d'arbre intrusifs. Le runner v2 utilise
 également un espace directement possédé. Aucun cache de projets vivants ni
 répétition de `project::set` sur le même parent n'est introduit.
 
-L'API du Test 7B accepte `single`, `fixed`, les quatre critères natifs,
-`simple` et `complete`. Les autres facteurs, objectifs et modes sont rejetés
-explicitement ; leur exposition appartient aux validations ultérieures. Les
+L'API initiale du Test 7B acceptait `single`, `fixed`, les quatre critères natifs,
+`simple` et `complete`. Le Test 7F étend cette même API comme décrit ci-dessous. Les
 paramètres des facteurs désignent uniquement `reals[0]` des constantes et des
 intégrateurs QSS. Les horizons sont finis et les cardinalités bornées avant
 l'initialisation native. Les projets se construisent une seule fois ; le reset
@@ -66,3 +65,30 @@ Le Test 7D ajoute le transport HTTP, la description CLI `--capabilities` et
 Le catalogue atomique `--describe` conserve exactement son format historique.
 Voir [le README web](../../../README.md) pour l'appel HTTP reproductible et
 les prérequis des tests, dont le runner historique de compatibilité.
+
+## Validation complète 7F
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-7f.ps1 -Configuration Release
+powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-7f.ps1 -Configuration Debug
+```
+
+Les builds moteur/historiques 7B doivent exister dans la même configuration.
+Le script les vérifie, construit l’adaptateur et ses clients dans
+`build-web-test7f/<Configuration>/runner/`, puis exécute CTest, les tests officiels,
+les 40 cas de stabilisation et les suites HTTP réelles. Les preuves et réponses
+numériques sont conservées sous `logs/`. Les dépendances CMake explicites des
+en-têtes et contrats évitent les objets périmés avec `/showIncludes` localisé.
+
+`advanced.cpp` ajoute objectifs, neuf types de facteurs, 17 distributions,
+états u64, modes et commandes. `distributions` compare les paramètres des
+scénarios au véritable `random_factor::gen` et publie un oracle numérique lu
+par `wrapper-7f-tests.mjs`. Cette suite teste les mêmes familles sur JSON et,
+avec `WRAPPER_7F_HTTP=1`, par TCP Fastify en comparant chaque réponse au runner
+direct. Aucun résultat scientifique de cette campagne n’est simulé par un mock.
+
+Les modes à horloges indépendantes utilisent des constantes natives avec des
+sacs enfant à 10, 10.5, 11, 11.5 et une borne 12 : bag s’arrête à 10, time à
+10.5, until(10.75) et during(0.75) dépassent leur cible jusqu’à 11. La commande
+parent est à 5 et ses réponses sont à 5, 15.75 ou 5.75 selon son scalaire.
+Les tests affines et de commandes couvrent séparément les critères et facteurs.

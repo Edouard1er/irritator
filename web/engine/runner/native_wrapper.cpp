@@ -5,6 +5,35 @@
 #include <limits>
 
 namespace irt_web {
+bool single_type(irt::factor_type t) {
+    return t == irt::factor_type::single || t == irt::factor_type::single_add || t == irt::factor_type::single_mult;
+}
+bool random_type(irt::factor_type t) {
+    return t == irt::factor_type::random || t == irt::factor_type::random_add || t == irt::factor_type::random_mult;
+}
+std::size_t factor_cardinality(const factor_spec& f) {
+    return random_type(f.type) ? f.random.count : f.values.size();
+}
+void validate_random_factor(const irt::random_factor& f) {
+    require(f.count > 0, "Random count must be positive");
+    const auto a=f.reals[0], b=f.reals[1];
+    require(std::isfinite(a) && std::isfinite(b), "Random parameters must be finite");
+    bool valid=false;
+    using D=irt::distribution_type;
+    switch(f.dist) {
+    case D::uniform_int: valid=f.ints[0]<=f.ints[1]; break;
+    case D::uniform_real: valid=a<=b; break;
+    case D::bernouilli: valid=a>=0 && a<=1; break;
+    case D::binomial: valid=f.ints[0]>=0 && a>=0 && a<=1; break;
+    case D::negative_binomial: valid=f.ints[0]>0 && a>0 && a<=1; break;
+    case D::geometric: valid=a>0 && a<1; break;
+    case D::poisson: case D::exponential: case D::chi_squared: case D::student_t: valid=a>0; break;
+    case D::gamma: case D::weibull: case D::fisher_f: valid=a>0 && b>0; break;
+    case D::exterme_value: case D::normal: case D::lognormal: case D::cauchy: valid=b>0; break;
+    default: break;
+    }
+    require(valid, "Invalid native distribution or parameter domain");
+}
 namespace {
 const native_target& resolve(const irt::project& pj, const target_table& targets,
                               const std::string& path)
@@ -37,8 +66,9 @@ void configure(Factors& factors, Selections& selections,
         factors.template get<irt::model_id>(id) = resolve(pj, targets, f.target).model;
         factors.template get<irt::name_str>(id) = f.id;
         factors.template get<irt::factor_type>(id) = f.type;
-        if (f.type == irt::factor_type::single)
+        if (single_type(f.type))
             factors.template get<irt::single_factor>(id).value = f.values.front();
+        else if (random_type(f.type)) factors.template get<irt::random_factor>(id) = f.random;
         else factors.template get<irt::fixed_factor>(id).values.assign(f.values.begin(), f.values.end());
         if constexpr (std::is_same_v<Factors, irt::simulation_component::factor_t>) {
             factors.template get<irt::tree_node_id>(id) = targets.at(f.target).tree;
@@ -62,7 +92,10 @@ void configure(Factors& factors, Selections& selections,
         selections.template get<irt::model_id>(id) = resolve(pj, targets, s.target).model;
         selections.template get<irt::name_str>(id) = s.id;
         selections.template get<irt::criteria_type>(id) = s.criterion;
-        if (s.id == spec.primary) objective.simple_params.primary = id;
+        if (s.id == spec.primary) {
+            objective.simple_params.primary = id;
+            objective.epsilon_constrained_params.primary = id;
+        }
         if constexpr (std::is_same_v<Selections, irt::simulation_component::selection_t>) {
             selections.template get<irt::tree_node_id>(id) = targets.at(s.target).tree;
             auto& path = selections.template get<irt::unique_id_path>(id);
@@ -75,7 +108,18 @@ void configure(Factors& factors, Selections& selections,
             } while (true);
         }
     }
-    require(selections.exists(objective.simple_params.primary), "Invalid primary selection");
+    if (spec.method != irt::optimization_method::weighted_sum)
+        require(selections.exists(objective.simple_params.primary), "Invalid primary selection");
+    // irt::vector::assign dereferences first even for an empty range. clear()
+    // already emptied inactive parameters; only pass validated nonempty arrays.
+    if(spec.method == irt::optimization_method::weighted_sum) {
+        objective.weighted_sum_params.weights.assign(spec.weights.begin(), spec.weights.end());
+        objective.weighted_sum_params.types.assign(spec.types.begin(), spec.types.end());
+        objective.weighted_sum_params.norm = spec.norm;
+    } else if(spec.method == irt::optimization_method::epsilon_constrained) {
+        objective.epsilon_constrained_params.epsilons.assign(spec.epsilons.begin(), spec.epsilons.end());
+        objective.epsilon_constrained_params.operations.assign(spec.operations.begin(), spec.operations.end());
+    }
 }
 } // namespace
 
@@ -85,8 +129,24 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
     const auto f = spec.factors.size(), s = spec.selections.size();
     require(f >= 1 && f <= 10 && s >= 1 && f + s >= 3 && f + s <= 12,
             "Native wrapper dimensions require 1<=F<=10, S>=1, 3<=F+S<=12");
-    require(spec.method == irt::optimization_method::simple, "Only simple is supported in Test 7B");
-    require(spec.mode == irt::simulation_wrapper::run_type::complete, "Only complete is supported in Test 7B");
+    require(spec.method == irt::optimization_method::simple ||
+            spec.method == irt::optimization_method::weighted_sum ||
+            spec.method == irt::optimization_method::epsilon_constrained, "Invalid optimization method");
+    if (spec.method == irt::optimization_method::weighted_sum) {
+        require(spec.weights.size() == s && spec.types.size() == s, "Weighted-sum arrays must match selections");
+        require(spec.norm == irt::norm_type::min_max || spec.norm == irt::norm_type::z_score, "Invalid norm");
+        for (double v : spec.weights) require(std::isfinite(v), "Non-finite weight");
+        for (auto t : spec.types) require(t == irt::optimization_type::maximize || t == irt::optimization_type::minimize, "Invalid criterion direction");
+    }
+    if (spec.method == irt::optimization_method::epsilon_constrained) {
+        require(spec.epsilons.size() == s && spec.operations.size() == s, "Epsilon arrays must match all selections, including primary");
+        for (double v : spec.epsilons) require(std::isfinite(v), "Non-finite epsilon");
+        for (auto op : spec.operations) require(op == irt::operation_type::equal || op == irt::operation_type::not_equal ||
+            op == irt::operation_type::greater_equal || op == irt::operation_type::less_equal, "Invalid constraint operation");
+    }
+    using R=irt::simulation_wrapper::run_type;
+    require(spec.mode == R::complete || spec.mode == R::bag || spec.mode == R::time ||
+        spec.mode == R::until || spec.mode == R::during, "Invalid execution mode");
     require(spec.direction == irt::optimization_type::maximize ||
             spec.direction == irt::optimization_type::minimize, "Invalid optimization direction");
     require(std::isfinite(pj.sim.limits.begin()) && std::isfinite(pj.sim.limits.end()) &&
@@ -106,13 +166,16 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
         require(type == irt::dynamics_type::constant || type == irt::dynamics_type::qss1_integrator ||
                 type == irt::dynamics_type::qss2_integrator || type == irt::dynamics_type::qss3_integrator,
                 "Unsupported factor parameter target");
-        require(factor.type == irt::factor_type::single || factor.type == irt::factor_type::fixed,
-                "Only single and fixed factors are supported in Test 7B");
-        require(!factor.values.empty() && (factor.type != irt::factor_type::single || factor.values.size() == 1),
-                "Invalid factor cardinality");
-        for (double value : factor.values) require(std::isfinite(value), "Non-finite factor value");
-        require(count <= cap / factor.values.size(), "Scenario cardinality exceeds budget or native capacity");
-        count *= factor.values.size();
+        require(single_type(factor.type) || random_type(factor.type) || factor.type == irt::factor_type::fixed ||
+            factor.type == irt::factor_type::fixed_add || factor.type == irt::factor_type::fixed_mult, "Invalid factor type");
+        if (random_type(factor.type)) validate_random_factor(factor.random);
+        else {
+            require(!factor.values.empty() && (!single_type(factor.type) || factor.values.size() == 1), "Invalid factor cardinality");
+            for (double value : factor.values) require(std::isfinite(value), "Non-finite factor value");
+        }
+        const auto n=factor_cardinality(factor);
+        require(count <= cap / n, "Scenario cardinality exceeds budget or native capacity");
+        count *= n;
     }
     names.clear();
     for (const auto& selection : spec.selections) {
@@ -127,7 +190,7 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
                 selection.criterion == irt::criteria_type::min_last || selection.criterion == irt::criteria_type::max_last,
                 "Invalid native criterion");
     }
-    require(names.contains(spec.primary), "Unknown primary selection");
+    require(spec.method == irt::optimization_method::weighted_sum || names.contains(spec.primary), "Unknown primary selection");
     // Nested wrappers need a separate depth/recursive resource audit.
     require(pj.sim.sims.empty(), "Nested wrapper prototypes are outside Test 7B");
     return count;
@@ -166,8 +229,11 @@ copy_audit audit_copy(const irt::embedded_simulation& resource, const descriptor
         if (target != desc.targets.at(f.target).model || !resource.sim.models.exists(target) ||
             resource.factors.get<irt::name_str>(id).sv() != f.id ||
             resource.factors.get<irt::factor_type>(id) != f.type) return ret;
-        if (f.type == irt::factor_type::single) {
+        if (single_type(f.type)) {
             if (resource.factors.get<irt::single_factor>(id).value != f.values.front()) return ret;
+        } else if (random_type(f.type)) {
+            const auto& r=resource.factors.get<irt::random_factor>(id);
+            if(r.count!=f.random.count || r.dist!=f.random.dist || r.reals!=f.random.reals || r.ints!=f.random.ints) return ret;
         } else {
             const auto& values = resource.factors.get<irt::fixed_factor>(id).values;
             if (values.size() != f.values.size() || !std::equal(values.begin(), values.end(), f.values.begin())) return ret;
@@ -179,10 +245,12 @@ copy_audit audit_copy(const irt::embedded_simulation& resource, const descriptor
         if (irt::get_index(id) != i - 1 || resource.selections.get<irt::model_id>(id) != desc.targets.at(s.target).model ||
             resource.selections.get<irt::criteria_type>(id) != s.criterion ||
             resource.selections.get<irt::name_str>(id).sv() != s.id) return ret;
-        if (s.id == desc.spec.primary && resource.objective.simple_params.primary != id) return ret;
+        if (s.id == desc.spec.primary && desc.spec.method == irt::optimization_method::simple && resource.objective.simple_params.primary != id) return ret;
+        if (s.id == desc.spec.primary && desc.spec.method == irt::optimization_method::epsilon_constrained && resource.objective.epsilon_constrained_params.primary != id) return ret;
     }
     ret.complete = resource.sim.models.size() == desc.targets.size() &&
-      resource.selections.exists(resource.objective.simple_params.primary) &&
+      (desc.spec.method == irt::optimization_method::weighted_sum || resource.selections.exists(
+          desc.spec.method == irt::optimization_method::simple ? resource.objective.simple_params.primary : resource.objective.epsilon_constrained_params.primary)) &&
       resource.objective.method == desc.spec.method && resource.objective.type == desc.spec.direction;
     return ret;
 }
@@ -224,6 +292,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         require(resource.sim.limits.begin() == source.pj.sim.limits.begin() &&
                 resource.sim.limits.end() == source.pj.sim.limits.end(), "copy_to changed prototype horizon");
         configure(resource.factors, resource.selections, resource.objective, source.pj, desc.targets, occurrence);
+        if(occurrence.seed) resource.seed=*occurrence.seed;
         for (const auto& [path, target] : desc.targets)
             require(resource.sim.models.exists(target.model) &&
                     resource.sim.models.get(target.model).type == source.pj.sim.models.get(target.model).type,
@@ -264,7 +333,10 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
         require(irt::get_index(id) == slot++, "Sparse selection ids");
         require(resource.sim.models.exists(resource.selections.get<irt::model_id>(id)), "Foreign selection model id");
     }
-    require(resource.selections.exists(resource.objective.simple_params.primary), "Invalid runtime primary");
+    require(resource.objective.method == spec.method && resource.objective.type == spec.direction, "Runtime objective mismatch");
+    if (spec.method != irt::optimization_method::weighted_sum)
+        require(resource.selections.exists(spec.method == irt::optimization_method::simple ?
+            resource.objective.simple_params.primary : resource.objective.epsilon_constrained_params.primary), "Invalid runtime primary");
 }
 
 void release_unreferenced_resources(irt::simulation& parent)

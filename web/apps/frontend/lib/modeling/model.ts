@@ -34,6 +34,12 @@ const v3EditorSchema = structuredClone(requestV3Schema);
 v3EditorSchema.properties.model.properties.components.minItems = 0;
 v3EditorSchema.definitions.experiment.properties.factors.minItems = 0;
 v3EditorSchema.definitions.experiment.properties.selections.minItems = 0;
+for (const arm of v3EditorSchema.definitions.experiment.properties.objective.oneOf) {
+  for(const key of ['weights','types','epsilons','operations'] as const) {
+    const property=arm.properties[key];
+    if(property) property.minItems=0;
+  }
+}
 const checkEditorV3 = new Ajv({ strict: false, strictNumbers: true }).compile<RunRequest>(v3EditorSchema);
 export function validateEditorDocument(input: unknown): asserts input is RunRequest {
   const version = (input as RunRequest | null)?.schemaVersion;

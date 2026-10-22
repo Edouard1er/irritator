@@ -6,6 +6,7 @@
 #include <limits>
 
 namespace wrapper_test {
+void advanced_case(const std::string&);
 namespace {
 void near(double value, double expected, const std::string& context)
 {
@@ -188,9 +189,8 @@ void invalid_cases()
     reject("epsilon method", [](auto& p) { p.method = irt::optimization_method::epsilon_constrained; });
     reject("invalid method", [](auto& p) { p.method = static_cast<irt::optimization_method>(255); });
     reject("invalid direction", [](auto& p) { p.direction = static_cast<irt::optimization_type>(255); });
-    reject("bag mode", [](auto& p) { p.mode = irt::simulation_wrapper::run_type::bag; });
     reject("invalid mode", [](auto& p) { p.mode = static_cast<irt::simulation_wrapper::run_type>(255); });
-    reject("random factor", [](auto& p) { p.factors[0].type = irt::factor_type::random; });
+    reject("random count zero", [](auto& p) { p.factors[0].type = irt::factor_type::random; p.factors[0].random.count = 0; });
     reject("single cardinality", [](auto& p) { p.factors[0].type = irt::factor_type::single; });
     reject("scenario budget", [](auto& p) { p.max_scenarios = 2; });
     reject("zero budget", [](auto& p) { p.max_scenarios = 0; });
@@ -276,6 +276,6 @@ void run_case(const std::string& name)
             require(now.first - now.second == balance, "Native allocations leaked after occurrence destruction");
             std::cout << "MEMORY cycle=" << cycle << " outstanding=" << now.first - now.second << '\n';
         }
-    } else throw std::runtime_error("Unknown test case: " + name);
+    } else advanced_case(name);
 }
 } // namespace wrapper_test
