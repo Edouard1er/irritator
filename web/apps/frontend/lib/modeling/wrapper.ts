@@ -2,7 +2,7 @@ import { catalog, factorCardinality, type Component, type FactorPlan, type RunRe
 import type { Catalog, ComponentSpec } from './model';
 
 export const wrapperPaletteSpec: ComponentSpec = {
-  type: 'simulation_wrapper', name: 'Simulation prospective', parameters: {}, required: [],
+  type: 'simulation_wrapper', name: 'Simulation imbriquée', parameters: {}, required: [],
   inputs: [{ port: 0, name: 'init' }, { port: 1, name: 'run' }], outputs: [],
 };
 export const scenarioCount = (e: { factors: FactorPlan[] }): number => e.factors.reduce((n, f) => n * factorCardinality(f), 1);

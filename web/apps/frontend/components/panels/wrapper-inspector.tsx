@@ -31,7 +31,7 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
   try { validateRequest(request); } catch (err) { validation = errorText(err); }
   const idError = (id: string, items: { id: string }[], previous: string) => !/^[A-Za-z0-9_-]{1,31}$/.test(id) ? 'Identifiant : 1 à 31 lettres, chiffres, tirets ou soulignés.' : items.some(x => x.id === id && x.id !== previous) ? 'Cet identifiant existe déjà.' : undefined;
   return <aside className="inspector panel wrapper-inspector" aria-label="Inspecteur expérimental">
-    <div className="panel-heading"><span>SIMULATION PROSPECTIVE</span></div>
+    <div className="panel-heading"><span>SIMULATION IMBRIQUEE</span></div>
     <div className="inspector-title"><span className="eyebrow">EXPÉRIMENTAL · JSON v3</span><h2>{component.id}</h2><code>simulation_wrapper</code></div>
     <CommitText label="Identifiant du composant" value={component.id} onCommit={onRename} />
     {error && <p className="inline-error" role="alert">{error}</p>}

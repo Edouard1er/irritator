@@ -192,7 +192,7 @@ $env:IRRITATOR_BROWSER_SCREENSHOTS='../../../build-web-test6/logs/screenshots-re
 npm.cmd run test:e2e
 ```
 
-## Simulation prospective — Test 7E
+## Simulation imbriquée — Test 7E
 
 Le catalogue natif reste à treize composants. La catégorie **Expérimental · JSON v3**
 propose `simulation_wrapper` après vérification exacte des capacités annoncées par

@@ -240,7 +240,7 @@ function Editor() {
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable nodeColor="#b6cdca" maskColor="rgba(247,249,250,.7)" />
         </ReactFlow>
-        {!nodes.length && <div className="canvas-empty"><span className="canvas-empty-symbol"><Network size={32} /></span><span className="eyebrow">VOTRE ESPACE DE MODÉLISATION</span><h1>De l’idée à la simulation.</h1><p>Ajoutez des composants, reliez leurs ports<br />et explorez la dynamique de votre modèle.</p><span className="empty-hint">← Choisissez un composant dans la bibliothèque</span></div>}
+        {!nodes.length && <div className="canvas-empty"><span className="canvas-empty-symbol"><Network size={32} /></span><span className="eyebrow">VOTRE ESPACE DE MODÉLISATION</span><p>Ajoutez des composants, reliez leurs ports<br />et explorez la dynamique de votre modèle.</p><span className="empty-hint">← Choisissez un composant dans la bibliothèque</span></div>}
         <span className="canvas-label">{state.request.model.id} <ChevronDown size={11} /></span>
       </main>
       {selectedComponent?.experiment ? <WrapperInspector key={`${scopeId}-${selectedComponent.id}`} component={selectedComponent} request={document.request} spec={selectedSpec!}
