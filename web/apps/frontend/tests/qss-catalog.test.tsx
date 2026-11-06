@@ -16,9 +16,9 @@ const types = [
   ['qss3_power', 1, ['n']], ['qss3_inverse', 1, []], ['qss3_square', 1, []], ['qss3_sqrt', 1, []],
 ] as const;
 describe('Catalogue QSS3 du Test 6.1', () => {
-  it('affiche les treize types reçus et recherche les sept types QSS3', () => {
+  it('affiche les types reçus et recherche les sept types QSS3', () => {
     render(<ComponentLibrary catalog={catalog} onAdd={vi.fn()} onRetry={vi.fn()} />);
-    expect(screen.getAllByRole('button', { name: /^Ajouter / })).toHaveLength(13);
+    expect(screen.getAllByRole('button', { name: /^Ajouter / })).toHaveLength(19);
     fireEvent.change(screen.getByLabelText('Rechercher un composant'), { target: { value: 'qss3' } });
     expect(screen.getAllByRole('button', { name: /^Ajouter / })).toHaveLength(7);
     for (const [type] of types) expect(screen.getByRole('button', { name: `Ajouter ${type}` })).toBeVisible();

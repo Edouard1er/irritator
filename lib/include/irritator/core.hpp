@@ -1154,11 +1154,16 @@ enum class dynamics_type : u8 {
     hsm_wrapper,
     simulation_wrapper,
     zero_order_hold,
+    event_tag,
+    value_memory,
+    event_operator,
+    candidate_filter,
+    candidate_select,
 };
 
 constexpr int dynamics_type_last() noexcept
 {
-    return static_cast<int>(dynamics_type::zero_order_hold);
+    return static_cast<int>(dynamics_type::candidate_select);
 }
 
 constexpr int dynamics_type_size() noexcept { return dynamics_type_last() + 1; }
@@ -1897,6 +1902,8 @@ using observers_type = id_data_array<observer,
 ///
 /// This class is used to dump a snapshot of the simulation keeping all
 /// identifiants.
+#include <irritator/event.hpp>
+
 struct simulation_snapshot {
 
     simulation_snapshot() noexcept = default;
@@ -1911,6 +1918,7 @@ struct simulation_snapshot {
     data_array<block_node, block_node_id>                    nodes;
     data_array<output_port, output_port_id>                  output_ports;
     data_array<ring_buffer<dated_message>, dated_message_id> dated_messages;
+    table<model_id, event_state> event_states;
     scheduller<allocator<new_delete_memory_resource>>        sched;
     time                                                     t{};
 };
@@ -2083,6 +2091,7 @@ public:
     data_array<block_node, block_node_id>                    nodes;
     data_array<output_port, output_port_id>                  output_ports;
     data_array<ring_buffer<dated_message>, dated_message_id> dated_messages;
+    table<model_id, event_state> event_states;
 
     scheduller<allocator<new_delete_memory_resource>> sched;
 
@@ -2430,6 +2439,9 @@ struct embedded_simulation {
     struct response {
         time            due;
         vector<message> values;
+        vector<event_emission> scenarios;
+        sz next_scenario = 0;
+        bool selected_sent = false;
     };
     vector<response> pending_responses;
 
@@ -8045,7 +8057,7 @@ struct simulation_wrapper {
 
     /** y[0..] are used to send the public parameter of the embedded
      * simulation according to the selection criteria. */
-    small_vector<output_port_id, 12> y;
+    small_vector<output_port_id, 32> y;
 
     /** Identifier of the source of the simulation to run. This
      * identifier references simulation in simulation::sims member. */
@@ -8090,6 +8102,8 @@ struct simulation_wrapper {
 
     // lambda precedes transition, also when external inputs are confluent.
     bool response_emitted = false;
+    bool scenario_results = false;
+    u64 campaign = 0;
 
     simulation_wrapper() noexcept = default;
 
@@ -8666,6 +8680,7 @@ constexpr sz max_size_in_bytes() noexcept
       sizeof(time_func), sizeof(accumulator_2), sizeof(logical_and_2),
       sizeof(logical_and_3), sizeof(logical_or_2), sizeof(logical_or_3),
       sizeof(logical_invert), sizeof(hsm_wrapper), sizeof(simulation_wrapper),
+      sizeof(event_tag), sizeof(value_memory), sizeof(event_operator), sizeof(candidate_filter), sizeof(candidate_select),
       sizeof(qss1_sample_hold), sizeof(qss2_sample_hold),
       sizeof(qss3_sample_hold), sizeof(zero_order_hold), sizeof(qss1_quantizer),
       sizeof(qss2_quantizer), sizeof(qss3_quantizer),
@@ -8690,7 +8705,12 @@ constexpr sz max_size_in_bytes() noexcept
 }
 
 template<typename Dynamics>
-concept dynamics = std::is_same_v<Dynamics, qss1_integrator> or
+concept dynamics = std::is_same_v<Dynamics, event_tag> or
+                   std::is_same_v<Dynamics, value_memory> or
+                   std::is_same_v<Dynamics, event_operator> or
+                   std::is_same_v<Dynamics, candidate_filter> or
+                   std::is_same_v<Dynamics, candidate_select> or
+                   std::is_same_v<Dynamics, qss1_integrator> or
                    std::is_same_v<Dynamics, qss1_multiplier> or
                    std::is_same_v<Dynamics, qss1_cross> or
                    std::is_same_v<Dynamics, qss1_max_hold> or
@@ -9025,6 +9045,21 @@ static constexpr dynamics_type dynamics_typeof() noexcept
 
     if constexpr (std::is_same_v<Dynamics, hsm_wrapper>)
         return dynamics_type::hsm_wrapper;
+
+    if constexpr (std::is_same_v<Dynamics, event_tag>)
+        return dynamics_type::event_tag;
+
+    if constexpr (std::is_same_v<Dynamics, value_memory>)
+        return dynamics_type::value_memory;
+
+    if constexpr (std::is_same_v<Dynamics, event_operator>)
+        return dynamics_type::event_operator;
+
+    if constexpr (std::is_same_v<Dynamics, candidate_filter>)
+        return dynamics_type::candidate_filter;
+
+    if constexpr (std::is_same_v<Dynamics, candidate_select>)
+        return dynamics_type::candidate_select;
 
     if constexpr (std::is_same_v<Dynamics, simulation_wrapper>)
         return dynamics_type::simulation_wrapper;
@@ -9557,6 +9592,16 @@ constexpr auto dispatch(const model& mdl, Function&& f, Args&&... args) noexcept
                            *reinterpret_cast<const hsm_wrapper*>(&mdl.dyn),
                            std::forward<Args>(args)...);
 
+    case dynamics_type::event_tag:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const event_tag*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::value_memory:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const value_memory*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::event_operator:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const event_operator*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::candidate_filter:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const candidate_filter*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::candidate_select:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const candidate_select*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::simulation_wrapper:
         return std::invoke(
           std::forward<Function>(f),
@@ -10137,6 +10182,16 @@ constexpr auto dispatch(model& mdl, Function&& f, Args&&... args) noexcept
         return f(*reinterpret_cast<hsm_wrapper*>(&mdl.dyn),
                  std::forward<Args>(args)...);
 
+    case dynamics_type::event_tag:
+        return f(*reinterpret_cast<event_tag*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::value_memory:
+        return f(*reinterpret_cast<value_memory*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::event_operator:
+        return f(*reinterpret_cast<event_operator*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::candidate_filter:
+        return f(*reinterpret_cast<candidate_filter*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::candidate_select:
+        return f(*reinterpret_cast<candidate_select*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::simulation_wrapper:
         return f(*reinterpret_cast<simulation_wrapper*>(&mdl.dyn),
                  std::forward<Args>(args)...);
@@ -10510,6 +10565,11 @@ inline bool is_ports_compatible(const dynamics_type mdl_src,
     case dynamics_type::generator:
     case dynamics_type::time_func:
     case dynamics_type::hsm_wrapper:
+    case dynamics_type::event_tag:
+    case dynamics_type::value_memory:
+    case dynamics_type::event_operator:
+    case dynamics_type::candidate_filter:
+    case dynamics_type::candidate_select:
     case dynamics_type::simulation_wrapper:
     case dynamics_type::accumulator_2:
     case dynamics_type::qss1_sample_hold:
@@ -11596,6 +11656,7 @@ inline simulation::simulation(const simulation& other) noexcept
   , nodes(other.nodes)
   , output_ports(other.output_ports)
   , dated_messages(other.dated_messages)
+  , event_states(other.event_states)
   , sched(other.sched)
   , srcs(other.srcs)
   , limits(other.limits)
@@ -11619,6 +11680,7 @@ inline simulation& simulation::operator=(const simulation& other) noexcept
     nodes               = other.nodes;
     output_ports        = other.output_ports;
     dated_messages      = other.dated_messages;
+    event_states        = other.event_states;
     sched               = other.sched;
     srcs                = other.srcs;
     limits              = other.limits;
@@ -11635,6 +11697,7 @@ inline simulation& simulation::operator=(
     nodes          = snap.nodes;
     output_ports   = snap.output_ports;
     dated_messages = snap.dated_messages;
+    event_states = snap.event_states;
     sched          = snap.sched;
     t              = snap.t;
 
@@ -11702,6 +11765,7 @@ inline void simulation::destroy() noexcept
     output_ports.destroy();
 
     dated_messages.destroy();
+    event_states.data.destroy();
     sched.destroy();
     srcs.destroy();
 }
@@ -11729,6 +11793,7 @@ inline void simulation::clean() noexcept
     immediate_observers.clear();
 
     dated_messages.clear();
+    event_states.data.clear();
 
     t = limits.begin();
 }
@@ -11745,6 +11810,7 @@ inline void simulation::clear() noexcept
     nodes.clear();
     output_ports.clear();
     dated_messages.clear();
+    event_states.data.clear();
 }
 
 constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
@@ -11983,6 +12049,8 @@ inline void simulation::deallocate(model_id id) noexcept
 template<typename Dynamics>
 void simulation::do_deallocate(Dynamics& dyn) noexcept
 {
+    if constexpr (requires { Dynamics::kind; })
+        event_states.erase(get_id(dyn));
     if constexpr (has_output_port<Dynamics>) {
         for (const auto y_id : dyn.y) {
             if (auto* y = output_ports.try_to_get(y_id)) {

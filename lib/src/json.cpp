@@ -875,6 +875,15 @@ struct json_dearchiver::impl {
         return true;
     }
 
+    template<event_kind K>
+    bool read_dynamics(const rapidjson::Value& val, event_model_tag<K>, parameter& p) noexcept
+    {
+        static constexpr std::string_view names[] = { "r0", "r1", "r2", "r3", "i0", "i1", "i2", "i3" };
+        return for_members(val, names, [&](auto idx, const auto& v) noexcept {
+            return idx < 4 ? read_real(v, p.reals[idx]) : (read_temp_i64(v) && copy_i64_to(p.integers[idx - 4]));
+        });
+    }
+
     bool read_dynamics(const rapidjson::Value& val,
                        qss_integrator_tag,
                        parameter& p) noexcept
@@ -2104,11 +2113,13 @@ struct json_dearchiver::impl {
         auto_stack a(this, "dynamics simulation wrapper");
 
         static constexpr std::string_view n[] = { "factors", "run-type",
-                                                  "selections", "sim" };
+                                                  "selections", "sim", "scenario-results" };
 
         const auto ret = for_members(
           val, n, [&](auto idx, const auto& value) noexcept {
               switch (idx) {
+              case 4:
+                  return read_real(value, p.reals[0]);
               case 0:
                   return read_temp_i64(value) &&
                          copy_i64_to(
@@ -5840,6 +5851,16 @@ struct json_archiver::impl {
       : self{ self_ }
     {}
 
+    template<typename Writer, event_kind K>
+    void write(Writer& writer, const file_access&, const component_access&, event_model_tag<K>, const component&, const parameter& p) noexcept
+    {
+        static constexpr const char* names[] = { "r0", "r1", "r2", "r3", "i0", "i1", "i2", "i3" };
+        writer.StartObject();
+        for (int i = 0; i < 4; ++i) { writer.Key(names[i]); writer.Double(p.reals[i]); }
+        for (int i = 0; i < 4; ++i) { writer.Key(names[i+4]); writer.Int64(p.integers[i]); }
+        writer.EndObject();
+    }
+
     template<typename Writer>
     void write(Writer& writer,
                const file_access& /*files*/,
@@ -6709,6 +6730,7 @@ struct json_archiver::impl {
         writer.Key("sim");
         writer.StartObject();
 
+        writer.Key("scenario-results"); writer.Double(p.reals[0]);
         const auto  uint_id = p.integers[simulation_wrapper_tag::id];
         const auto  id      = enum_cast<component_id>(uint_id);
         const auto& f       = ids.component_file_paths[id];

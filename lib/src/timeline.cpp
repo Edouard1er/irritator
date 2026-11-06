@@ -13,6 +13,7 @@ simulation_snapshot::simulation_snapshot(const simulation& sim) noexcept
   , nodes{ sim.nodes }
   , output_ports{ sim.output_ports }
   , dated_messages{ sim.dated_messages }
+  , event_states{ sim.event_states }
   , sched{ sim.sched }
   , t{ sim.current_time() }
 {}
@@ -25,6 +26,7 @@ simulation_snapshot& simulation_snapshot::operator=(
     nodes          = sim.nodes;
     output_ports   = sim.output_ports;
     dated_messages = sim.dated_messages;
+    event_states = sim.event_states;
     sched          = sim.sched;
     t              = sim.current_time();
 

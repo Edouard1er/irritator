@@ -5,6 +5,7 @@ set(public_irritator_header
     include/irritator/archiver.hpp
     include/irritator/container.hpp
     include/irritator/core.hpp
+    include/irritator/event.hpp
     include/irritator/dot-parser.hpp
     include/irritator/error.hpp
     include/irritator/ext.hpp
@@ -44,6 +45,7 @@ set(private_irritator_sources
     src/parameter.cpp
     src/project.cpp
     src/project-simulation.cpp
+    src/event.cpp
     src/simulation.cpp
     src/timeline.cpp
     src/thread.cpp

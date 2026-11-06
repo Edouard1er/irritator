@@ -7,7 +7,10 @@ import capabilitiesData from './runner-capabilities.json' with { type: 'json' };
 import { validateWrapperRequest } from './wrapper-v3.js';
 export * from './wrapper-v3.js';
 
-export const catalog = catalogData;
+export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
+export interface ComponentSpec { type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
+export interface Catalog { schemaVersion: number; adapterVersion: string; engineVersion: string; components: ComponentSpec[] }
+export const catalog = catalogData as unknown as Catalog;
 export const runnerCapabilities = capabilitiesData;
 // Both Ajv (draft 7) and RapidJSON (draft 4) support this common subset.
 const { $schema: _dialect, ...schema } = schemaData;
@@ -62,9 +65,9 @@ export function validateGraph(request: RunRequest): void {
     specs.set(c.id, found);
     for (const name of found.required) if (!Object.hasOwn(c.parameters, name)) fail('INVALID_PARAMETER', `Missing parameter: ${name}`);
     for (const [name, value] of Object.entries(c.parameters)) {
-      const bounds = (found.parameters as Record<string, { minimum: number; maximum: number }>)[name];
+      const bounds = (found.parameters as Record<string, { type: string; minimum: number; maximum: number }>)[name];
       if (!Object.hasOwn(found.parameters,name) || !bounds) fail('INVALID_PARAMETER', `Unknown parameter: ${name}`);
-      if (!Number.isFinite(value) || value < bounds!.minimum || value > bounds!.maximum) fail('INVALID_PARAMETER', `Parameter out of bounds: ${name}`);
+      if ((bounds!.type === "integer" && !Number.isInteger(value)) || !Number.isFinite(value) || value < bounds!.minimum || value > bounds!.maximum) fail('INVALID_PARAMETER', `Parameter out of bounds: ${name}`);
     }
   }
   const get = (id: string) => specs.get(id) ?? fail('INVALID_REFERENCE', `Unknown component: ${id}`);
@@ -126,7 +129,7 @@ export function validateHierarchy(r: RunRequest, editing = false): Map<string, {
   const ports = (c: Component, direction: 'inputs' | 'outputs') => {
     if (r.schemaVersion === 3 && c.type === 'simulation_wrapper') {
       const e = c.experiment!;
-      return Array.from({ length: e.factors.length + (direction === 'inputs' ? 2 : e.selections.length) }, (_, port) => ({ port, name: String(port) }));
+      return Array.from({ length: direction === 'inputs' ? e.factors.length + 2 : e.scenarioResults ? 2*(e.factors.length+e.selections.length)+2 : e.factors.length+e.selections.length }, (_, port) => ({ port, name: String(port) }));
     }
     const spec = c.type === 'coupled' ? getDefinition(c) : catalog.components.find(s => s.type === c.type) ?? fail('UNKNOWN_COMPONENT', `Unsupported component: ${c.type}`);
     return spec[direction];
@@ -145,8 +148,8 @@ export function validateHierarchy(r: RunRequest, editing = false): Map<string, {
         const spec = catalog.components.find(s => s.type === c.type) ?? fail('UNKNOWN_COMPONENT', `Unsupported component: ${c.type}`);
         for (const name of spec.required) if (!Object.hasOwn(c.parameters, name)) fail('INVALID_PARAMETER', `Missing parameter: ${name}`);
         for (const [name, value] of Object.entries(c.parameters)) {
-          const b = (spec.parameters as Record<string, { minimum: number; maximum: number }>)[name];
-          if (!Object.hasOwn(spec.parameters, name) || !b || !Number.isFinite(value) || value < b.minimum || value > b.maximum) fail('INVALID_PARAMETER', `Invalid parameter: ${name}`);
+          const b = (spec.parameters as Record<string, { type: string; minimum: number; maximum: number }>)[name];
+          if (!Object.hasOwn(spec.parameters, name) || !b || (b.type === "integer" && !Number.isInteger(value)) || !Number.isFinite(value) || value < b.minimum || value > b.maximum) fail('INVALID_PARAMETER', `Invalid parameter: ${name}`);
         }
       }
     }

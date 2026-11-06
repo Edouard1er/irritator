@@ -701,6 +701,19 @@ static void parameter_init(parameter& param, const hsm_wrapper& dyn) noexcept
     param.reals[hsm_wrapper_tag::timer] = dyn.exec.timer;
 }
 
+template<event_kind K>
+static void model_init(const parameter& param, event_dynamics<K>& dyn) noexcept
+{
+    dyn.reals = param.reals;
+    dyn.integers = param.integers;
+}
+template<event_kind K>
+static void parameter_init(parameter& param, const event_dynamics<K>& dyn) noexcept
+{
+    param.reals = dyn.reals;
+    param.integers = dyn.integers;
+}
+
 static void model_init(const parameter& param, simulation_wrapper& dyn) noexcept
 {
     switch (param.integers[simulation_wrapper_tag::run]) {
@@ -724,6 +737,7 @@ static void model_init(const parameter& param, simulation_wrapper& dyn) noexcept
         break;
     }
 
+    dyn.scenario_results = param.reals[0] != zero;
     dyn.sim_id = enum_cast<embedded_simulation_id>(
       param.integers[simulation_wrapper_tag::id]);
 }
@@ -731,6 +745,7 @@ static void model_init(const parameter& param, simulation_wrapper& dyn) noexcept
 static void parameter_init(parameter&                param,
                            const simulation_wrapper& dyn) noexcept
 {
+    param.reals[0] = dyn.scenario_results ? one : zero;
     param.integers[simulation_wrapper_tag::run] = ordinal(dyn.run);
     param.integers[simulation_wrapper_tag::id]  = ordinal(dyn.sim_id);
 }
@@ -790,6 +805,12 @@ void parameter::init_from(const dynamics_type type) noexcept
     dispatch(
       type,
       []<typename Tag>(const Tag, [[maybe_unused]] parameter& param) noexcept {
+          if constexpr (requires { Tag::kind; }) {
+              const event_dynamics<Tag::kind> defaults;
+              param.reals = defaults.reals;
+              param.integers = defaults.integers;
+          }
+
           if constexpr (std::is_same_v<Tag, qss_integrator_tag>) {
               param.set_integrator(zero, 0.01);
           }

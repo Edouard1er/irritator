@@ -108,9 +108,13 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
 
     static constexpr string_to_type table[] = {
         { "accumulator_2", dynamics_type::accumulator_2 },
+        { "candidate_filter", dynamics_type::candidate_filter },
+        { "candidate_select", dynamics_type::candidate_select },
         { "constant", dynamics_type::constant },
         { "counter", dynamics_type::counter },
         { "dynamic_queue", dynamics_type::dynamic_queue },
+        { "event_operator", dynamics_type::event_operator },
+        { "event_tag", dynamics_type::event_tag },
         { "generator", dynamics_type::generator },
         { "hsm_wrapper", dynamics_type::hsm_wrapper },
         { "logical_and_2", dynamics_type::logical_and_2 },
@@ -251,7 +255,8 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
         { "queue", dynamics_type::queue },
         { "simulation_wrapper", dynamics_type::simulation_wrapper },
         { "time_func", dynamics_type::time_func },
-        { "zero_order_hold", dynamics_type::zero_order_hold }
+        { "value_memory", dynamics_type::value_memory },
+        { "zero_order_hold", dynamics_type::zero_order_hold },
     };
 
     static_assert(std::size(table) == static_cast<sz>(dynamics_type_size()));

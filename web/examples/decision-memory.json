@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "memory-demand",
+    "components": [
+      {
+        "id": "input",
+        "type": "constant",
+        "parameters": {
+          "value": 42,
+          "offset": 0
+        }
+      },
+      {
+        "id": "read",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "memory",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 0,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "received",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "input",
+          "port": 0
+        },
+        "to": {
+          "component": "memory",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "read",
+          "port": 0
+        },
+        "to": {
+          "component": "memory",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "memory",
+          "port": 0
+        },
+        "to": {
+          "component": "received",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "memory",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "received",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

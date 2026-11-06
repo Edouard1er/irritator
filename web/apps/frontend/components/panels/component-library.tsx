@@ -6,7 +6,7 @@ import type { CoupledDefinition } from '@contracts';
 import { wrapperPaletteSpec } from '@/lib/modeling/wrapper';
 
 export function category(spec: ComponentSpec): string {
-  return spec.inputs.length === 0 ? 'Sources' : spec.type.includes('integrator') ? 'Intégrateurs' : 'Opérateurs';
+  return ['event_tag','value_memory','event_operator','candidate_filter','candidate_select','generator'].includes(spec.type) ? 'Contrôle et décision' : spec.inputs.length === 0 ? 'Sources' : spec.type.includes('integrator') ? 'Intégrateurs' : 'Opérateurs';
 }
 export function ComponentLibrary({ catalog, error, onAdd, onRetry, definitions = [], onCreate, onOpen, onInstance, wrapperAvailable = false }: { catalog?: Catalog; error?: string; onAdd: (spec: ComponentSpec) => void; onRetry: () => void; definitions?: CoupledDefinition[]; onCreate?: (id: string, name: string) => string | undefined; onOpen?: (id: string) => void; onInstance?: (id: string) => void; wrapperAvailable?: boolean }) {
   const [query, setQuery] = useState('');
@@ -17,7 +17,7 @@ export function ComponentLibrary({ catalog, error, onAdd, onRetry, definitions =
     <div className="panel-heading"><span>COMPOSANTS</span><span className="count">{catalog?.components.length ?? '—'}</span></div>
     <label className="search"><Search size={15} /><input aria-label="Rechercher un composant" placeholder="Rechercher un composant…" value={query} onChange={e => setQuery(e.target.value)} /><kbd>⌕</kbd></label>
     {error ? <div className="inline-error" role="alert">{error}<button onClick={onRetry}>Réessayer</button></div> : !catalog ? <p className="muted small">Chargement du catalogue…</p> : <>
-      {['Sources', 'Opérateurs', 'Intégrateurs'].map(group => {
+      {['Sources', 'Opérateurs', 'Intégrateurs', 'Contrôle et décision'].map(group => {
         const specs = catalog.components.filter(s => category(s) === group && `${s.name} ${s.type}`.toLowerCase().includes(query.toLowerCase()));
         if (!specs.length) return null;
         return <section className="library-group" key={group}><h3>{group}</h3>{specs.map(spec => <button key={spec.type} className={`library-item ${category(spec).toLowerCase()}`} aria-label={`Ajouter ${spec.type}`}

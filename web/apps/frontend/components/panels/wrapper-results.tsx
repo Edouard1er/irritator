@@ -13,7 +13,7 @@ export function WrapperResults({ result }: { result: RunResultV2 }) {
         {result.resultEvents.slice(page * 100, (page + 1) * 100).map((event, index) => {
           const layout = result.wrappers.find(w => w.component === event.component)!;
           const output = layout.outputs.find(p => p.port === event.port)!;
-          return <tr key={`${page}-${index}`}><td>{event.component}</td><td>{String(event.time)}</td><td>y[{event.port}]</td><td>{output.id} · {output.kind === 'selection' ? 'critère' : 'facteur'}</td><td>{String(event.value[0])}</td><td>[{event.value.join(', ')}]</td><td>{event.bag}</td><td>{layout.scenarioCount}</td></tr>;
+          return <tr key={`${page}-${index}`}><td>{event.component}</td><td>{String(event.time)}</td><td>y[{event.port}]</td><td>{output.id} · {output.kind === 'selection' ? 'critère' : output.kind === 'factor' ? 'facteur' : output.kind}</td><td>{String(event.value[0])}</td><td>[{event.value.join(', ')}]</td><td>{event.bag}</td><td>{layout.scenarioCount}</td></tr>;
         })}
       </tbody></table>
       {result.resultEvents.length > 100 && <div className="pagination"><button disabled={!page} onClick={() => setPage(p => p - 1)}>Précédent</button><span>{page + 1} / {Math.ceil(result.resultEvents.length / 100)}</span><button disabled={(page + 1) * 100 >= result.resultEvents.length} onClick={() => setPage(p => p + 1)}>Suivant</button></div>}

@@ -1,0 +1,429 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "select-candidates",
+    "components": [
+      {
+        "id": "score0",
+        "type": "constant",
+        "parameters": {
+          "value": 5,
+          "offset": 0
+        }
+      },
+      {
+        "id": "scoreTag0",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 20,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "action0",
+        "type": "constant",
+        "parameters": {
+          "value": 200,
+          "offset": 0
+        }
+      },
+      {
+        "id": "actionTag0",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 20,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "score1",
+        "type": "constant",
+        "parameters": {
+          "value": 9,
+          "offset": 0
+        }
+      },
+      {
+        "id": "scoreTag1",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 10,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "action1",
+        "type": "constant",
+        "parameters": {
+          "value": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "actionTag1",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 10,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "score2",
+        "type": "constant",
+        "parameters": {
+          "value": 9,
+          "offset": 0
+        }
+      },
+      {
+        "id": "scoreTag2",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 30,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "action2",
+        "type": "constant",
+        "parameters": {
+          "value": 300,
+          "offset": 0
+        }
+      },
+      {
+        "id": "actionTag2",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 30,
+          "campaign": 0
+        }
+      },
+      {
+        "id": "end",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0
+        }
+      },
+      {
+        "id": "decision0",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "Maximum"
+      },
+      {
+        "id": "received0",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "score0",
+          "port": 0
+        },
+        "to": {
+          "component": "scoreTag0",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "action0",
+          "port": 0
+        },
+        "to": {
+          "component": "actionTag0",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "score1",
+          "port": 0
+        },
+        "to": {
+          "component": "scoreTag1",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "action1",
+          "port": 0
+        },
+        "to": {
+          "component": "actionTag1",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "score2",
+          "port": 0
+        },
+        "to": {
+          "component": "scoreTag2",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "action2",
+          "port": 0
+        },
+        "to": {
+          "component": "actionTag2",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "scoreTag0",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "actionTag0",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "scoreTag1",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "actionTag1",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "scoreTag2",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "actionTag2",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "end",
+          "port": 0
+        },
+        "to": {
+          "component": "decision0",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "decision0",
+          "port": 0
+        },
+        "to": {
+          "component": "received0",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "received0",
+        "samplingInterval": 0.1
+      }
+    ],
+    "definitions": [
+      {
+        "id": "Maximum",
+        "name": "Maximum",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "scores"
+          },
+          {
+            "port": 1,
+            "name": "actions"
+          },
+          {
+            "port": 2,
+            "name": "end"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          }
+        ],
+        "components": [
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 7,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "select",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": -7,
+              "requireAction": 1,
+              "emitFallback": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "condition",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 10,
+              "left": 0,
+              "right": 8,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "select",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "select",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "select",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "condition",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "condition",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 2
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

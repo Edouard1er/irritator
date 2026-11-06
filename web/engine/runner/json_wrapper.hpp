@@ -86,6 +86,7 @@ struct json_wrappers {
         using R=irt::simulation_wrapper::run_type;
         const std::map<std::string,R> modes{{"complete",R::complete},{"bag",R::bag},{"time",R::time},{"until",R::until},{"during",R::during}};
         spec.mode=modes.at(str(e["run"]));
+        spec.scenario_results=e.HasMember("scenarioResults") && e["scenarioResults"].GetBool();
         if(e.HasMember("seed")) {
             std::array<irt::u64,6> seed{};
             for(unsigned i=0;i<6;++i) {
@@ -281,7 +282,7 @@ struct json_wrappers {
             auto& sim=parent->project->sim;
             for(const auto& o:occurrences) bindings.push_back(irt_web::bind_wrapper(sim,parent->models.at(o.path),*parent->access,descriptors.at(o.component),o.plan));
             irt_web::release_unreferenced_resources(sim);
-            std::size_t ports=0; for(const auto& o:occurrences) ports+=o.plan.factors.size()+o.plan.selections.size();
+            std::size_t ports=0; for(const auto& o:occurrences) ports+=o.plan.output_count();
             irt_web::require(sim.grow_models_to(static_cast<int>(sim.models.size()+ports)),"Collector model allocation failed");
             irt_web::require(sim.grow_connections_to(1024),"Collector connection allocation failed");
             // Unconnected native output ports otherwise emit no message at all.
@@ -359,6 +360,12 @@ struct json_wrappers {
             };
             for(const auto& s:o.plan.selections) add(s.id,"selection");
             for(const auto& f:o.plan.factors) add(f.id,"factor");
+            if(o.plan.scenario_results) {
+                add("scenario-status","scenario-status");
+                for(const auto& f:o.plan.factors) add(f.id,"scenario-factor");
+                for(const auto& s:o.plan.selections) add(s.id,"scenario-selection");
+                add("campaign-end","campaign-end");
+            }
             item.AddMember("component",V(o.path.c_str(),a),a).AddMember("inputs",static_cast<unsigned>(o.plan.factors.size()+2),a)
                 .AddMember("outputs",outputs,a).AddMember("scenarioCount",static_cast<unsigned>(scenarios(o.plan)),a)
                 .AddMember("criteriaScale",V(o.plan.method==irt::optimization_method::weighted_sum?"normalized":"raw",a),a);

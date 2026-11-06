@@ -4,8 +4,9 @@ import { validateHierarchy } from '@contracts';
 import { componentSpec, validateDependencies } from './wrapper';
 import type { catalog } from '@contracts';
 
-export type Catalog = typeof catalog;
-export type ComponentSpec = Catalog['components'][number];
+export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
+export interface ComponentSpec { type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
+export interface Catalog { schemaVersion: number; adapterVersion: string; engineVersion: string; components: ComponentSpec[] }
 export type Position = { x: number; y: number };
 export type Viewport = Position & { zoom: number };
 export interface EditorState {
@@ -126,8 +127,9 @@ export function defaultParameters(spec: ComponentSpec): Record<string, number> {
     return [name, Math.min(bounds.maximum, Math.max(bounds.minimum, initial))];
   }));
 }
-export function parameterError(value: number, bounds: { minimum: number; maximum: number }): string | undefined {
+export function parameterError(value: number, bounds: { minimum: number; maximum: number; type?: string }): string | undefined {
   if (!Number.isFinite(value)) return 'Saisir un nombre fini.';
+  if (bounds.type === 'integer' && !Number.isInteger(value)) return 'Saisir un entier.';
   if (value < bounds.minimum || value > bounds.maximum) return `Valeur attendue entre ${bounds.minimum} et ${bounds.maximum}.`;
 }
 export function fingerprint(request: RunRequest): string { return JSON.stringify(request); }

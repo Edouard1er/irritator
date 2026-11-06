@@ -2,7 +2,9 @@
   "protocolVersion": 1,
   "requestVersions": [1, 2, 3],
   "resultVersions": { "1": 1, "2": 1, "3": 2 },
+  "eventComponents": ["event_tag", "value_memory", "event_operator", "candidate_filter", "candidate_select"],
   "wrapper": {
+    "scenarioResults": "raw-keyed-frames-zero-time-fifo",
     "implementation": "native-wrapper-7F",
     "runModes": ["complete", "bag", "time", "until", "during"],
     "factorTypes": ["single", "single-add", "single-mult", "fixed", "fixed-add", "fixed-mult", "random", "random-add", "random-mult"],

@@ -62,6 +62,12 @@ using constructor = irt::model& (*)(irt::simulation&);
 struct atomic_type { constructor make; irt::dynamics_type dynamics; };
 template<class T> constexpr atomic_type atomic() { return {allocate<T>,irt::dynamics_typeof<T>()}; }
 const std::map<std::string,atomic_type> registry{
+     {"generator",atomic<irt::generator>()},
+ {"event_tag",atomic<irt::event_tag>()},
+ {"value_memory",atomic<irt::value_memory>()},
+ {"event_operator",atomic<irt::event_operator>()},
+ {"candidate_filter",atomic<irt::candidate_filter>()},
+ {"candidate_select",atomic<irt::candidate_select>()},
     {"constant",atomic<irt::constant>()}, {"qss1_sum_2",atomic<irt::qss1_sum_2>()},
     {"qss1_sum_3",atomic<irt::qss1_sum_3>()}, {"qss1_integrator",atomic<irt::qss1_integrator>()},
     {"qss3_integrator",atomic<irt::qss3_integrator>()}, {"qss2_integrator",atomic<irt::qss2_integrator>()},
@@ -72,7 +78,14 @@ const std::map<std::string,atomic_type> registry{
 };
 // Flat and coupled models use exactly the same native parameter setters.
 void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
-    if(type=="constant") target.set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
+    if (registry.contains(type)) target.init_from(registry.at(type).dynamics);
+    if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); }
+    else if(type=="value_memory") { target.reals[0]=p["initial"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["emitOnWrite"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="event_operator") { target.reals[0]=p["left"].GetDouble(); target.reals[1]=p["right"].GetDouble(); target.reals[2]=p["epsilon"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["automatic"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="candidate_filter") { target.reals[0]=p["defaultAction"].GetDouble(); target.reals[1]=p["defaultCondition"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="candidate_select") { target.reals[0]=p["fallback"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["direction"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["requireAction"].GetDouble()); if(p.HasMember("emitFallback")) target.integers[2]=static_cast<irt::i64>(p["emitFallback"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="generator") { target.set_generator_ta(p["period"].GetDouble()); target.reals[1]=p["value"].GetDouble(); }
+    else if(type=="constant") target.set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
     else if(type=="qss1_integrator" || type=="qss2_integrator" || type=="qss3_integrator") target.set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
     else if(type=="qss3_wsum_2") target.set_wsum2(p["coeff-0"].GetDouble(),p["coeff-1"].GetDouble());
     else if(type=="qss3_power") target.set_power(p["n"].GetDouble());
@@ -126,7 +139,7 @@ D execute(const D& doc,const D& catalog) {
             if(!desc["parameters"].HasMember(p->name)) fail("INVALID_PARAMETER","Unknown parameter: "+str(p->name));
             const auto& bounds=desc["parameters"][p->name];
             double value=p->value.GetDouble();
-            if(!std::isfinite(value) || value<bounds["minimum"].GetDouble() || value>bounds["maximum"].GetDouble()) fail("INVALID_PARAMETER","Parameter out of bounds: "+str(p->name));
+            if((str(bounds["type"])=="integer" && std::floor(value)!=value) || !std::isfinite(value) || value<bounds["minimum"].GetDouble() || value>bounds["maximum"].GetDouble()) fail("INVALID_PARAMETER","Parameter out of bounds: "+str(p->name));
         }
     }
     auto find=[&](const V& id)->const V& {

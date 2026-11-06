@@ -46,6 +46,7 @@ export type WrapperObjective = { type: OptimizationType } & (
   { method: 'weighted-sum'; primary?: string; weights: number[]; types: OptimizationType[]; norm: 'min-max' | 'z-score' } |
   { method: 'epsilon-constrained'; primary: string; epsilons: number[]; operations: ConstraintOperation[] });
 export interface WrapperExperiment {
+  scenarioResults?: boolean;
   definition: string; simulation: { start: number; end: number }; run: 'complete' | 'bag' | 'time' | 'until' | 'during';
   seed?: WrapperSeed;
   factors: WrapperFactor[]; selections: WrapperSelection[];
@@ -55,7 +56,12 @@ export interface WrapperExperiment {
 export interface ExperimentOverride { target: string; factors: FactorPlan[] }
 export interface WrapperOccurrence { component: string; experiment: WrapperExperiment }
 export interface WrapperEvent { component: string; time: number; port: number; bag: number; value: [number, number, number] }
-export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; criteriaScale?: 'raw' | 'normalized'; outputs: { port: number; kind: 'selection' | 'factor'; id: string }[] }
+export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; criteriaScale?: 'raw' | 'normalized'; outputs: { port: number; kind: 'selection' | 'factor' | 'scenario-status' | 'scenario-factor' | 'scenario-selection' | 'campaign-end'; id: string }[] }
+export function wrapperOutputs(e: WrapperExperiment): WrapperLayout['outputs'] {
+  const out: Omit<WrapperLayout['outputs'][number], 'port'>[] = [...e.selections.map(s => ({ kind: 'selection' as const, id: s.id })), ...e.factors.map(f => ({ kind: 'factor' as const, id: f.id }))];
+  if (e.scenarioResults) out.push({ kind: 'scenario-status', id: 'scenario-status' }, ...e.factors.map(f => ({ kind: 'scenario-factor' as const, id: f.id })), ...e.selections.map(s => ({ kind: 'scenario-selection' as const, id: s.id })), { kind: 'campaign-end', id: 'campaign-end' });
+  return out.map((p, port) => ({ port, ...p }));
+}
 export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[] }
 const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
 type Scope = Pick<CoupledDefinition, 'components' | 'connections'>;
@@ -201,7 +207,7 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
   const layouts = new Map<string, number>();
   for (let i = 0; i < expected.length; ++i) {
     const o = expected[i]!, w = r.wrappers[i], e = o.experiment;
-    const ports = [...e.selections.map(s => ({ kind: 'selection', id: s.id })), ...e.factors.map(f => ({ kind: 'factor', id: f.id }))].map((p, port) => ({ port, ...p }));
+    const ports = wrapperOutputs(e);
     if (!w || w.component !== o.component || w.inputs !== e.factors.length + 2 || w.scenarioCount !== cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios) || !Array.isArray(w.outputs) || w.outputs.length !== ports.length || w.outputs.some((p, j) => !p || p.port !== ports[j]!.port || p.kind !== ports[j]!.kind || p.id !== ports[j]!.id)) return bad();
     const scale=e.objective.method==='weighted-sum'?'normalized':'raw';
     if((w.criteriaScale!==undefined || scale==='normalized') && w.criteriaScale!==scale) return bad();
@@ -210,11 +216,35 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
   if (r.resultEvents.length > (request.limits?.maxResultEvents ?? wrapperCaps.maxResultEvents)) return bad();
   let previousBag = 0, previousTime = -Infinity;
   const seen = new Set<string>();
+  const campaigns = new Map<string, { fields: Set<string>; status: Map<number, number>; ended: boolean }>();
   for (const event of r.resultEvents) {
     if (!event || !layouts.has(event.component) || !Number.isInteger(event.port) || event.port < 0 || event.port >= layouts.get(event.component)! || !Number.isSafeInteger(event.bag) || event.bag < 1 || event.bag > r.simulation.runCalls || event.bag < previousBag || !Number.isFinite(event.time) || event.time < request.simulation.start || event.time >= request.simulation.end || event.time < previousTime || !Array.isArray(event.value) || event.value.length !== 3 || event.value.some(v => !Number.isFinite(v))) return bad();
     const key = JSON.stringify([event.component, event.port, event.bag]);
     if (seen.has(key)) return bad();
     seen.add(key); previousBag = event.bag; previousTime = event.time;
+    const layout = r.wrappers.find(w => w.component === event.component)!;
+    const kind = layout.outputs[event.port]!.kind;
+    if (kind.startsWith('scenario-') || kind === 'campaign-end') {
+      const [value, candidate, campaign] = event.value;
+      if (!Number.isSafeInteger(campaign) || campaign < 1) return bad();
+      const campaignKey = JSON.stringify([event.component, campaign]);
+      const state = campaigns.get(campaignKey) ?? { fields: new Set<string>(), status: new Map<number, number>(), ended: false };
+      campaigns.set(campaignKey, state);
+      if (state.ended) return bad();
+      if (kind === 'campaign-end') {
+        if (!Number.isSafeInteger(value) || value < 0 || value > layout.scenarioCount || candidate !== layout.scenarioCount || state.status.size !== layout.scenarioCount || [...state.status.values()].filter(v => v === 1).length !== value) return bad();
+        for (const [id, valid] of state.status) for (const port of layout.outputs.filter(p => p.kind === 'scenario-factor' || p.kind === 'scenario-selection'))
+          if (state.fields.has(`${port.port}:${id}`) !== (valid === 1)) return bad();
+        state.ended = true;
+      } else {
+        if (!Number.isSafeInteger(candidate) || candidate < 0 || candidate >= layout.scenarioCount) return bad();
+        const field = `${event.port}:${candidate}`;
+        if (state.fields.has(field)) return bad(); state.fields.add(field);
+        if (kind === 'scenario-status') {
+          if (value !== 0 && value !== 1) return bad(); state.status.set(candidate, value);
+        }
+      }
+    }
   }
   return r;
 }

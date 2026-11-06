@@ -1,0 +1,381 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "prospective-external-decision",
+    "definitions": [
+      {
+        "id": "Prospectif",
+        "name": "Integrale prospective",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "u",
+            "type": "constant",
+            "parameters": {
+              "value": 0,
+              "offset": 0
+            }
+          },
+          {
+            "id": "X",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 1,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "u",
+              "port": 0
+            },
+            "to": {
+              "component": "X",
+              "port": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "External",
+        "name": "External",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "scores"
+          },
+          {
+            "port": 1,
+            "name": "actions"
+          },
+          {
+            "port": 2,
+            "name": "end"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          }
+        ],
+        "components": [
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 3,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "select",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": -7,
+              "requireAction": 1,
+              "emitFallback": 1,
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "select",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "select",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "select",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "decision",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Prospectif",
+          "simulation": {
+            "start": 0,
+            "end": 2
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "rate",
+              "name": "Debit",
+              "target": "u",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                -1,
+                0,
+                1
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "terminal",
+              "target": "X",
+              "criteria": "max-last"
+            },
+            {
+              "id": "minimum",
+              "target": "X",
+              "criteria": "min"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "terminal"
+          },
+          "scenarioResults": true
+        }
+      },
+      {
+        "id": "terminal",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "minimum",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "rate",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "score",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 3,
+          "left": 0,
+          "right": -1,
+          "epsilon": 0,
+          "required": 1,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "external",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "External"
+      },
+      {
+        "id": "action",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "decision",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 0
+        },
+        "to": {
+          "component": "terminal",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 1
+        },
+        "to": {
+          "component": "minimum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 2
+        },
+        "to": {
+          "component": "rate",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 5
+        },
+        "to": {
+          "component": "score",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 7
+        },
+        "to": {
+          "component": "score",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "score",
+          "port": 0
+        },
+        "to": {
+          "component": "external",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 4
+        },
+        "to": {
+          "component": "external",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "score",
+          "port": 2
+        },
+        "to": {
+          "component": "external",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 0
+        },
+        "to": {
+          "component": "action",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "terminal",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "minimum",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "rate",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "action",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

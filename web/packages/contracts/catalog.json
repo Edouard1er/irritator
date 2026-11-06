@@ -213,53 +213,599 @@
       "name": "QSS3 multiplier",
       "parameters": {},
       "required": [],
-      "inputs": [{ "port": 0, "name": "x0" }, { "port": 1, "name": "x1" }],
-      "outputs": [{ "port": 0, "name": "product" }]
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x0"
+        },
+        {
+          "port": 1,
+          "name": "x1"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "product"
+        }
+      ]
     },
     {
       "type": "qss3_wsum_2",
       "name": "QSS3 weighted sum (2)",
       "parameters": {
-        "coeff-0": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 },
-        "coeff-1": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 }
+        "coeff-0": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 1
+        },
+        "coeff-1": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 1
+        }
       },
-      "required": ["coeff-0", "coeff-1"],
-      "inputs": [{ "port": 0, "name": "x0" }, { "port": 1, "name": "x1" }],
-      "outputs": [{ "port": 0, "name": "sum" }]
+      "required": [
+        "coeff-0",
+        "coeff-1"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x0"
+        },
+        {
+          "port": 1,
+          "name": "x1"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "sum"
+        }
+      ]
     },
     {
       "type": "qss3_power",
       "name": "QSS3 power",
       "parameters": {
-        "n": { "type": "number", "minimum": -1000000000000, "maximum": 1000000000000, "default": 1 }
+        "n": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 1
+        }
       },
-      "required": ["n"],
-      "inputs": [{ "port": 0, "name": "x" }],
-      "outputs": [{ "port": 0, "name": "power" }]
+      "required": [
+        "n"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "power"
+        }
+      ]
     },
     {
       "type": "qss3_inverse",
       "name": "QSS3 inverse",
       "parameters": {},
       "required": [],
-      "inputs": [{ "port": 0, "name": "x" }],
-      "outputs": [{ "port": 0, "name": "inverse" }]
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "inverse"
+        }
+      ]
     },
     {
       "type": "qss3_square",
       "name": "QSS3 square",
       "parameters": {},
       "required": [],
-      "inputs": [{ "port": 0, "name": "x" }],
-      "outputs": [{ "port": 0, "name": "square" }]
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "square"
+        }
+      ]
     },
     {
       "type": "qss3_sqrt",
       "name": "QSS3 square root",
       "parameters": {},
       "required": [],
-      "inputs": [{ "port": 0, "name": "x" }],
-      "outputs": [{ "port": 0, "name": "sqrt" }]
+      "inputs": [
+        {
+          "port": 0,
+          "name": "x"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "sqrt"
+        }
+      ]
+    },
+    {
+      "type": "generator",
+      "name": "Déclencheur périodique",
+      "description": "Générateur DEVS natif, sans source externe.",
+      "parameters": {
+        "period": {
+          "type": "number",
+          "minimum": 0.000001,
+          "maximum": 1000000000,
+          "default": 1,
+          "description": "Période ; première émission après une période."
+        },
+        "value": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        }
+      },
+      "required": [
+        "period",
+        "value"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "time"
+        },
+        {
+          "port": 2,
+          "name": "add-delay"
+        },
+        {
+          "port": 3,
+          "name": "multiply-delay"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "tick"
+        }
+      ]
+    },
+    {
+      "type": "event_tag",
+      "name": "Identifier une valeur",
+      "description": "Émet [valeur, identité, campagne]. Les identités sont conservées dans les calculs événementiels.",
+      "parameters": {
+        "identity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        },
+        "campaign": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        }
+      },
+      "required": [
+        "identity",
+        "campaign"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "identity"
+        },
+        {
+          "port": 2,
+          "name": "campaign"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "tagged"
+        }
+      ]
+    },
+    {
+      "type": "value_memory",
+      "name": "Mémoire à la demande",
+      "description": "Mémoire identifiée ; reset puis écritures puis lectures dans un même sac. La commande read utilise les champs identité et campagne.",
+      "parameters": {
+        "initial": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        },
+        "emitOnWrite": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Émettre aussi à chaque écriture.",
+          "choices": [
+            "Lecture seulement",
+            "Lecture et écriture"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        }
+      },
+      "required": [
+        "initial",
+        "emitOnWrite",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "write"
+        },
+        {
+          "port": 1,
+          "name": "read"
+        },
+        {
+          "port": 2,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "missing"
+        }
+      ]
+    },
+    {
+      "type": "event_operator",
+      "name": "Calcul événementiel",
+      "description": "Joint les valeurs par identité et campagne. Une valeur invalide produit invalid et est exclue du flux result. end attend toutes les lignes avant de transmettre leur nombre valide.",
+      "parameters": {
+        "operation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 21,
+          "default": 0,
+          "description": "Opération sur a et b.",
+          "choices": [
+            "Identité",
+            "Addition",
+            "Soustraction",
+            "Multiplication",
+            "Division sûre",
+            "Minimum",
+            "Maximum",
+            "Supérieur",
+            "Inférieur",
+            "Égal",
+            "Supérieur ou égal",
+            "Inférieur ou égal",
+            "Différent",
+            "ET",
+            "OU",
+            "NON",
+            "Valeur absolue",
+            "Puissance",
+            "Racine",
+            "Logarithme",
+            "Exponentielle",
+            "Normalisation affine"
+          ]
+        },
+        "left": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": "Valeur initiale de a ; borne basse en normalisation."
+        },
+        "right": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": "Valeur initiale de b ; borne haute en normalisation."
+        },
+        "epsilon": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": "Tolérance égalité et dénominateur nul."
+        },
+        "required": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "default": 1,
+          "description": "Masque des entrées obligatoires : 1=a, 2=b, 3=a et b."
+        },
+        "automatic": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Calcul après réception ou sur commande trigger.",
+          "choices": [
+            "Sur commande",
+            "À réception"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        }
+      },
+      "required": [
+        "operation",
+        "left",
+        "right",
+        "epsilon",
+        "required",
+        "automatic",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "a"
+        },
+        {
+          "port": 1,
+          "name": "b"
+        },
+        {
+          "port": 2,
+          "name": "trigger"
+        },
+        {
+          "port": 3,
+          "name": "end"
+        },
+        {
+          "port": 4,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "result"
+        },
+        {
+          "port": 1,
+          "name": "invalid"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        }
+      ]
+    },
+    {
+      "type": "candidate_filter",
+      "name": "Filtre de candidats",
+      "description": "Joint score, action et condition par identité. Transmet les candidats admissibles et le nombre retenu en fin de campagne.",
+      "parameters": {
+        "defaultAction": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        },
+        "defaultCondition": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 1,
+          "description": ""
+        },
+        "required": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 7,
+          "default": 1,
+          "description": "Masque obligatoire : 1=score, 2=action, 4=condition. Le score est obligatoire."
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        }
+      },
+      "required": [
+        "defaultAction",
+        "defaultCondition",
+        "required",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "score"
+        },
+        {
+          "port": 1,
+          "name": "action"
+        },
+        {
+          "port": 2,
+          "name": "condition"
+        },
+        {
+          "port": 3,
+          "name": "end"
+        },
+        {
+          "port": 4,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "score"
+        },
+        {
+          "port": 1,
+          "name": "action"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        },
+        {
+          "port": 3,
+          "name": "rejected"
+        }
+      ]
+    },
+    {
+      "type": "candidate_select",
+      "name": "Sélection de candidat",
+      "description": "Attend end et toutes les actions. Égalité : plus petite identité. Aucun candidat : selected=0 et action seulement si emitFallback=1. La sortie action est un scalaire DEVS [action,0,0].",
+      "parameters": {
+        "direction": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Choix de l’extrémum.",
+          "choices": [
+            "Maximum",
+            "Minimum"
+          ]
+        },
+        "fallback": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": ""
+        },
+        "requireAction": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Attendre l’action associée à chaque score.",
+          "choices": [
+            "Action de repli",
+            "Action associée"
+          ]
+        },
+        "emitFallback": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Campagne vide : supprimer l’action ou émettre le repli configuré. Défaut historique : 1.",
+          "choices": ["Aucune action", "Émettre fallback"]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        }
+      },
+      "required": [
+        "direction",
+        "fallback",
+        "requireAction",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "score"
+        },
+        {
+          "port": 1,
+          "name": "action"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        },
+        {
+          "port": 3,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "action"
+        },
+        {
+          "port": 1,
+          "name": "identity"
+        },
+        {
+          "port": 2,
+          "name": "score"
+        },
+        {
+          "port": 3,
+          "name": "selected"
+        }
+      ]
     }
   ]
 }

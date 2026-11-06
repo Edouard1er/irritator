@@ -215,6 +215,7 @@ irt::child_id add_wrapper(irt::generic_component& gen, std::string_view name,
     const auto id = add_child(gen, irt::dynamics_type::simulation_wrapper, name);
     gen.children_parameters[id].integers[irt::simulation_wrapper_tag::id] = irt::ordinal(desc.component);
     gen.children_parameters[id].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(desc.spec.mode);
+    gen.children_parameters[id].reals[0] = desc.spec.scenario_results ? 1 : 0;
     return id;
 }
 
@@ -275,7 +276,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
             parent.parameters[model].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(wrapper.sim_id),
             "project::set did not associate the wrapper resource");
     require(wrapper.x.size() == occurrence.factors.size() + 2 &&
-            wrapper.y.size() == occurrence.selections.size() + occurrence.factors.size(), "Invalid connected wrapper dimensions");
+            wrapper.y.size() == occurrence.output_count(), "Invalid connected wrapper dimensions");
     const auto after_set = audit_copy(parent.sims.get(wrapper.sim_id), desc);
     const auto old_id = wrapper.sim_id;
     const auto old_run = wrapper.run;
@@ -319,11 +320,11 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
     require(parent.models.exists(binding.wrapper) && parent.sims.exists(binding.resource), "Missing bound resource/model");
     const auto& wrapper = irt::get_dyn<irt::simulation_wrapper>(parent.models.get(binding.wrapper));
     const auto& resource = parent.sims.get(binding.resource);
-    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode &&
+    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(binding.resource) &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::run] == irt::ordinal(spec.mode),
             "Wrapper parameters and dynamics disagree");
-    require(wrapper.x.size() == spec.factors.size() + 2 && wrapper.y.size() == spec.factors.size() + spec.selections.size(),
+    require(wrapper.x.size() == spec.factors.size() + 2 && wrapper.y.size() == spec.output_count(),
             "Bound port dimensions changed");
     require(resource.factors.size() == spec.factors.size() && resource.selections.size() == spec.selections.size(),
             "Incomplete runtime factors/selections");

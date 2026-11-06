@@ -1,0 +1,823 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "decision-schaefer-external",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.003333,
+              "offset": 0
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 260,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "DecisionFiltrage",
+        "name": "DecisionFiltrage",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "Nmin"
+          },
+          {
+            "port": 1,
+            "name": "CH"
+          },
+          {
+            "port": 2,
+            "name": "E"
+          },
+          {
+            "port": 3,
+            "name": "end"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          },
+          {
+            "port": 1,
+            "name": "identity"
+          },
+          {
+            "port": 2,
+            "name": "score"
+          },
+          {
+            "port": 3,
+            "name": "selected"
+          }
+        ],
+        "components": [
+          {
+            "id": "admissible",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 10,
+              "left": 0,
+              "right": 140,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 7,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "select",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "admissible",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 3
+            },
+            "to": {
+              "component": "admissible",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "admissible",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "admissible",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "select",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "select",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "select",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "decision",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Schaefer",
+          "simulation": {
+            "start": 0,
+            "end": 20
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "effort",
+              "target": "E",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                80,
+                150,
+                260
+              ]
+            },
+            {
+              "id": "capturabilite",
+              "target": "q",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                0.0008,
+                0.001
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "Nmin",
+              "target": "N",
+              "criteria": "min"
+            },
+            {
+              "id": "CH",
+              "target": "C",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "CH"
+          },
+          "scenarioResults": true
+        }
+      },
+      {
+        "id": "external",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "DecisionFiltrage"
+      },
+      {
+        "id": "internalNmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalCH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalE",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalQ",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "action",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "actionReceipt",
+        "type": "value_memory",
+        "parameters": {
+          "initial": -999,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "identity",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "score",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "selected",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "decision",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 0
+        },
+        "to": {
+          "component": "internalNmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 1
+        },
+        "to": {
+          "component": "internalCH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 2
+        },
+        "to": {
+          "component": "internalE",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 3
+        },
+        "to": {
+          "component": "internalQ",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 7
+        },
+        "to": {
+          "component": "external",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 8
+        },
+        "to": {
+          "component": "external",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 5
+        },
+        "to": {
+          "component": "external",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 9
+        },
+        "to": {
+          "component": "external",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 0
+        },
+        "to": {
+          "component": "action",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 0
+        },
+        "to": {
+          "component": "actionReceipt",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 1
+        },
+        "to": {
+          "component": "identity",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 2
+        },
+        "to": {
+          "component": "score",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 3
+        },
+        "to": {
+          "component": "selected",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "internalNmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalCH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalE",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalQ",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "action",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "actionReceipt",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "identity",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "score",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "selected",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

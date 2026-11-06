@@ -1,0 +1,115 @@
+new-delete::allocate   4.0000 KB,8.0000 B 0.0000 B,0.0000 B
+                       4.0000 KB,8.0000 B 4.0000 KB,0.0000 B = 0x1f4d858d6e0
+new-delete::allocate   4.0000 KB,8.0000 B 4.0000 KB,0.0000 B
+                       4.0000 KB,8.0000 B 8.0000 KB,0.0000 B = 0x1f4d858e720
+new-delete::allocate   24.0000 KB,8.0000 B 8.0000 KB,0.0000 B
+                       24.0000 KB,8.0000 B 32.0000 KB,0.0000 B = 0x1f4d8593f50
+new-delete::allocate   32.0000 KB,8.0000 B 32.0000 KB,0.0000 B
+                       32.0000 KB,8.0000 B 64.0000 KB,0.0000 B = 0x1f4d8599f90
+new-delete::allocate   4.0000 KB,8.0000 B 64.0000 KB,0.0000 B
+                       4.0000 KB,8.0000 B 68.0000 KB,0.0000 B = 0x1f4d858f760
+new-delete::allocate   224.0000 KB,8.0000 B 68.0000 KB,0.0000 B
+                       224.0000 KB,8.0000 B 292.0000 KB,0.0000 B = 0x1f4d86d00b0
+new-delete::allocate   176.0000 KB,8.0000 B 292.0000 KB,0.0000 B
+                       176.0000 KB,8.0000 B 468.0000 KB,0.0000 B = 0x1f4d87080f0
+new-delete::allocate   288.0000 KB,8.0000 B 468.0000 KB,0.0000 B
+                       288.0000 KB,8.0000 B 756.0000 KB,0.0000 B = 0x1f4d8734130
+new-delete::allocate   16.0000 KB,8.0000 B 756.0000 KB,0.0000 B
+                       16.0000 KB,8.0000 B 772.0000 KB,0.0000 B = 0x1f4d85a1fd0
+new-delete::allocate   4.0000 KB,8.0000 B 772.0000 KB,0.0000 B
+                       4.0000 KB,8.0000 B 776.0000 KB,0.0000 B = 0x1f4d85a6010
+new-delete::allocate   60.0000 KB,8.0000 B 776.0000 KB,0.0000 B
+                       60.0000 KB,8.0000 B 836.0000 KB,0.0000 B = 0x1f4d877c170
+new-delete::allocate   88.0000 KB,8.0000 B 836.0000 KB,0.0000 B
+                       88.0000 KB,8.0000 B 924.0000 KB,0.0000 B = 0x1f4d878b1b0
+new-delete::allocate   112.0000 KB,8.0000 B 924.0000 KB,0.0000 B
+                       112.0000 KB,8.0000 B 1.0117 MB,0.0000 B = 0x1f4d87a11f0
+new-delete::allocate   8.0000 KB,8.0000 B 1.0117 MB,0.0000 B
+                       8.0000 KB,8.0000 B 1.0195 MB,0.0000 B = 0x1f4d87bd230
+new-delete::allocate   16.0000 KB,8.0000 B 1.0195 MB,0.0000 B
+                       16.0000 KB,8.0000 B 1.0352 MB,0.0000 B = 0x1f4d87bf270
+new-delete::allocate   80.0000 B,8.0000 B 1.0352 MB,0.0000 B
+                       80.0000 B,8.0000 B 1.0352 MB,0.0000 B = 0x1f4d857c3b0
+new-delete::allocate   48.0000 B,8.0000 B 1.0352 MB,0.0000 B
+                       48.0000 B,8.0000 B 1.0353 MB,0.0000 B = 0x1f4d857f260
+new-delete::allocate   160.0000 B,8.0000 B 1.0353 MB,0.0000 B
+                       160.0000 B,8.0000 B 1.0354 MB,0.0000 B = 0x1f4d85714e0
+new-delete::deallocate 80.0000 B,8.0000 B 1.0354 MB,0.0000 B 0x1f4d857c3b0
+                       80.0000 B,8.0000 B 1.0354 MB,80.0000 B
+new-delete::allocate   240.0000 B,8.0000 B 1.0354 MB,80.0000 B
+                       240.0000 B,8.0000 B 1.0357 MB,80.0000 B = 0x1f4d857b390
+new-delete::deallocate 160.0000 B,8.0000 B 1.0357 MB,80.0000 B 0x1f4d85714e0
+                       160.0000 B,8.0000 B 1.0357 MB,240.0000 B
+new-delete::allocate   320.0000 B,8.0000 B 1.0357 MB,240.0000 B
+                       320.0000 B,8.0000 B 1.0360 MB,240.0000 B = 0x1f4d8578dd0
+new-delete::deallocate 240.0000 B,8.0000 B 1.0360 MB,240.0000 B 0x1f4d857b390
+                       240.0000 B,8.0000 B 1.0360 MB,480.0000 B
+new-delete::allocate   32.0000 B,8.0000 B 1.0360 MB,480.0000 B
+                       32.0000 B,8.0000 B 1.0360 MB,480.0000 B = 0x1f4d8581240
+new-delete::allocate   96.0000 B,8.0000 B 1.0360 MB,480.0000 B
+                       96.0000 B,8.0000 B 1.0361 MB,480.0000 B = 0x1f4d85714e0
+new-delete::deallocate 48.0000 B,8.0000 B 1.0361 MB,480.0000 B 0x1f4d857f260
+                       48.0000 B,8.0000 B 1.0361 MB,528.0000 B
+new-delete::allocate   32.0000 B,8.0000 B 1.0361 MB,528.0000 B
+                       32.0000 B,8.0000 B 1.0361 MB,528.0000 B = 0x1f4d8580be0
+new-delete::allocate   32.0000 B,8.0000 B 1.0361 MB,528.0000 B
+                       32.0000 B,8.0000 B 1.0361 MB,528.0000 B = 0x1f4d8580c40
+new-delete::allocate   32.0000 B,8.0000 B 1.0361 MB,528.0000 B
+                       32.0000 B,8.0000 B 1.0362 MB,528.0000 B = 0x1f4d85809a0
+new-delete::allocate   64.0000 B,8.0000 B 1.0362 MB,528.0000 B
+                       64.0000 B,8.0000 B 1.0362 MB,528.0000 B = 0x1f4d8591f30
+new-delete::deallocate 32.0000 B,8.0000 B 1.0362 MB,528.0000 B 0x1f4d85809a0
+                       32.0000 B,8.0000 B 1.0362 MB,560.0000 B
+new-delete::allocate   32.0000 KB,8.0000 B 1.0362 MB,560.0000 B
+                       32.0000 KB,8.0000 B 1.0675 MB,560.0000 B = 0x1f4d85a7050
+new-delete::allocate   224.0000 KB,8.0000 B 1.0675 MB,560.0000 B
+                       224.0000 KB,8.0000 B 1.2862 MB,560.0000 B = 0x1f4d85af090
+new-delete::allocate   176.0000 KB,8.0000 B 1.2862 MB,560.0000 B
+                       176.0000 KB,8.0000 B 1.4581 MB,560.0000 B = 0x1f4d85e70d0
+new-delete::allocate   288.0000 KB,8.0000 B 1.4581 MB,560.0000 B
+                       288.0000 KB,8.0000 B 1.7394 MB,560.0000 B = 0x1f4d87e00b0
+new-delete::allocate   16.0000 KB,8.0000 B 1.7394 MB,560.0000 B
+                       16.0000 KB,8.0000 B 1.7550 MB,560.0000 B = 0x1f4d8613110
+new-delete::allocate   4.0000 KB,8.0000 B 1.7550 MB,560.0000 B
+                       4.0000 KB,8.0000 B 1.7589 MB,560.0000 B = 0x1f4d88280f0
+new-delete::allocate   60.0000 KB,8.0000 B 1.7589 MB,560.0000 B
+                       60.0000 KB,8.0000 B 1.8175 MB,560.0000 B = 0x1f4d8617150
+new-delete::allocate   88.0000 KB,8.0000 B 1.8175 MB,560.0000 B
+                       88.0000 KB,8.0000 B 1.9034 MB,560.0000 B = 0x1f4d8626190
+new-delete::allocate   112.0000 KB,8.0000 B 1.9034 MB,560.0000 B
+                       112.0000 KB,8.0000 B 2.0128 MB,560.0000 B = 0x1f4d8829130
+new-delete::allocate   8.0000 KB,8.0000 B 2.0128 MB,560.0000 B
+                       8.0000 KB,8.0000 B 2.0206 MB,560.0000 B = 0x1f4d863c1d0
+new-delete::allocate   320.0000 B,8.0000 B 2.0206 MB,560.0000 B
+                       320.0000 B,8.0000 B 2.0209 MB,560.0000 B = 0x1f4d85907a0
+new-delete::allocate   96.0000 B,8.0000 B 2.0209 MB,560.0000 B
+                       96.0000 B,8.0000 B 2.0210 MB,560.0000 B = 0x1f4d856ea10
+new-delete::allocate   16.0000 KB,8.0000 B 2.0210 MB,560.0000 B
+                       16.0000 KB,8.0000 B 2.0366 MB,560.0000 B = 0x1f4d863e210
+new-delete::allocate   224.0000 KB,8.0000 B 2.0366 MB,560.0000 B
+                       224.0000 KB,8.0000 B 2.2554 MB,560.0000 B = 0x1f4d8845170
+new-delete::allocate   288.0000 KB,8.0000 B 2.2554 MB,560.0000 B
+                       288.0000 KB,8.0000 B 2.5366 MB,560.0000 B = 0x1f4d887d1b0
+new-delete::allocate   16.0000 KB,8.0000 B 2.5366 MB,560.0000 B
+                       16.0000 KB,8.0000 B 2.5523 MB,560.0000 B = 0x1f4d87c32b0
+new-delete::allocate   4.0000 KB,8.0000 B 2.5523 MB,560.0000 B
+                       4.0000 KB,8.0000 B 2.5562 MB,560.0000 B = 0x1f4d87c72f0
+new-delete::allocate   60.0000 KB,8.0000 B 2.5562 MB,560.0000 B
+                       60.0000 KB,8.0000 B 2.6148 MB,560.0000 B = 0x1f4d8642250
+new-delete::allocate   88.0000 KB,8.0000 B 2.6148 MB,560.0000 B
+                       88.0000 KB,8.0000 B 2.7007 MB,560.0000 B = 0x1f4d88c51f0
+new-delete::allocate   112.0000 KB,8.0000 B 2.7007 MB,560.0000 B
+                       112.0000 KB,8.0000 B 2.8101 MB,560.0000 B = 0x1f4d88db230
+new-delete::allocate   8.0000 KB,8.0000 B 2.8101 MB,560.0000 B
+                       8.0000 KB,8.0000 B 2.8179 MB,560.0000 B = 0x1f4d88f7270
+new-delete::allocate   320.0000 B,8.0000 B 2.8179 MB,560.0000 B
+                       320.0000 B,8.0000 B 2.8182 MB,560.0000 B = 0x1f4d8590920
+new-delete::allocate   96.0000 B,8.0000 B 2.8182 MB,560.0000 B
+                       96.0000 B,8.0000 B 2.8183 MB,560.0000 B = 0x1f4d8571200
+new-delete::allocate   16.0000 KB,8.0000 B 2.8183 MB,560.0000 B
+                       16.0000 KB,8.0000 B 2.8339 MB,560.0000 B = 0x1f4d87c8330
+new-delete::deallocate 96.0000 B,8.0000 B 2.8339 MB,560.0000 B 0x1f4d856ea10
+                       96.0000 B,8.0000 B 2.8339 MB,656.0000 B
+new-delete::allocate   224.0000 KB,8.0000 B 2.8339 MB,656.0000 B
+                       224.0000 KB,8.0000 B 3.0527 MB,656.0000 B = 0x1f4d88f92b0
+new-delete::deallocate 224.0000 KB,8.0000 B 3.0527 MB,656.0000 

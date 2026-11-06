@@ -322,3 +322,28 @@ Les overrides d’occurrences acceptent les neuf plans, sans changer cibles ni
 dimensions. Les limites, les ports logiques, les formats v1/v2 et le rejet des
 wrappers récursifs sont conservés. Campagne reproductible :
 `web/engine/runner/tests-wrapper/run-7f.ps1 -Configuration Release` (ou Debug).
+# Composants génériques de décision — Test 8A
+
+Le catalogue comprend aussi `generator` (natif existant), `event_tag`,
+`value_memory`, `event_operator`, `candidate_filter` et `candidate_select`.
+Les paramètres numériques et entiers, leurs défauts et leurs descriptions
+sont fournis par `catalog.json` et validés par TypeScript et C++.
+
+Les flux identifiés utilisent `[valeur,candidat,campagne]`. Les fins d’ensemble
+annoncent le nombre de lignes à recevoir ; les consommateurs attendent aussi
+leurs champs requis, même si une branche arrive plus tard. Les masques requis
+sont 1=a/score, 2=b/action, 4=condition pour le filtre. Les sorties sont drainées
+à sigma=0, un message par sac. La sortie action du sélecteur est un scalaire
+`[action,0,0]` ; les autres sorties conservent les identités.
+
+Le champ v3 optionnel `experiment.scenarioResults: true` ajoute, après les
+F+S sorties historiques du wrapper : le statut de chaque scénario, F facteurs
+réellement appliqués, S critères bruts, puis une fin
+`[nombre valide,nombre total,campagne]`. Les indices de scénarios sont locaux
+au wrapper, comme les campagnes. Les instantanés sont émis à la date de réponse
+par de vraies transitions DEVS du parent. L'enveloppe HTTP v2 conserve leur
+journal ; elle ne calcule aucune décision.
+
+Exemples portables : `web/examples/decision-*.json`.
+Sémantique détaillée, cas limites et vérifications :
+[`reports/bstar-generic-components-test-8A.md`](../../../reports/bstar-generic-components-test-8A.md).

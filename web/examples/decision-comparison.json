@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "comparisons",
+    "components": [
+      {
+        "id": "a",
+        "type": "constant",
+        "parameters": {
+          "value": 5,
+          "offset": 0
+        }
+      },
+      {
+        "id": "b",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0
+        }
+      },
+      {
+        "id": "greater",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 7,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "less",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 8,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "equal",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 9,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "a",
+          "port": 0
+        },
+        "to": {
+          "component": "greater",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "b",
+          "port": 0
+        },
+        "to": {
+          "component": "greater",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "a",
+          "port": 0
+        },
+        "to": {
+          "component": "less",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "b",
+          "port": 0
+        },
+        "to": {
+          "component": "less",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "a",
+          "port": 0
+        },
+        "to": {
+          "component": "equal",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "b",
+          "port": 0
+        },
+        "to": {
+          "component": "equal",
+          "port": 1
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "greater",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "less",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "equal",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

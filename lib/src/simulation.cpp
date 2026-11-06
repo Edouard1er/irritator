@@ -475,6 +475,7 @@ static status embedded_sims_init(embedded_simulation& embed_sims) noexcept
 simulation_wrapper::simulation_wrapper(const simulation_wrapper& other) noexcept
   : sim_id{ undefined<embedded_simulation_id>() }
   , run{ other.run }
+  , scenario_results{ other.scenario_results }
 {}
 
 auto compute_simulation_number =
@@ -510,6 +511,7 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     sigma = time_domain<time>::infinity;
     state = run_state::uninitialized;
     response_emitted = false;
+    campaign = 0;
     auto* embed_sims = sim.sims.try_to_get(sim_id);
 
     if (not embed_sims)
@@ -544,6 +546,41 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
 
 static status compute_response(const embedded_simulation& embed_sims,
                                vector<message>& values) noexcept;
+
+// Raw per-scenario results are captured at the same logical request as the
+// legacy optimizer response. Never reconstruct unselected rows in the runner.
+static status scenario_response(const embedded_simulation& resource,
+                                real campaign,
+                                vector<event_emission>& output) noexcept
+{
+    const auto base = resource.factors.size() + resource.selections.size();
+    const auto count = resource.embedded_sims.size();
+    if (not output.reserve(count * (base + 1) + 1))
+        return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+    sz valid_count = 0, index = 0;
+    for (const auto id : resource.embedded_sims) {
+        const auto& child = resource.embedded_sims.get<simulation>(id);
+        const auto& obs = resource.embedded_sims.get<embedded_simulation::simulation_observation>(id);
+        bool valid = true;
+        for (const auto selection : resource.selections) {
+            const auto* values = obs.get(resource.selections.get<model_id>(selection));
+            valid = valid and values and std::isfinite(values->compute_result(resource.selections.get<criteria_type>(selection)));
+        }
+        for (const auto factor : resource.factors)
+            valid = valid and std::isfinite(child.parameters[resource.factors.get<model_id>(factor)].reals[0]);
+        const auto key = real(index++);
+        output.emplace_back(event_emission{ int(base), message{ valid ? one : zero, key, campaign } });
+        if (not valid) continue;
+        ++valid_count;
+        int port = int(base + 1);
+        for (const auto factor : resource.factors)
+            output.emplace_back(event_emission{ port++, message{ child.parameters[resource.factors.get<model_id>(factor)].reals[0], key, campaign } });
+        for (const auto selection : resource.selections)
+            output.emplace_back(event_emission{ port++, message{ obs.get(resource.selections.get<model_id>(selection))->compute_result(resource.selections.get<criteria_type>(selection)), key, campaign } });
+    }
+    output.emplace_back(event_emission{ int(2 * base + 1), message{ real(valid_count), real(count), campaign } });
+    return success();
+}
 
 status simulation_wrapper::transition(simulation& sim,
                                       time t,
@@ -641,6 +678,11 @@ status simulation_wrapper::transition(simulation& sim,
 
         embedded_simulation::response result{ due, {} };
         irt_check(compute_response(*embed_sims, result.values));
+        if (scenario_results) {
+            if (campaign >= 9007199254740991ULL)
+                return make_error(simulation_errc::simulation_wrapper_parameter_error);
+            irt_check(scenario_response(*embed_sims, real(++campaign), result.scenarios));
+        }
         if (not pending_responses.reserve(pending_responses.size() + 1))
             return make_error(
               simulation_errc::simulation_wrapper_not_enough_memory);
@@ -1241,16 +1283,26 @@ static status compute_response(const embedded_simulation& embed_sims,
 
 status simulation_wrapper::lambda(simulation& sim) noexcept
 {
-    const auto* embed_sims = sim.sims.try_to_get(sim_id);
+    auto* embed_sims = sim.sims.try_to_get(sim_id);
     const auto& pending_responses = embed_sims->pending_responses;
     if (pending_responses.empty())
         return success();
 
-    const auto& values = pending_responses.front().values;
-    debug::ensure(values.empty() or values.size() == y.size());
-    for (sz i = 0; i < values.size(); ++i)
-        irt_check(send_message(sim, y[i], values[i][0], values[i][1], values[i][2]));
-    response_emitted = true;
+    auto& response = embed_sims->pending_responses.front();
+    const auto& values = response.values;
+    debug::ensure(values.empty() or values.size() == embed_sims->factors.size() + embed_sims->selections.size());
+    if (not response.selected_sent) {
+        for (sz i = 0; i < values.size(); ++i)
+            irt_check(send_message(sim, y[i], values[i][0], values[i][1], values[i][2]));
+        response.selected_sent = true;
+    }
+    // One frame per internal transition, at unchanged parent time. A native
+    // output port holds one message, so looping all rows here would lose data.
+    if (response.next_scenario < response.scenarios.size()) {
+        const auto& frame = response.scenarios[response.next_scenario++];
+        irt_check(send_message(sim, y[frame.port], frame.value[0], frame.value[1], frame.value[2]));
+    }
+    response_emitted = response.next_scenario == response.scenarios.size();
     return success();
 }
 

@@ -76,7 +76,7 @@ struct native_hierarchy {
             if(inserted) {
                 // Values own their allocator: this document outlives validation.
                 const auto& e=c["experiment"];
-                const auto n=std::string(direction)=="inputs"?e["factors"].Size()+2:e["factors"].Size()+e["selections"].Size();
+                const auto n=std::string(direction)=="inputs"?e["factors"].Size()+2:(e.HasMember("scenarioResults") && e["scenarioResults"].GetBool()?2*(e["factors"].Size()+e["selections"].Size())+2:e["factors"].Size()+e["selections"].Size());
                 for(unsigned p=0;p<n;++p) { V item(rapidjson::kObjectType); item.AddMember("port",p,port_storage.GetAllocator()); it->second.PushBack(item,port_storage.GetAllocator()); }
             }
             return it->second;
@@ -108,7 +108,7 @@ struct native_hierarchy {
                     if(!desc["parameters"].HasMember(p->name)) fail("INVALID_PARAMETER","Unknown atomic parameter");
                     const auto& b=desc["parameters"][p->name];
                     const auto value=p->value.GetDouble();
-                    if(!std::isfinite(value)||value<b["minimum"].GetDouble()||value>b["maximum"].GetDouble()) fail("INVALID_PARAMETER","Atomic parameter out of bounds");
+                    if((str(b["type"])=="integer" && std::floor(value)!=value)||!std::isfinite(value)||value<b["minimum"].GetDouble()||value>b["maximum"].GetDouble()) fail("INVALID_PARAMETER","Atomic parameter out of bounds");
                 }
             }
         }

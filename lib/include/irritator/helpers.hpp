@@ -390,6 +390,43 @@ struct hsm_wrapper_tag {
     };
 };
 
+template<event_kind K> struct event_model_tag;
+template<> struct event_model_tag<event_kind::tag> {
+    static constexpr event_kind kind = event_kind::tag;
+    static constexpr std::string_view x_names[] = { "value", "identity", "campaign" };
+    static constexpr std::string_view y_names[] = { "tagged" };
+    static constexpr port_type x_types[] = { qss, qss, qss };
+    static constexpr port_type y_types[] = { qss };
+};
+template<> struct event_model_tag<event_kind::memory> {
+    static constexpr event_kind kind = event_kind::memory;
+    static constexpr std::string_view x_names[] = { "write", "read", "reset" };
+    static constexpr std::string_view y_names[] = { "value", "missing" };
+    static constexpr port_type x_types[] = { qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss };
+};
+template<> struct event_model_tag<event_kind::numeric> {
+    static constexpr event_kind kind = event_kind::numeric;
+    static constexpr std::string_view x_names[] = { "a", "b", "trigger", "end", "reset" };
+    static constexpr std::string_view y_names[] = { "result", "invalid", "end" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss };
+};
+template<> struct event_model_tag<event_kind::filter> {
+    static constexpr event_kind kind = event_kind::filter;
+    static constexpr std::string_view x_names[] = { "score", "action", "condition", "end", "reset" };
+    static constexpr std::string_view y_names[] = { "score", "action", "end", "rejected" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss };
+};
+template<> struct event_model_tag<event_kind::select> {
+    static constexpr event_kind kind = event_kind::select;
+    static constexpr std::string_view x_names[] = { "score", "action", "end", "reset" };
+    static constexpr std::string_view y_names[] = { "action", "identity", "score", "selected" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss };
+};
+
 struct simulation_wrapper_tag {
     static constexpr std::string_view x_names[] = { "init", "run" };
 
@@ -783,6 +820,16 @@ constexpr auto dispatch(const dynamics_type type,
         return std::invoke(std::forward<Function>(f), hsm_wrapper_tag{},
                            std::forward<Args>(args)...);
 
+    case dynamics_type::event_tag:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::tag>{}, std::forward<Args>(args)...);
+    case dynamics_type::value_memory:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::memory>{}, std::forward<Args>(args)...);
+    case dynamics_type::event_operator:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::numeric>{}, std::forward<Args>(args)...);
+    case dynamics_type::candidate_filter:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::filter>{}, std::forward<Args>(args)...);
+    case dynamics_type::candidate_select:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::select>{}, std::forward<Args>(args)...);
     case dynamics_type::simulation_wrapper:
         return std::invoke(std::forward<Function>(f), simulation_wrapper_tag{},
                            std::forward<Args>(args)...);

@@ -401,3 +401,31 @@ Le runner courant est construit par `web/engine/runner/tests-wrapper/run-7f.ps1`
 Voir `packages/contracts/README.md` pour le contrat scientifique et
 `apps/frontend/README.md` pour l’inspecteur, les horloges et les tests réels.
 Le catalogue atomique et les protections de ressources restent inchangés.
+
+## Observation et décision génériques — Test 8A
+
+Le catalogue possède désormais 19 atomes, dont un groupe « Contrôle et décision ».
+Ouvrir `examples/decision-memory.json`, `decision-selection.json`,
+`decision-constraint.json`, `decision-fallback.json`, `decision-reuse.json` ou
+`decision-prospective.json` dans React Flow. Ces modèles sont des assemblages
+configurables ; les calculs et les choix sont exécutés par le moteur C++.
+
+Le wrapper propose la case « Transmettre tous les scénarios au modèle parent ».
+Elle ajoute des ports de résultats identifiés et de fin de campagne, en conservant
+les sorties du gagnant historique. Relier les facteurs aux actions, les critères
+aux calculs, puis les scores/actions/fins aux filtres et sélecteurs.
+
+Pour utiliser la construction 8A présente sur ce poste, depuis `web` :
+
+```powershell
+$env:IRRITATOR_RUNNER='D:\these\irritator\build-web-test8a\runner\irritator-runner.exe'
+npm.cmd run test:decision
+npm.cmd start
+```
+
+Le binaire et les contrats doivent être reconstruits ensemble : la négociation
+refuse un ancien catalogue. La construction native standard reste
+`web/build-runner.ps1` ; les suites supplémentaires sont inscrites dans CTest.
+Voir [le rapport 8A](../reports/bstar-generic-components-test-8A.md) pour les ports,
+les interfaces DEVS, les commandes de validation et les limites, dont le CSV
+historique 7G manquant.
