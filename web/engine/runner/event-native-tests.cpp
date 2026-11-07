@@ -28,9 +28,10 @@ auto& tag(irt::simulation& sim, double value, double key, double campaign, doubl
     checked(wire(sim, source, 0, d, 0), "source -> tag");
     return d;
 }
-template<class T> std::vector<emission> execute(irt::simulation& sim, T& observed, int observed_ports = T::outputs)
+template<class T> std::vector<emission> execute(irt::simulation& sim, T& observed, int observed_ports = -1)
 {
-    for (int p = 0; p < T::outputs; ++p) {
+    if (observed_ports < 0) observed_ports = static_cast<int>(std::size(observed.y));
+    for (int p = 0; p < std::ssize(observed.y); ++p) {
         auto& sink = add<irt::counter>(sim);
         checked(wire(sim, observed, p, sink, 0), "event sink");
     }

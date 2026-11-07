@@ -476,6 +476,7 @@ simulation_wrapper::simulation_wrapper(const simulation_wrapper& other) noexcept
   : sim_id{ undefined<embedded_simulation_id>() }
   , run{ other.run }
   , scenario_results{ other.scenario_results }
+  , required_inputs{ other.required_inputs }
 {}
 
 auto compute_simulation_number =
@@ -512,6 +513,7 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     state = run_state::uninitialized;
     response_emitted = false;
     campaign = 0;
+    last_input_campaign = 0;
     auto* embed_sims = sim.sims.try_to_get(sim_id);
 
     if (not embed_sims)
@@ -530,6 +532,10 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
 
     embed_sims->embedded_sims.clear();
     embed_sims->pending_responses.clear();
+    embed_sims->input_frames.clear();
+    if (required_inputs and (run != run_type::complete or embed_sims->factors.size() > 10 or
+        (required_inputs >> embed_sims->factors.size()) != 0))
+        return make_error(simulation_errc::simulation_wrapper_parameter_error);
 
     if (not embed_sims->embedded_sims.can_alloc(nb_sims) and
         not embed_sims->embedded_sims.grow<2, 1>(nb_sims))
@@ -601,13 +607,66 @@ status simulation_wrapper::transition(simulation& sim,
     const auto init_msg = get_message(sim, x[ordinal(input_init)]);
     const auto run_msg  = get_message(sim, x[ordinal(input_run)]);
 
+    // Legacy documents keep last-value scalar inputs. Addressed transactions
+    // never borrow a missing field from another observation cycle.
+    const auto valid_frame = [this](const message& m) noexcept {
+        return m[1] == zero and std::isfinite(m[2]) and m[2] >= one and
+          m[2] <= 9007199254740991.0 and std::floor(m[2]) == m[2] and
+          m[2] > real(last_input_campaign);
+    };
+    auto& frames = embed_sims->input_frames;
+    constexpr unsigned prepared_frame = 1u << 31;
+
     for (sz i = 0; i < embed_sims->input_parameters.size(); ++i) {
         const auto i_param_msg = get_message(sim, x[i + 2]);
 
         if (not i_param_msg.empty()) {
-            embed_sims->input_parameters[i].value = i_param_msg.back()[0];
-            state                                 = run_state::input_changed;
+            if (required_inputs) {
+                for (const auto& msg : i_param_msg) {
+                    if (not valid_frame(msg) or not std::isfinite(msg[0]))
+                        return make_error(simulation_errc::event_protocol_error);
+                    auto pos = std::find_if(frames.begin(), frames.end(),
+                      [&](const auto& f) { return f.campaign == msg[2]; });
+                    if (pos == frames.end()) {
+                        if (frames.size() >= 128 or not frames.reserve(frames.size() + 1))
+                            return make_error(simulation_errc::event_capacity_error);
+                        frames.emplace_back(embedded_simulation::input_frame{});
+                        pos = frames.end() - 1;
+                        pos->campaign = msg[2];
+                    }
+                    // A DEVS bag has no order: conflicting duplicates are an
+                    // error, including duplicates arriving in later bags.
+                    if ((pos->mask & (1u << i)) and pos->values[i] != msg[0])
+                        return make_error(simulation_errc::event_protocol_error);
+                    if (not (pos->mask & (1u << i))) pos->mask &= ~prepared_frame;
+                    pos->values[i] = msg[0]; pos->mask |= 1u << i;
+                }
+            } else {
+                embed_sims->input_parameters[i].value = i_param_msg.back()[0];
+                state = run_state::input_changed;
+            }
         }
+    }
+
+    real requested_campaign = 0;
+    if (required_inputs and (not init_msg.empty() or not run_msg.empty())) {
+        if (init_msg.size() > 1 or run_msg.size() > 1)
+            return make_error(simulation_errc::event_protocol_error);
+        const auto& command = not run_msg.empty() ? run_msg.front() : init_msg.front();
+        if (not valid_frame(command) or (not init_msg.empty() and
+            (not valid_frame(init_msg.front()) or init_msg.front()[2] != command[2])))
+            return make_error(simulation_errc::event_protocol_error);
+        requested_campaign = command[2];
+        const auto frame = std::find_if(frames.begin(), frames.end(),
+          [&](const auto& f) { return f.campaign == requested_campaign; });
+        if (frame == frames.end() or (frame->mask & required_inputs) != required_inputs)
+            return make_error(simulation_errc::event_protocol_error);
+        for (sz i = 0; i < embed_sims->input_parameters.size(); ++i) {
+            auto& value = embed_sims->input_parameters[i].value;
+            if (frame->mask & (1u << i)) value = frame->values[i];
+            else value.reset();
+        }
+        if (not (frame->mask & prepared_frame)) state = run_state::input_changed;
     }
 
     if (not init_msg.empty()) {
@@ -619,6 +678,14 @@ status simulation_wrapper::transition(simulation& sim,
 
         state = run_state::initialized;
         pending_responses.clear();
+        if (required_inputs) {
+            // Only this frame describes the currently initialized children.
+            // A following run must not draw random factors a second time.
+            for (auto& frame : frames) {
+                frame.mask &= ~prepared_frame;
+                if (frame.campaign == requested_campaign) frame.mask |= prepared_frame;
+            }
+        }
     }
 
     if (not run_msg.empty()) {
@@ -681,7 +748,7 @@ status simulation_wrapper::transition(simulation& sim,
         if (scenario_results) {
             if (campaign >= 9007199254740991ULL)
                 return make_error(simulation_errc::simulation_wrapper_parameter_error);
-            irt_check(scenario_response(*embed_sims, real(++campaign), result.scenarios));
+            irt_check(scenario_response(*embed_sims, required_inputs ? requested_campaign : real(++campaign), result.scenarios));
         }
         if (not pending_responses.reserve(pending_responses.size() + 1))
             return make_error(
@@ -690,6 +757,12 @@ status simulation_wrapper::transition(simulation& sim,
         while (pos != pending_responses.end() and pos->due <= due)
             ++pos;
         pending_responses.emplace(pos, std::move(result));
+        if (required_inputs) {
+            last_input_campaign = static_cast<u64>(requested_campaign);
+            for (auto& frame : frames) frame.mask &= ~prepared_frame;
+            frames.erase(std::remove_if(frames.begin(), frames.end(),
+              [&](const auto& f) { return f.campaign <= requested_campaign; }), frames.end());
+        }
     }
 
     sigma = pending_responses.empty() ? time_domain<time>::infinity

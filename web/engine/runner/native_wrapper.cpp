@@ -129,6 +129,8 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
     const auto f = spec.factors.size(), s = spec.selections.size();
     require(f >= 1 && f <= 10 && s >= 1 && f + s >= 3 && f + s <= 12,
             "Native wrapper dimensions require 1<=F<=10, S>=1, 3<=F+S<=12");
+    require(!spec.required_inputs || (spec.mode == irt::simulation_wrapper::run_type::complete &&
+        (spec.required_inputs >> f) == 0), "Addressed factor inputs require complete mode and valid slots");
     require(spec.method == irt::optimization_method::simple ||
             spec.method == irt::optimization_method::weighted_sum ||
             spec.method == irt::optimization_method::epsilon_constrained, "Invalid optimization method");
@@ -216,6 +218,7 @@ irt::child_id add_wrapper(irt::generic_component& gen, std::string_view name,
     gen.children_parameters[id].integers[irt::simulation_wrapper_tag::id] = irt::ordinal(desc.component);
     gen.children_parameters[id].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(desc.spec.mode);
     gen.children_parameters[id].reals[0] = desc.spec.scenario_results ? 1 : 0;
+    gen.children_parameters[id].reals[1] = desc.spec.required_inputs;
     return id;
 }
 
@@ -300,14 +303,17 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
                     "Prototype copy changed local model identifiers");
         wrapper.sim_id = resource_id;
         wrapper.run = occurrence.mode;
+        wrapper.required_inputs = occurrence.required_inputs;
         parent.parameters[model].integers[irt::simulation_wrapper_tag::id] = irt::ordinal(resource_id);
         parent.parameters[model].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(occurrence.mode);
+        parent.parameters[model].reals[1] = occurrence.required_inputs;
         wrapper_binding ret{model, resource_id, after_set, after_copy, count};
         validate_binding(parent, ret, occurrence);
         return ret;
     } catch (...) {
         wrapper.sim_id = old_id;
         wrapper.run = old_run;
+        wrapper.required_inputs = static_cast<unsigned>(old_parameters.reals[1]);
         parent.parameters[model] = old_parameters;
         parent.sims.free(resource_id);
         throw;
@@ -320,7 +326,7 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
     require(parent.models.exists(binding.wrapper) && parent.sims.exists(binding.resource), "Missing bound resource/model");
     const auto& wrapper = irt::get_dyn<irt::simulation_wrapper>(parent.models.get(binding.wrapper));
     const auto& resource = parent.sims.get(binding.resource);
-    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results &&
+    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results && wrapper.required_inputs == spec.required_inputs &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(binding.resource) &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::run] == irt::ordinal(spec.mode),
             "Wrapper parameters and dynamics disagree");

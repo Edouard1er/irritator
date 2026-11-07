@@ -34,6 +34,7 @@ struct experiment_spec {
     irt::simulation_wrapper::run_type mode = irt::simulation_wrapper::run_type::complete;
     std::size_t max_scenarios = 128;
     bool scenario_results = false;
+    unsigned required_inputs = 0;
     std::size_t output_count() const { const auto n = factors.size() + selections.size(); return scenario_results ? 2*n+2 : n; }
 };
 bool single_type(irt::factor_type);

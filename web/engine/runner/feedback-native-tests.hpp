@@ -1,6 +1,18 @@
 // Direct engine audit: neither HTTP observations nor chart samples are inputs.
 void feedback_audit_tests()
 {
+    { // Same-bag commands are a QSS maximum, never an ordered action queue.
+        for (const bool reverse : {false,true}) {
+            irt::simulation bag;
+            auto& hold=add<irt::zero_order_hold>(bag);
+            auto& first=constant(bag,reverse ? 150 : 260,1);
+            auto& second=constant(bag,reverse ? 260 : 150,1);
+            checked(wire(bag,first,0,hold,0),"same bag first");
+            checked(wire(bag,second,0,hold,0),"same bag second");
+            const auto events=execute(bag,hold);
+            require(events.size()==1 && events[0].time==1 && events[0].value==irt::message{260,0,0},"same-bag hold is maximum");
+        }
+    }
     irt::simulation s;
     auto& x = add<irt::qss3_integrator>(s);
     s.parameters[s.get_id(x)].set_integrator(10, .01);
@@ -38,6 +50,22 @@ void feedback_audit_tests()
 
 void feedback_observer_tests()
 {
+    for (const bool reverse : {false,true}) {
+        // Two reads coincide with genuine QSS quantization events, with the
+        // observer IDs on either side of the two independent source IDs.
+        irt::simulation s;
+        irt::state_observer* n=reverse?&add<irt::state_observer>(s):nullptr;
+        irt::state_observer* c=reverse?&add<irt::state_observer>(s):nullptr;
+        auto& x=add<irt::qss3_integrator>(s); auto& y=add<irt::qss3_integrator>(s);
+        if(!n) n=&add<irt::state_observer>(s); if(!c) c=&add<irt::state_observer>(s);
+        s.parameters[s.get_id(x)].set_integrator(10,.01); s.parameters[s.get_id(y)].set_integrator(20,.015);
+        auto& a=constant(s,2); auto& b=constant(s,3); auto& read=constant(s,0,.005);
+        checked(wire(s,a,0,x,0),"pair derivative N"); checked(wire(s,b,0,y,0),"pair derivative C");
+        checked(wire(s,x,0,*n,0),"pair bind N"); checked(wire(s,y,0,*c,0),"pair bind C");
+        checked(wire(s,read,0,*n,1),"pair read N"); checked(wire(s,read,0,*c,1),"pair read C");
+        const auto events=execute(s,*n);
+        require(events.size()==1 && events[0].time==.005 && std::abs(events[0].value[0]-10.01)<1e-12 && std::abs(c->value-20.015)<1e-12,"paired read raced with QSS events");
+    }
     { // A real continuous value between quantized emissions, then a new action.
         irt::simulation s;
         auto& x = add<irt::qss3_integrator>(s);

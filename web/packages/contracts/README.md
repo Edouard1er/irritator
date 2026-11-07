@@ -363,6 +363,26 @@ Sémantique détaillée, cas limites et vérifications :
 
 ## Boucle native 8D
 
+En v3, `experiment.requiredInputs: ["facteurA", "facteurB"]` active les
+transactions de facteurs identifiées du wrapper, uniquement en mode complete.
+Les champs et commandes init/run portent `[valeur, 0, campagne]`, campagne
+entière de 1 à 2^53−1. Le port détermine le facteur. Toutes les entrées nommées
+doivent exister pour ce même cycle avant init ou run ; sinon erreur native de
+protocole, sans ancienne valeur de secours. Les autres facteurs utilisent le
+plan configuré s'ils sont absents du cycle. Les valeurs différentes reçues
+deux fois pour un même champ/cycle sont rejetées. Les champs sont traités
+avant init, puis run, même dans un seul sac. Un sac contient au plus une
+commande de chaque sorte et leurs campagnes doivent coïncider.
+
+Le wrapper garde au plus 128 trames de facteurs, indépendamment des réponses
+différées. Les runs doivent porter des campagnes strictement croissantes,
+sans obligation de contiguïté. Après run, les trames de numéro inférieur ou
+égal sont libérées ; les arrivées tardives sont rejetées. Les résultats
+individuels conservent exactement le numéro demandé. init conserve son effet
+d'annulation des réponses en attente. Les trames appartiennent à la ressource
+native du wrapper et sont effacées par initialize. Sans requiredInputs, ou
+avec une liste vide, le protocole scalaire historique reste actif.
+
 `state_observer` expose `source`, `read`, `reset` → `value`, `missing`.
 Relier une seule sortie d'intégrateur QSS1/2/3 à `source` : cette connexion lie
 l'état natif ; ses messages quantifiés ne servent pas de données mémorisées.

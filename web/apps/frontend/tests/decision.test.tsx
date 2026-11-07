@@ -15,6 +15,7 @@ import normalization8c from '../../../examples/decision-8c-normalization-v3.json
 import fallback8c from '../../../examples/decision-8c-fallback-v3.json';
 import schaefer8c from '../../../examples/decision-8c-schaefer-v3.json';
 import feedback8d from '../../../examples/decision-feedback-minimal-v3.json';
+import feedback8e from '../../../examples/decision-feedback-schaefer-v3.json';
 it('exposes generic decision primitives with editable native defaults', () => {
   const onAdd = vi.fn(); render(<ComponentLibrary catalog={catalog} onAdd={onAdd} onRetry={() => {}} />);
   for (const type of ['generator', 'event_tag', 'value_memory', 'event_operator', 'candidate_filter', 'candidate_select', 'campaign_aggregate', 'campaign_broadcast', 'selection_priority', 'state_observer', 'zero_order_hold']) {
@@ -32,13 +33,24 @@ it('configures comparison operations and fallback in the standard inspector', ()
   expect(screen.getByText(/Joint les valeurs par identité/)).toBeInTheDocument();
 });
 it('roundtrips scientific JSON and graphical workspace with generic hierarchical decisions', () => {
-  for (const example of [memory, reuse, prospective, schaeferExternal, aggregation8c, normalization8c, fallback8c, schaefer8c, feedback8d]) {
+  for (const example of [memory, reuse, prospective, schaeferExternal, aggregation8c, normalization8c, fallback8c, schaefer8c, feedback8d, feedback8e]) {
     const r = structuredClone(example); validateRequest(r);
     const state = deserializeModel(r);
     expect(serializeModel(state)).toEqual(r);
     const restored = loadWorkspace(saveWorkspace(state));
     expect(serializeModel(restored)).toEqual(r);
   }
+});
+it('8E keeps required factor identities when renaming and reordering the plan', () => {
+  const r=structuredClone(feedback8e) as RunRequest; validateRequest(r);
+  const e=r.model.components.find(c=>c.id==='forecast')!.experiment!;
+  const renamed=updateExperiment(r,'$root','forecast',{...e,factors:e.factors.map(f=>f.id==='initialN'?{...f,id:'biomass'}:f)},{factor:['initialN','biomass']});
+  expect(renamed.model.components.find(c=>c.id==='forecast')!.experiment!.requiredInputs).toEqual(['biomass','initialC']);
+  const next=renamed.model.components.find(c=>c.id==='forecast')!.experiment!;
+  const reordered=updateExperiment(renamed,'$root','forecast',{...next,factors:[...next.factors].reverse()});
+  validateRequest(reordered);
+  expect(reordered.model.connections.find(e=>e.to.component==='forecast'&&e.from.component==='synchronize'&&e.from.port===0)?.to.port).toBe(4);
+  expect(serializeModel(deserializeModel(reordered))).toEqual(reordered);
 });
 it('edits campaign reductions and branch priorities through standard metadata', () => {
   for (const [type, key, value] of [['campaign_aggregate', 'operation', 3], ['selection_priority', 'primaryPriority', 2], ['candidate_select', 'requireSecondary', 1]] as const) {

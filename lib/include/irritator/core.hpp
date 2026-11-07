@@ -2437,6 +2437,15 @@ struct embedded_simulation {
      * factors in the simulation-component. */
     vector<input_parameter> input_parameters;
 
+    // Optional addressed factor transactions. A port identifies the field;
+    // message[2] identifies the observation cycle (message[1] must be zero).
+    struct input_frame {
+        real campaign = 0;
+        std::array<real, 10> values{};
+        unsigned mask = 0;
+    };
+    vector<input_frame> input_frames;
+
     // Results belong to the typed embedded resource, whose destruction
     // releases their storage even when the parent model's byte buffer is
     // discarded. Later experiments cannot change these response snapshots.
@@ -8108,6 +8117,8 @@ struct simulation_wrapper {
     bool response_emitted = false;
     bool scenario_results = false;
     u64 campaign = 0;
+    unsigned required_inputs = 0;
+    u64 last_input_campaign = 0;
 
     simulation_wrapper() noexcept = default;
 

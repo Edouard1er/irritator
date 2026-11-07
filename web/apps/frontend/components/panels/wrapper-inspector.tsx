@@ -45,6 +45,7 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
     </section>
     <section className="inspector-section"><h3>Facteurs expérimentaux ({e.factors.length})</h3>
       {e.factors.map((f, i) => <fieldset className="experiment-card" key={f.id} data-testid={`factor-${f.id}`}><legend>{f.name || f.id}</legend>
+        <label className="checkbox"><input aria-label={`Entrée obligatoire ${f.id}`} type="checkbox" checked={e.requiredInputs?.includes(f.id) ?? false} onChange={event => edit({ ...e, requiredInputs: event.target.checked ? [...(e.requiredInputs ?? []), f.id] : e.requiredInputs?.filter(id => id !== f.id) })} />Recevoir ce facteur à chaque campagne</label>
         <CommitText label="Id du facteur" value={f.id} maxLength={31} onCommit={id => idError(id, e.factors, f.id) ?? edit({ ...e, factors: e.factors.map((x, j) => j === i ? { ...x, id } : x) }, { factor: [f.id, id] })} />
         <CommitText label="Nom du facteur (facultatif)" value={f.name ?? ''} onCommit={name => edit({ ...e, factors: e.factors.map((x, j) => { if (j !== i) return x; const { name: old, ...rest } = x; return name ? { ...rest, name } : rest; }) })} />
         <label className="field"><span>Cible du facteur</span><select aria-label="Cible du facteur" value={f.target} aria-invalid={!targets.some(a => a.path === f.target && a.parameter === f.parameter)} onChange={event => { const a = targets.find(a => a.path === event.target.value)!; edit({ ...e, factors: e.factors.map((x, j) => j === i ? { ...x, target: a.path, parameter: a.parameter! } : x) }); }}>
@@ -56,6 +57,7 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
       </fieldset>)}
       <button disabled={e.factors.length >= 10 || e.factors.length + e.selections.length >= 12 || !targets.some(a => !e.factors.some(f => f.target === a.path))} onClick={() => { const a = targets.find(a => !e.factors.some(f => f.target === a.path))!; edit({ ...e, factors: [...e.factors, { id: nextId('factor', e.factors), target: a.path, parameter: a.parameter!, type: 'single', value: a.component.parameters[a.parameter!] ?? 0 }] }); }}>Ajouter un facteur</button>
       <p className="small scenario-count" role="status">{scenarioCount(e)} scénario(s) configuré(s) · produit des cardinalités</p>
+      {!!e.requiredInputs?.length && <p className="small">Les facteurs et commandes utilisent [valeur, 0, campagne]. Chaque campagne doit fournir toutes ses entrées obligatoires avant init ou run. Le numéro de campagne est conservé dans les résultats ; les commandes s’exécutent dans l’ordre croissant des campagnes, en mode complete.</p>}
       <p className="small">Plafonds : {request.limits?.maxScenarios ?? wrapperCaps.maxScenarios} scénarios par wrapper ; {request.limits?.maxTotalScenarios ?? wrapperCaps.maxTotalScenarios} scénarios cumulés ; {request.limits?.maxInternalPoints ?? wrapperCaps.maxInternalPoints} points internes. Une cible ne peut avoir qu’un facteur.</p>
     </section>
     <section className="inspector-section"><h3>Sélections et critères ({e.selections.length})</h3>

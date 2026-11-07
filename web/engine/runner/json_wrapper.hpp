@@ -111,6 +111,18 @@ struct json_wrappers {
                 fail("INVALID_FACTOR","Factor parameter must map to a validated reals[0]");
             factor_values(item,atom,native); spec.factors.push_back(std::move(native));
         }
+        if(e.HasMember("requiredInputs")) {
+            std::set<std::string> required;
+            for(const auto& id:e["requiredInputs"].GetArray()) {
+                const auto name=str(id);
+                const auto it=std::find_if(spec.factors.begin(),spec.factors.end(),[&](const auto& factor){return factor.id==name;});
+                if(it==spec.factors.end() || !required.insert(name).second)
+                    fail("INVALID_FACTOR","Unknown or duplicate required factor input");
+                spec.required_inputs |= 1u << (it-spec.factors.begin());
+            }
+            if(spec.required_inputs && spec.mode!=R::complete)
+                fail("INVALID_EXPERIMENT","Addressed factor inputs require complete mode");
+        }
         names.clear();
         const std::map<std::string,irt::criteria_type> criteria{
             {"min",irt::criteria_type::min},{"max",irt::criteria_type::max},

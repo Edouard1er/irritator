@@ -22,6 +22,7 @@
     "state_observer"
   ],
   "wrapper": {
+    "requiredInputs": "complete-addressed-campaign-transactions-128",
     "scenarioResults": "raw-keyed-frames-zero-time-fifo",
     "implementation": "native-wrapper-7F",
     "runModes": [

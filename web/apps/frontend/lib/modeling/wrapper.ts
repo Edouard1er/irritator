@@ -92,6 +92,9 @@ export function updateExperiment(r: RunRequest, scopeId: string, componentId: st
   const result = structuredClone(r);
   const scope = scopes(result).find(s => s.id === scopeId)!;
   const next=structuredClone(experiment);
+  if (next.requiredInputs) next.requiredInputs = next.requiredInputs
+    .map(id => id === rename.factor?.[0] ? rename.factor[1] : id)
+    .filter(id => next.factors.some(f => f.id === id));
   // Objective arrays follow selection identities too, including rename/add/remove.
   // UI structural edits supply the arrays in the previous selection order.
   if(old.objective.method===next.objective.method &&

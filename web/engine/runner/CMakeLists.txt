@@ -36,6 +36,18 @@ if(MSVC)
   target_compile_options(irritator-runner PRIVATE /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd5030)
 endif()
 enable_testing()
+add_executable(schaefer-feedback-native schaefer-feedback-native.cpp)
+target_include_directories(schaefer-feedback-native PRIVATE "${IRRITATOR_ROOT}/external/rapidjson/include" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(schaefer-feedback-native PRIVATE irritator-native-wrapper)
+set_property(SOURCE schaefer-feedback-native.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/json_wrapper.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/hierarchy.hpp" "${CMAKE_CURRENT_BINARY_DIR}/contracts.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native_wrapper.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/native_graph.hpp"
+    "${IRRITATOR_ROOT}/lib/include/irritator/core.hpp" "${IRRITATOR_ROOT}/lib/include/irritator/event.hpp")
+if(MSVC)
+  target_compile_options(schaefer-feedback-native PRIVATE /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd5030)
+endif()
+add_test(NAME native-schaefer-feedback COMMAND schaefer-feedback-native "${CMAKE_CURRENT_LIST_DIR}/../../examples/decision-feedback-schaefer-v3.json")
+set_tests_properties(native-schaefer-feedback PROPERTIES TIMEOUT 30)
 add_executable(event-native-tests event-native-tests.cpp)
 set_property(SOURCE event-native-tests.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/campaign-native-tests.hpp"
@@ -78,3 +90,5 @@ add_test(NAME runner-decision-8c COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RU
 set_tests_properties(runner-decision-8c PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
 add_test(NAME runner-decision-8d COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/decision-8d-tests.mjs")
 set_tests_properties(runner-decision-8d PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
+add_test(NAME runner-decision-8e COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/decision-8e-tests.mjs")
+set_tests_properties(runner-decision-8e PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)

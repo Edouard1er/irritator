@@ -47,6 +47,7 @@ export type WrapperObjective = { type: OptimizationType } & (
   { method: 'epsilon-constrained'; primary: string; epsilons: number[]; operations: ConstraintOperation[] });
 export interface WrapperExperiment {
   scenarioResults?: boolean;
+  requiredInputs?: string[];
   definition: string; simulation: { start: number; end: number }; run: 'complete' | 'bag' | 'time' | 'until' | 'during';
   seed?: WrapperSeed;
   factors: WrapperFactor[]; selections: WrapperSelection[];
@@ -157,6 +158,7 @@ export function validateWrapperRequest(r: RunRequest): void {
   const sizes = validateHierarchy(r);
   if (declared.length > limits.maxWrappers) fail('LIMIT_EXCEEDED', 'Declared wrapper budget exceeded');
   function validate(e: WrapperExperiment) {
+    if (e.requiredInputs?.length && (e.run !== 'complete' || new Set(e.requiredInputs).size !== e.requiredInputs.length || e.requiredInputs.some(id => !e.factors.some(f => f.id === id)))) fail('INVALID_EXPERIMENT', 'Required inputs must name distinct factors in complete mode');
     if(e.seed && !e.seed.every(validU64)) fail('INVALID_EXPERIMENT', 'Seed must contain six exact unsigned 64-bit decimal strings');
     const { start, end } = e.simulation;
     if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start) || end - start > 1e9 || !(start + .1 > start) || !(end + .1 > end)) fail('INVALID_TIME', 'Invalid prospective horizon');
