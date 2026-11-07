@@ -72,6 +72,7 @@ const std::map<std::string,atomic_type> registry{
  {"campaign_broadcast",atomic<irt::campaign_broadcast>()},
  {"selection_priority",atomic<irt::selection_priority>()},
  {"state_observer",atomic<irt::state_observer>()},
+ {"group_aggregate",atomic<irt::group_aggregate>()},
  {"zero_order_hold",atomic<irt::zero_order_hold>()},
     {"constant",atomic<irt::constant>()}, {"qss1_sum_2",atomic<irt::qss1_sum_2>()},
     {"qss1_sum_3",atomic<irt::qss1_sum_3>()}, {"qss1_integrator",atomic<irt::qss1_integrator>()},
@@ -85,6 +86,7 @@ const std::map<std::string,atomic_type> registry{
 void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
     if (registry.contains(type)) target.init_from(registry.at(type).dynamics);
     if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); }
+    else if(type=="group_aggregate") { target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["validation"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); target.reals[0]=p["endCount"].GetDouble(); }
     else if(type=="state_observer") { target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="value_memory") { target.reals[0]=p["initial"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["emitOnWrite"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="event_operator") { target.reals[0]=p["left"].GetDouble(); target.reals[1]=p["right"].GetDouble(); target.reals[2]=p["epsilon"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["automatic"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }

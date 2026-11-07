@@ -118,6 +118,7 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
         { "event_operator", dynamics_type::event_operator },
         { "event_tag", dynamics_type::event_tag },
         { "generator", dynamics_type::generator },
+        { "group_aggregate", dynamics_type::group_aggregate },
         { "hsm_wrapper", dynamics_type::hsm_wrapper },
         { "logical_and_2", dynamics_type::logical_and_2 },
         { "logical_and_3", dynamics_type::logical_and_3 },

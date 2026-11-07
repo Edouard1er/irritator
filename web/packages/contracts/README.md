@@ -396,3 +396,61 @@ et émet seulement `[valeur,0,0]`, pour éviter qu'une identité devienne une
 dérivée QSS3. Dans un même sac, sa règle native retient la valeur maximale.
 L'exemple `decision-feedback-minimal-v3.json` assemble lecture, mémoire,
 configuration prospective, commandes, décision couplée et action maintenue.
+
+## Test 8G : agrégats de groupes identifiés
+
+`group_aggregate` reçoit key/action/value/valid/weight/end/seal/reset, et émet
+aggregate/action/end/status/validCount/totalCount/member/invalid/campaignStatus/key.
+Les données sont `[valeur,scénario,campagne]`. La jointure attend le masque
+`required` : 1 valeur, 2 validité, 4 poids, 8 action ; key est toujours requis,
+la valeur est requise sauf pour count, et le poids est obligatoire pour les
+opérations pondérées. Une validité explicite 0 dispense de valeur et de poids,
+mais pas du manifeste clé/action. Action facultative prend la valeur de key.
+
+Les clés finies sont comparées exactement en double (sans epsilon ni chaîne
+arrondie ; +0 et -0 sont une même valeur numérique). L'identité du groupe est
+la plus petite identité de scénario portant cette clé dans cette campagne.
+Tous les membres doivent décrire une même action. `member=[scénario,groupe,campagne]`
+permet de retrouver chaque origine ; `key=[clé,groupe,campagne]` conserve le
+facteur, même s'il diffère de l'action. Les autres sorties sont identifiées par
+`[valeur,groupe,campagne]` ; end et campaignStatus ont l'identité 0.
+
+`operation` : 0 min, 1 max, 2 somme, 3 moyenne descriptive, 4 nombre valide,
+5 somme pondérée, 6 moyenne pondérée. Aucun poids implicite : la moyenne
+descriptive ne constitue pas une espérance. Poids finis, non négatifs ; la
+moyenne pondérée exige une somme de poids positive. Les réductions suivent
+l'ordre croissant des identités de scénario.
+
+Avec `endCount=1` (défaut), end est la clôture du wrapper `[valides,total,campagne]`.
+Avec 0, il porte `[nombre,0,campagne]`. Une clôture ordinaire attend toutes les
+lignes et leurs champs requis ; un champ reçu après end peut donc compléter
+la campagne. En attente, campaignStatus=3 et aucun agrégat complet n'est émis.
+`seal=[commande,0,campagne]`, après end, conclut explicitement malgré les absences.
+Un seal avant end, un compte contradictoire, une écriture dupliquée, une action
+conflictuelle ou une réponse après clôture effective produit une erreur explicite.
+
+`validation=0` exige tous les membres valides dans chaque groupe et un manifeste
+complet de campagne ; 1 agrège les membres disponibles. status vaut 1 complet,
+2 partiel, 0 invalide. Un groupe sans membre valide ne produit jamais d'agrégat,
+y compris avec count (validCount=0 reste observable). invalid vaut 1 pour des
+absences/manifeste inconnu, 2 pour des membres invalides, 3 pour un résultat
+numérique inutilisable. End compte uniquement les groupes ayant réellement
+émis aggregate et action. CampaignStatus vaut 1 si tout est complet et valide,
+2 si des groupes utilisables subsistent dans une campagne dégradée, 0 sinon.
+Une absence intégrale de scénario ne reçoit ni clé ni résultat inventés.
+
+Les lignes vivantes, campagnes et plages anti-rejeu sont bornées par capacity.
+Les clôtures consécutives fusionnent en une plage ; des identités de campagne
+très dispersées peuvent nécessiter un reset explicite. Le reset annule les
+réponses en attente et les identités clôturées. Copie, snapshot et désallocation
+utilisent le stockage possédé `simulation::event_states`. La FIFO est bornée
+à `16*capacity+16` messages. Les limites générales du moteur restent actives.
+
+Plusieurs métriques se composent avec plusieurs instances partageant le même
+manifeste. Les branches décisionnelles doivent recevoir le même ensemble de
+groupes admissibles : joindre leurs champs obligatoires ou appliquer une
+validité commune avant la réduction. Une branche incomplète reste en attente ;
+son absence ne vaut ni un indicateur nul ni une contrainte satisfaite.
+Les exemples `decision-grouped-schaefer-v3.json` et
+`tstar-schaefer-uncertainty-v3.json` exposent poids et scellement dans les
+interfaces couplées ; le q prospectif n'est relié à aucune action du Plant.

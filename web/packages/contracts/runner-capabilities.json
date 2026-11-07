@@ -19,7 +19,8 @@
     "campaign_aggregate",
     "campaign_broadcast",
     "selection_priority",
-    "state_observer"
+    "state_observer",
+    "group_aggregate"
   ],
   "wrapper": {
     "requiredInputs": "complete-addressed-campaign-transactions-128",

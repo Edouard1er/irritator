@@ -1133,6 +1133,148 @@
           "name": "out"
         }
       ]
+    },
+    {
+      "type": "group_aggregate",
+      "name": "Agrégation par groupe",
+      "description": "Joint les scénarios par identité et campagne, puis regroupe par clé numérique exacte. Identité du groupe = plus petite identité de membre. end attend les champs requis ; seal conclut explicitement les absences. status : 0 invalide, 1 complet, 2 partiel. Aucun poids implicite pour les opérations pondérées.",
+      "parameters": {
+        "operation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 0,
+          "choices": [
+            "Minimum",
+            "Maximum",
+            "Somme",
+            "Moyenne descriptive",
+            "Nombre valide",
+            "Somme pondérée explicite",
+            "Moyenne pondérée explicite"
+          ],
+          "description": "Une moyenne descriptive ne constitue pas une espérance. Poids explicites finis, non négatifs ; somme positive pour une moyenne pondérée."
+        },
+        "validation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "choices": [
+            "Exiger tous les scénarios",
+            "Utiliser les disponibles avec statut partiel"
+          ],
+          "description": "Strict : aucune valeur issue de données incomplètes. Disponible : status=2 pour un résultat partiel ; zéro membre valide ne produit aucun agrégat."
+        },
+        "required": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15,
+          "default": 11,
+          "description": "Masque : 1 valeur, 2 validité, 4 poids, 8 action. Clé toujours requise ; valeur requise sauf count ; poids requis par les opérations pondérées. Action facultative = clé."
+        },
+        "endCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "choices": [
+            "Nombre dans le premier réel",
+            "Clôture wrapper : total dans le deuxième réel"
+          ],
+          "description": "Wrapper : [valides,total,campagne]. Flux ordinaire : [nombre,0,campagne]."
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Borne les scénarios vivants, campagnes et plages de clôture anti-rejeu. Reset annule les sorties en attente et les clôtures mémorisées."
+        }
+      },
+      "required": [
+        "operation",
+        "validation",
+        "required",
+        "endCount",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "key"
+        },
+        {
+          "port": 1,
+          "name": "action"
+        },
+        {
+          "port": 2,
+          "name": "value"
+        },
+        {
+          "port": 3,
+          "name": "valid"
+        },
+        {
+          "port": 4,
+          "name": "weight"
+        },
+        {
+          "port": 5,
+          "name": "end"
+        },
+        {
+          "port": 6,
+          "name": "seal"
+        },
+        {
+          "port": 7,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "aggregate"
+        },
+        {
+          "port": 1,
+          "name": "action"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        },
+        {
+          "port": 3,
+          "name": "status"
+        },
+        {
+          "port": 4,
+          "name": "validCount"
+        },
+        {
+          "port": 5,
+          "name": "totalCount"
+        },
+        {
+          "port": 6,
+          "name": "member"
+        },
+        {
+          "port": 7,
+          "name": "invalid"
+        },
+        {
+          "port": 8,
+          "name": "campaignStatus"
+        },
+        {
+          "port": 9,
+          "name": "key"
+        }
+      ]
     }
   ]
 }

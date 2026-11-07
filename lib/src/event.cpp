@@ -67,6 +67,7 @@ real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
     }
 }
 #include "campaign-event.hpp"
+#include "group-event.hpp"
 } // namespace
 
 template<event_kind K>
@@ -85,6 +86,9 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
             (reals[1] != 0 and reals[1] != 1) or (reals[2] != 0 and reals[2] != 1)) return protocol_error();
     if constexpr (K == event_kind::aggregate)
         if (integers[0] < 0 or integers[0] > 4) return protocol_error();
+    if constexpr (K == event_kind::group)
+        if (integers[0] < 0 or integers[0] > 6 or integers[1] < 0 or integers[1] > 1 or
+            integers[2] < 0 or integers[2] > 15 or (reals[0] != 0 and reals[0] != 1)) return protocol_error();
     if constexpr (K == event_kind::tag)
         if (not event_identifier(reals[0]) or not event_identifier(reals[1])) return protocol_error();
     if (not sim.event_states.data.reserve(sim.event_states.size() + 1)) return capacity_error();
@@ -141,6 +145,8 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
                 const auto campaign = sent.value[2];
                 s.rows.erase(std::remove_if(s.rows.begin(), s.rows.end(), [campaign](const auto& r) { return r.campaign == campaign; }), s.rows.end());
                 s.barriers.erase(std::remove_if(s.barriers.begin(), s.barriers.end(), [campaign](const auto& b) { return b.campaign == campaign; }), s.barriers.end());
+                if constexpr (K == event_kind::group)
+                    s.groups.erase(std::remove_if(s.groups.begin(), s.groups.end(), [campaign](const auto& r) { return r.campaign == campaign; }), s.groups.end());
             }
         }
         s.pending.erase(s.pending.begin()); emitted = false;
@@ -149,6 +155,7 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
         constexpr int reset_port = K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
         if (not get_message(sim, x[reset_port]).empty()) {
             s.rows.clear(); s.barriers.clear(); s.pending.clear(); s.reads.clear();
+            s.groups.clear(); s.closed.clear();
             if constexpr (K == event_kind::state_observer) value = 0;
             if constexpr (K == event_kind::memory) {
                 auto* r = row(s, message{ reals[0], 0, 0 }, capacity, reals[0], 0, 1);
@@ -202,6 +209,8 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
             for (const auto& r : s.rows) if (r.key == m[1] and r.campaign == m[2]) { found = &r; break; }
             irt_check(emit(s, found ? 0 : 1, found ? found->a : 0, m[1], m[2]));
         }
+    } else if constexpr (K == event_kind::group) {
+        irt_check(group_transition(sim, *this, s, capacity));
     } else if constexpr (K == event_kind::aggregate or K == event_kind::broadcast or K == event_kind::priority) {
         irt_check(campaign_transition(sim, *this, s, capacity));
     } else {
@@ -327,4 +336,5 @@ template struct event_dynamics<event_kind::aggregate>;
 template struct event_dynamics<event_kind::broadcast>;
 template struct event_dynamics<event_kind::priority>;
 template struct event_dynamics<event_kind::state_observer>;
+template struct event_dynamics<event_kind::group>;
 } // namespace irt

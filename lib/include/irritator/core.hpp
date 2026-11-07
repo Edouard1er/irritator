@@ -1163,11 +1163,12 @@ enum class dynamics_type : u8 {
     campaign_broadcast,
     selection_priority,
     state_observer,
+    group_aggregate,
 };
 
 constexpr int dynamics_type_last() noexcept
 {
-    return static_cast<int>(dynamics_type::state_observer);
+    return static_cast<int>(dynamics_type::group_aggregate);
 }
 
 constexpr int dynamics_type_size() noexcept { return dynamics_type_last() + 1; }
@@ -8695,7 +8696,7 @@ constexpr sz max_size_in_bytes() noexcept
       sizeof(time_func), sizeof(accumulator_2), sizeof(logical_and_2),
       sizeof(logical_and_3), sizeof(logical_or_2), sizeof(logical_or_3),
       sizeof(logical_invert), sizeof(hsm_wrapper), sizeof(simulation_wrapper),
-      sizeof(event_tag), sizeof(value_memory), sizeof(event_operator), sizeof(candidate_filter), sizeof(candidate_select), sizeof(campaign_aggregate), sizeof(campaign_broadcast), sizeof(selection_priority), sizeof(state_observer),
+      sizeof(event_tag), sizeof(value_memory), sizeof(event_operator), sizeof(candidate_filter), sizeof(candidate_select), sizeof(campaign_aggregate), sizeof(campaign_broadcast), sizeof(selection_priority), sizeof(state_observer), sizeof(group_aggregate),
       sizeof(qss1_sample_hold), sizeof(qss2_sample_hold),
       sizeof(qss3_sample_hold), sizeof(zero_order_hold), sizeof(qss1_quantizer),
       sizeof(qss2_quantizer), sizeof(qss3_quantizer),
@@ -8721,6 +8722,7 @@ constexpr sz max_size_in_bytes() noexcept
 
 template<typename Dynamics>
 concept dynamics = std::is_same_v<Dynamics, state_observer> or
+                   std::is_same_v<Dynamics, group_aggregate> or
                    std::is_same_v<Dynamics, campaign_aggregate> or
                    std::is_same_v<Dynamics, campaign_broadcast> or
                    std::is_same_v<Dynamics, selection_priority> or
@@ -9069,6 +9071,8 @@ static constexpr dynamics_type dynamics_typeof() noexcept
         return dynamics_type::campaign_aggregate;
     if constexpr (std::is_same_v<Dynamics, campaign_broadcast>)
         return dynamics_type::campaign_broadcast;
+    if constexpr (std::is_same_v<Dynamics, group_aggregate>)
+        return dynamics_type::group_aggregate;
     if constexpr (std::is_same_v<Dynamics, state_observer>)
         return dynamics_type::state_observer;
 
@@ -9634,6 +9638,8 @@ constexpr auto dispatch(const model& mdl, Function&& f, Args&&... args) noexcept
         return std::invoke(std::forward<Function>(f), *reinterpret_cast<const campaign_aggregate*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::campaign_broadcast:
         return std::invoke(std::forward<Function>(f), *reinterpret_cast<const campaign_broadcast*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::group_aggregate:
+        return std::invoke(std::forward<Function>(f), *reinterpret_cast<const group_aggregate*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::state_observer:
         return std::invoke(std::forward<Function>(f), *reinterpret_cast<const state_observer*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::selection_priority:
@@ -10232,6 +10238,8 @@ constexpr auto dispatch(model& mdl, Function&& f, Args&&... args) noexcept
         return f(*reinterpret_cast<campaign_aggregate*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::campaign_broadcast:
         return f(*reinterpret_cast<campaign_broadcast*>(&mdl.dyn), std::forward<Args>(args)...);
+    case dynamics_type::group_aggregate:
+        return f(*reinterpret_cast<group_aggregate*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::state_observer:
         return f(*reinterpret_cast<state_observer*>(&mdl.dyn), std::forward<Args>(args)...);
     case dynamics_type::selection_priority:
@@ -10617,6 +10625,7 @@ inline bool is_ports_compatible(const dynamics_type mdl_src,
     case dynamics_type::campaign_aggregate:
     case dynamics_type::campaign_broadcast:
     case dynamics_type::selection_priority:
+    case dynamics_type::group_aggregate:
     case dynamics_type::state_observer:
     case dynamics_type::simulation_wrapper:
     case dynamics_type::accumulator_2:

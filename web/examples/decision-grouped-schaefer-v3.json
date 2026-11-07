@@ -1,0 +1,1978 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "decision-grouped-schaefer",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.0033333333333333335,
+              "offset": 0
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 260,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "ConditionalDecision",
+        "name": "ConditionalDecision",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "primary"
+          },
+          {
+            "port": 1,
+            "name": "secondary"
+          },
+          {
+            "port": 2,
+            "name": "action"
+          },
+          {
+            "port": 3,
+            "name": "condition"
+          },
+          {
+            "port": 4,
+            "name": "end"
+          },
+          {
+            "name": "reset",
+            "port": 5
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          },
+          {
+            "port": 1,
+            "name": "identity"
+          },
+          {
+            "port": 2,
+            "name": "score"
+          },
+          {
+            "port": 3,
+            "name": "selected"
+          },
+          {
+            "port": 4,
+            "name": "taggedAction"
+          },
+          {
+            "port": 5,
+            "name": "secondary"
+          },
+          {
+            "port": 6,
+            "name": "end"
+          },
+          {
+            "name": "primarySelected",
+            "port": 7
+          },
+          {
+            "name": "secondarySelected",
+            "port": 8
+          }
+        ],
+        "components": [
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 15,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "primary",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128,
+              "requireSecondary": 1,
+              "secondaryDirection": 0
+            }
+          },
+          {
+            "id": "secondary",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128,
+              "requireSecondary": 1,
+              "secondaryDirection": 0
+            }
+          },
+          {
+            "id": "priority",
+            "type": "selection_priority",
+            "parameters": {
+              "primaryPriority": 0,
+              "secondaryPriority": 1,
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 3
+            },
+            "to": {
+              "component": "filter",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "primary",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "primary",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 4
+            },
+            "to": {
+              "component": "primary",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "primary",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "secondary",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "secondary",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "secondary",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "secondary",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 4
+            },
+            "to": {
+              "component": "priority",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 2
+            },
+            "to": {
+              "component": "priority",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 5
+            },
+            "to": {
+              "component": "priority",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 3
+            },
+            "to": {
+              "component": "priority",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 4
+            },
+            "to": {
+              "component": "priority",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 2
+            },
+            "to": {
+              "component": "priority",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 5
+            },
+            "to": {
+              "component": "priority",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 3
+            },
+            "to": {
+              "component": "priority",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 4
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 5
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 6
+            },
+            "to": {
+              "component": "$output",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "filter",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "primary",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "secondary",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "priority",
+              "port": 8
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 8
+            }
+          }
+        ]
+      },
+      {
+        "id": "GroupedDecision",
+        "name": "Actions regroupées — critères configurables",
+        "inputs": [
+          {
+            "name": "Nmin",
+            "port": 0
+          },
+          {
+            "name": "CH",
+            "port": 1
+          },
+          {
+            "name": "E",
+            "port": 2
+          },
+          {
+            "name": "valid",
+            "port": 3
+          },
+          {
+            "name": "end",
+            "port": 4
+          },
+          {
+            "name": "reset",
+            "port": 5
+          },
+          {
+            "name": "weight",
+            "port": 6
+          },
+          {
+            "name": "seal",
+            "port": 7
+          }
+        ],
+        "outputs": [
+          {
+            "name": "action",
+            "port": 0
+          },
+          {
+            "name": "identity",
+            "port": 1
+          },
+          {
+            "name": "score",
+            "port": 2
+          },
+          {
+            "name": "selected",
+            "port": 3
+          },
+          {
+            "name": "taggedAction",
+            "port": 4
+          },
+          {
+            "name": "secondary",
+            "port": 5
+          },
+          {
+            "name": "end",
+            "port": 6
+          },
+          {
+            "name": "primarySelected",
+            "port": 7
+          },
+          {
+            "name": "secondarySelected",
+            "port": 8
+          }
+        ],
+        "components": [
+          {
+            "id": "minCH",
+            "type": "group_aggregate",
+            "parameters": {
+              "operation": 0,
+              "validation": 0,
+              "required": 11,
+              "endCount": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "maxCH",
+            "type": "group_aggregate",
+            "parameters": {
+              "operation": 1,
+              "validation": 0,
+              "required": 11,
+              "endCount": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "minN",
+            "type": "group_aggregate",
+            "parameters": {
+              "operation": 0,
+              "validation": 0,
+              "required": 11,
+              "endCount": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "count",
+            "type": "group_aggregate",
+            "parameters": {
+              "operation": 4,
+              "validation": 0,
+              "required": 11,
+              "endCount": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "chReady",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 3,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "joinCH",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 1,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 3,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "joinN",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 0,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 3,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "scoreReady",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 3,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "joinGroups",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 1,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 3,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "admissible",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 10,
+              "left": 0,
+              "right": 140,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "choose",
+            "type": "coupled",
+            "parameters": {},
+            "definition": "ConditionalDecision"
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "minCH",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "minCH",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "minCH",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "joinN",
+              "port": 0
+            },
+            "to": {
+              "component": "minCH",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "minCH",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "minCH",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 6
+            },
+            "to": {
+              "component": "minCH",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 7
+            },
+            "to": {
+              "component": "minCH",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "joinN",
+              "port": 0
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 6
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 7
+            },
+            "to": {
+              "component": "maxCH",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "minN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "minN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "minN",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "joinN",
+              "port": 0
+            },
+            "to": {
+              "component": "minN",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "minN",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "minN",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 6
+            },
+            "to": {
+              "component": "minN",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 7
+            },
+            "to": {
+              "component": "minN",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "count",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "count",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "count",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "joinN",
+              "port": 0
+            },
+            "to": {
+              "component": "count",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "count",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "count",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 6
+            },
+            "to": {
+              "component": "count",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 7
+            },
+            "to": {
+              "component": "count",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "chReady",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "chReady",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "chReady",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "chReady",
+              "port": 0
+            },
+            "to": {
+              "component": "joinCH",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 3
+            },
+            "to": {
+              "component": "joinCH",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "chReady",
+              "port": 2
+            },
+            "to": {
+              "component": "joinCH",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "joinCH",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "joinCH",
+              "port": 0
+            },
+            "to": {
+              "component": "joinN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "joinN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "joinCH",
+              "port": 2
+            },
+            "to": {
+              "component": "joinN",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "joinN",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "minCH",
+              "port": 0
+            },
+            "to": {
+              "component": "scoreReady",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "minCH",
+              "port": 2
+            },
+            "to": {
+              "component": "scoreReady",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "scoreReady",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "scoreReady",
+              "port": 0
+            },
+            "to": {
+              "component": "joinGroups",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "minN",
+              "port": 0
+            },
+            "to": {
+              "component": "joinGroups",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "scoreReady",
+              "port": 2
+            },
+            "to": {
+              "component": "joinGroups",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "joinGroups",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "joinGroups",
+              "port": 0
+            },
+            "to": {
+              "component": "admissible",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "joinGroups",
+              "port": 2
+            },
+            "to": {
+              "component": "admissible",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "admissible",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "minCH",
+              "port": 0
+            },
+            "to": {
+              "component": "choose",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "joinGroups",
+              "port": 0
+            },
+            "to": {
+              "component": "choose",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "minCH",
+              "port": 1
+            },
+            "to": {
+              "component": "choose",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "admissible",
+              "port": 0
+            },
+            "to": {
+              "component": "choose",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "joinGroups",
+              "port": 2
+            },
+            "to": {
+              "component": "choose",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 5
+            },
+            "to": {
+              "component": "choose",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 4
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 5
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 6
+            },
+            "to": {
+              "component": "$output",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 7
+            },
+            "to": {
+              "component": "$output",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "choose",
+              "port": 8
+            },
+            "to": {
+              "component": "$output",
+              "port": 8
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "decision",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Schaefer",
+          "simulation": {
+            "start": 0,
+            "end": 20
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "effort",
+              "target": "E",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                80,
+                150,
+                260
+              ]
+            },
+            {
+              "id": "capturabilite",
+              "target": "q",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                0.0008,
+                0.001
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "Nmin",
+              "target": "N",
+              "criteria": "min"
+            },
+            {
+              "id": "CH",
+              "target": "C",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "CH"
+          },
+          "scenarioResults": true
+        }
+      },
+      {
+        "id": "external",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "GroupedDecision"
+      },
+      {
+        "id": "internalNmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalCH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalE",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "internalQ",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "action",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "actionReceipt",
+        "type": "value_memory",
+        "parameters": {
+          "initial": -999,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "identity",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "score",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "selected",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "decision",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 0
+        },
+        "to": {
+          "component": "internalNmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 1
+        },
+        "to": {
+          "component": "internalCH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 2
+        },
+        "to": {
+          "component": "internalE",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 3
+        },
+        "to": {
+          "component": "internalQ",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 0
+        },
+        "to": {
+          "component": "action",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 0
+        },
+        "to": {
+          "component": "actionReceipt",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 1
+        },
+        "to": {
+          "component": "identity",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 2
+        },
+        "to": {
+          "component": "score",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "external",
+          "port": 3
+        },
+        "to": {
+          "component": "selected",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 7
+        },
+        "to": {
+          "component": "external",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 8
+        },
+        "to": {
+          "component": "external",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 5
+        },
+        "to": {
+          "component": "external",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 4
+        },
+        "to": {
+          "component": "external",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "decision",
+          "port": 9
+        },
+        "to": {
+          "component": "external",
+          "port": 4
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "internalNmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalCH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalE",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "internalQ",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "action",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "actionReceipt",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "identity",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "score",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "selected",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "external/minCH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "external/maxCH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "external/minN",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "external/count",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}
