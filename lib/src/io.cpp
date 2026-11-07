@@ -108,6 +108,8 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
 
     static constexpr string_to_type table[] = {
         { "accumulator_2", dynamics_type::accumulator_2 },
+        { "campaign_aggregate", dynamics_type::campaign_aggregate },
+        { "campaign_broadcast", dynamics_type::campaign_broadcast },
         { "candidate_filter", dynamics_type::candidate_filter },
         { "candidate_select", dynamics_type::candidate_select },
         { "constant", dynamics_type::constant },
@@ -253,7 +255,9 @@ auto get_dynamics_type(std::string_view dynamics_name) noexcept
         { "qss3_wsum_3", dynamics_type::qss3_wsum_3 },
         { "qss3_wsum_4", dynamics_type::qss3_wsum_4 },
         { "queue", dynamics_type::queue },
+        { "selection_priority", dynamics_type::selection_priority },
         { "simulation_wrapper", dynamics_type::simulation_wrapper },
+        { "state_observer", dynamics_type::state_observer },
         { "time_func", dynamics_type::time_func },
         { "value_memory", dynamics_type::value_memory },
         { "zero_order_hold", dynamics_type::zero_order_hold },

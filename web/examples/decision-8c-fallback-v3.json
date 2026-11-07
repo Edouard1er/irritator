@@ -1,0 +1,1010 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "conditional-real-candidate",
+    "definitions": [
+      {
+        "id": "ConditionalDecision",
+        "name": "ConditionalDecision",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "primary"
+          },
+          {
+            "port": 1,
+            "name": "secondary"
+          },
+          {
+            "port": 2,
+            "name": "action"
+          },
+          {
+            "port": 3,
+            "name": "condition"
+          },
+          {
+            "port": 4,
+            "name": "end"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          },
+          {
+            "port": 1,
+            "name": "identity"
+          },
+          {
+            "port": 2,
+            "name": "score"
+          },
+          {
+            "port": 3,
+            "name": "selected"
+          },
+          {
+            "port": 4,
+            "name": "taggedAction"
+          },
+          {
+            "port": 5,
+            "name": "secondary"
+          },
+          {
+            "port": 6,
+            "name": "end"
+          }
+        ],
+        "components": [
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 15,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "primary",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128,
+              "requireSecondary": 1,
+              "secondaryDirection": 0
+            }
+          },
+          {
+            "id": "secondary",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128,
+              "requireSecondary": 1,
+              "secondaryDirection": 0
+            }
+          },
+          {
+            "id": "priority",
+            "type": "selection_priority",
+            "parameters": {
+              "primaryPriority": 0,
+              "secondaryPriority": 1,
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 3
+            },
+            "to": {
+              "component": "filter",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "primary",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "primary",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 4
+            },
+            "to": {
+              "component": "primary",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "primary",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "secondary",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "secondary",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "secondary",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 4
+            },
+            "to": {
+              "component": "secondary",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 4
+            },
+            "to": {
+              "component": "priority",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 2
+            },
+            "to": {
+              "component": "priority",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 5
+            },
+            "to": {
+              "component": "priority",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "primary",
+              "port": 3
+            },
+            "to": {
+              "component": "priority",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 4
+            },
+            "to": {
+              "component": "priority",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 2
+            },
+            "to": {
+              "component": "priority",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 5
+            },
+            "to": {
+              "component": "priority",
+              "port": 6
+            }
+          },
+          {
+            "from": {
+              "component": "secondary",
+              "port": 3
+            },
+            "to": {
+              "component": "priority",
+              "port": 7
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 4
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 5
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          },
+          {
+            "from": {
+              "component": "priority",
+              "port": 6
+            },
+            "to": {
+              "component": "$output",
+              "port": 6
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "decide",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "ConditionalDecision"
+      },
+      {
+        "id": "s1",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s1t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s3",
+        "type": "constant",
+        "parameters": {
+          "value": 9,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s3t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s5",
+        "type": "constant",
+        "parameters": {
+          "value": 100,
+          "offset": 0.3
+        }
+      },
+      {
+        "id": "s5t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s7",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s7t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s9",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s9t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s11",
+        "type": "constant",
+        "parameters": {
+          "value": 2,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s11t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s13",
+        "type": "constant",
+        "parameters": {
+          "value": 200,
+          "offset": 0.3
+        }
+      },
+      {
+        "id": "s13t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s15",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s15t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s17",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s17t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s19",
+        "type": "constant",
+        "parameters": {
+          "value": 4,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s19t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s21",
+        "type": "constant",
+        "parameters": {
+          "value": 300,
+          "offset": 0.3
+        }
+      },
+      {
+        "id": "s21t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s23",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s23t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s25",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s25t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "action",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "identity",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "score",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "selected",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "taggedAction",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "secondary",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "end",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "s1",
+          "port": 0
+        },
+        "to": {
+          "component": "s1t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s1t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s3",
+          "port": 0
+        },
+        "to": {
+          "component": "s3t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s3t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "s5",
+          "port": 0
+        },
+        "to": {
+          "component": "s5t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s5t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "s7",
+          "port": 0
+        },
+        "to": {
+          "component": "s7t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s7t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "s9",
+          "port": 0
+        },
+        "to": {
+          "component": "s9t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s9t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s11",
+          "port": 0
+        },
+        "to": {
+          "component": "s11t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s11t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "s13",
+          "port": 0
+        },
+        "to": {
+          "component": "s13t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s13t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "s15",
+          "port": 0
+        },
+        "to": {
+          "component": "s15t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s15t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "s17",
+          "port": 0
+        },
+        "to": {
+          "component": "s17t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s17t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s19",
+          "port": 0
+        },
+        "to": {
+          "component": "s19t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s19t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "s21",
+          "port": 0
+        },
+        "to": {
+          "component": "s21t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s21t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "s23",
+          "port": 0
+        },
+        "to": {
+          "component": "s23t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s23t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 3
+        }
+      },
+      {
+        "from": {
+          "component": "s25",
+          "port": 0
+        },
+        "to": {
+          "component": "s25t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s25t",
+          "port": 0
+        },
+        "to": {
+          "component": "decide",
+          "port": 4
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 0
+        },
+        "to": {
+          "component": "action",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 1
+        },
+        "to": {
+          "component": "identity",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 2
+        },
+        "to": {
+          "component": "score",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 3
+        },
+        "to": {
+          "component": "selected",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 4
+        },
+        "to": {
+          "component": "taggedAction",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 5
+        },
+        "to": {
+          "component": "secondary",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 6
+        },
+        "to": {
+          "component": "end",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "action",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "identity",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "score",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "selected",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "taggedAction",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "secondary",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "end",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

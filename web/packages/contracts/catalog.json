@@ -655,9 +655,9 @@
         "required": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 7,
+          "maximum": 15,
           "default": 1,
-          "description": "Masque obligatoire : 1=score, 2=action, 4=condition. Le score est obligatoire."
+          "description": "Masque requis : 1=score, 2=action, 4=condition, 8=second score. Le score reste obligatoire."
         },
         "capacity": {
           "type": "integer",
@@ -693,6 +693,10 @@
         {
           "port": 4,
           "name": "reset"
+        },
+        {
+          "port": 5,
+          "name": "secondary"
         }
       ],
       "outputs": [
@@ -711,13 +715,17 @@
         {
           "port": 3,
           "name": "rejected"
+        },
+        {
+          "port": 4,
+          "name": "secondary"
         }
       ]
     },
     {
       "type": "candidate_select",
       "name": "Sélection de candidat",
-      "description": "Attend end et toutes les actions. Égalité : plus petite identité. Aucun candidat : selected=0 et action seulement si emitFallback=1. La sortie action est un scalaire DEVS [action,0,0].",
+      "description": "Attend la clôture et les champs requis. Compare score, second score optionnel puis identité numérique croissante. Action scalaire et action identifiée ; selected=1 uniquement pour un vrai candidat. end compte 0 ou 1 ligne.",
       "parameters": {
         "direction": {
           "type": "integer",
@@ -754,7 +762,10 @@
           "maximum": 1,
           "default": 1,
           "description": "Campagne vide : supprimer l’action ou émettre le repli configuré. Défaut historique : 1.",
-          "choices": ["Aucune action", "Émettre fallback"]
+          "choices": [
+            "Aucune action",
+            "Émettre fallback"
+          ]
         },
         "capacity": {
           "type": "integer",
@@ -762,6 +773,28 @@
           "maximum": 4096,
           "default": 128,
           "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        },
+        "requireSecondary": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Attendre et comparer un second score après le premier.",
+          "choices": [
+            "Un score",
+            "Deux scores"
+          ]
+        },
+        "secondaryDirection": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Sens du second critère en cas d’égalité du premier.",
+          "choices": [
+            "Maximum",
+            "Minimum"
+          ]
         }
       },
       "required": [
@@ -786,6 +819,10 @@
         {
           "port": 3,
           "name": "reset"
+        },
+        {
+          "port": 4,
+          "name": "secondary"
         }
       ],
       "outputs": [
@@ -804,6 +841,296 @@
         {
           "port": 3,
           "name": "selected"
+        },
+        {
+          "port": 4,
+          "name": "taggedAction"
+        },
+        {
+          "port": 5,
+          "name": "secondary"
+        },
+        {
+          "port": 6,
+          "name": "end"
+        }
+      ]
+    },
+    {
+      "type": "campaign_aggregate",
+      "name": "Agrégation par campagne",
+      "description": "Attend toutes les identités distinctes et end. Produit [agrégat,0,campagne], puis end=1. Vide : somme et count valent 0 ; min/max/moyenne émettent invalid et end=0. Toute valeur non finie invalide la campagne.",
+      "parameters": {
+        "operation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "default": 0,
+          "description": "Réduction native sur les candidats de la campagne.",
+          "choices": [
+            "Minimum",
+            "Maximum",
+            "Somme",
+            "Moyenne",
+            "Nombre de candidats"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de lignes et de campagnes simultanées. Reset annule les sorties en attente."
+        }
+      },
+      "required": [
+        "operation",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "end"
+        },
+        {
+          "port": 2,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "aggregate"
+        },
+        {
+          "port": 1,
+          "name": "invalid"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        }
+      ]
+    },
+    {
+      "type": "campaign_broadcast",
+      "name": "Diffusion d’un agrégat",
+      "description": "Joint chaque valeur avec l’agrégat de sa campagne. Attend end et aggregateEnd, puis émet les deux valeurs avec la même identité. Connecter ces sorties à a/b d’un event_operator ; end compte uniquement les paires finies.",
+      "parameters": {
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de lignes et de campagnes simultanées. Reset annule les sorties en attente."
+        }
+      },
+      "required": [
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "aggregate"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        },
+        {
+          "port": 3,
+          "name": "aggregateEnd"
+        },
+        {
+          "port": 4,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "aggregate"
+        },
+        {
+          "port": 2,
+          "name": "end"
+        },
+        {
+          "port": 3,
+          "name": "invalid"
+        }
+      ]
+    },
+    {
+      "type": "selection_priority",
+      "name": "Priorité entre sélections",
+      "description": "Attend le statut des deux branches et leurs actions identifiées / deux scores si selected=1. Choisit le résultat réel de plus petite priorité. Égalité de priorité : branche principale. Deux branches vides : selected=0, identité=-1, aucune action.",
+      "parameters": {
+        "primaryPriority": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 0,
+          "description": "Priorité principale, plus petite en premier."
+        },
+        "secondaryPriority": {
+          "type": "number",
+          "minimum": -1000000000000,
+          "maximum": 1000000000000,
+          "default": 1,
+          "description": "Priorité secondaire, plus petite en premier."
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de lignes et de campagnes simultanées. Reset annule les sorties en attente."
+        }
+      },
+      "required": [
+        "primaryPriority",
+        "secondaryPriority",
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "primaryAction"
+        },
+        {
+          "port": 1,
+          "name": "primaryScore"
+        },
+        {
+          "port": 2,
+          "name": "primarySecondary"
+        },
+        {
+          "port": 3,
+          "name": "primarySelected"
+        },
+        {
+          "port": 4,
+          "name": "secondaryAction"
+        },
+        {
+          "port": 5,
+          "name": "secondaryScore"
+        },
+        {
+          "port": 6,
+          "name": "secondarySecondary"
+        },
+        {
+          "port": 7,
+          "name": "secondarySelected"
+        },
+        {
+          "port": 8,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "action"
+        },
+        {
+          "port": 1,
+          "name": "identity"
+        },
+        {
+          "port": 2,
+          "name": "score"
+        },
+        {
+          "port": 3,
+          "name": "selected"
+        },
+        {
+          "port": 4,
+          "name": "taggedAction"
+        },
+        {
+          "port": 5,
+          "name": "secondary"
+        },
+        {
+          "port": 6,
+          "name": "end"
+        }
+      ]
+    },
+    {
+      "type": "state_observer",
+      "name": "Lecture de l’état natif",
+      "description": "Relier exactement un intégrateur QSS1/2/3 à source. read déclenche une lecture de son état continu natif après les transitions du sac reçu, sans utiliser les sorties quantifiées ni les courbes. read conserve ses identités ; missing signale une source absente. reset annule les lectures et sorties en attente.",
+      "parameters": {
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Nombre maximal de lectures et réponses en attente."
+        }
+      },
+      "required": [
+        "capacity"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "source"
+        },
+        {
+          "port": 1,
+          "name": "read"
+        },
+        {
+          "port": 2,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "value"
+        },
+        {
+          "port": 1,
+          "name": "missing"
+        }
+      ]
+    },
+    {
+      "type": "zero_order_hold",
+      "name": "Maintien de la commande",
+      "description": "Conserve la dernière valeur reçue et émet [valeur,0,0]. Les identités candidat/campagne ne deviennent jamais des dérivées QSS. Valeur initiale native : zéro ; utiliser une source pour la commande initiale.",
+      "parameters": {},
+      "required": [],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "in"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "out"
         }
       ]
     }

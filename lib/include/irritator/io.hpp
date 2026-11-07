@@ -202,6 +202,10 @@ static constexpr inline const char* dynamics_type_names[] = {
     "event_operator",
     "candidate_filter",
     "candidate_select",
+    "campaign_aggregate",
+    "campaign_broadcast",
+    "selection_priority",
+    "state_observer",
 
 };
 

@@ -60,15 +60,19 @@ constexpr void debug_logi([[maybe_unused]] int      indent,
 template<typename S, typename... Args>
 constexpr void dlog(int indent, const S& s, Args&&... args) noexcept
 {
-    fmt::print(stderr, "{:{}}", "", indent);
-    fmt::vprint(stderr, s, fmt::make_format_args(args...));
+    if (auto* stream = debug::scientific_trace()) {
+        fmt::print(stream, "{:{}}", "", indent);
+        fmt::vprint(stream, s, fmt::make_format_args(args...));
+    }
 }
 
 template<typename S, typename... Args>
 constexpr void dlogln(int indent, const S& s, Args&&... args) noexcept
 {
-    fmt::print(stderr, "{:{}}", "", indent);
-    fmt::vprintln(stderr, s, fmt::make_format_args(args...));
+    if (auto* stream = debug::scientific_trace()) {
+        fmt::print(stream, "{:{}}", "", indent);
+        fmt::vprintln(stream, s, fmt::make_format_args(args...));
+    }
 }
 
 #else

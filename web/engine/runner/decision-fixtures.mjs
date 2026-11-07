@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 const catalog = JSON.parse(readFileSync(new URL('../../packages/contracts/catalog.json', import.meta.url), 'utf8'));
 export const atom = (id, type, parameters = {}) => ({ id, type, parameters: { ...Object.fromEntries(Object.entries(catalog.components.find(c => c.type === type).parameters).map(([key, b]) => [key, b.default ?? 0])), ...parameters } });
 export const edge = (from, fp, to, tp) => ({ from: { component: from, port: fp }, to: { component: to, port: tp } });
@@ -41,7 +42,7 @@ export function prospective() {
   m.model.observations.push({ component: 'action', samplingInterval: 0.1 });
   return m;
 }
-if (process.argv.includes('--write')) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv.includes('--write')) {
   for (const [name, m] of Object.entries({ memory: memory(), comparison: comparison(), selection: selection(), constraint: selection(8), fallback: selection(10), reuse: selection(undefined, true), prospective: prospective() }))
     writeFileSync(new URL(`../../examples/decision-${name}.json`, import.meta.url), JSON.stringify(m, null, 2) + '\n');
 }

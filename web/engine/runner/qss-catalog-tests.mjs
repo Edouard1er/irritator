@@ -35,7 +35,7 @@ test('QSS catalog exposes exactly thirteen atomic types, including all seven his
   const p = spawnSync(runner, ['--describe'], { encoding: 'utf8', timeout: 10000, windowsHide: true });
   assert.equal(p.status, 0, p.stderr);
   const catalog = JSON.parse(p.stdout);
-  assert.equal(catalog.components.length, 19);
+  assert.equal(catalog.components.length, 24);
   assert.deepEqual(catalog, JSON.parse(readFileSync(new URL('../../packages/contracts/catalog.json', import.meta.url), 'utf8')));
   assert.deepEqual(catalog.components.slice(0, 7).map(c => c.type), ['constant', 'qss1_sum_2', 'qss1_sum_3', 'qss1_integrator', 'qss3_integrator', 'qss2_integrator', 'qss1_multiplier']);
 });

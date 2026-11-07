@@ -6,7 +6,7 @@ import type { CoupledDefinition } from '@contracts';
 import { wrapperPaletteSpec } from '@/lib/modeling/wrapper';
 
 export function category(spec: ComponentSpec): string {
-  return ['event_tag','value_memory','event_operator','candidate_filter','candidate_select','generator'].includes(spec.type) ? 'Contrôle et décision' : spec.inputs.length === 0 ? 'Sources' : spec.type.includes('integrator') ? 'Intégrateurs' : 'Opérateurs';
+  return ['event_tag','value_memory','event_operator','candidate_filter','candidate_select','campaign_aggregate','campaign_broadcast','selection_priority','state_observer','zero_order_hold','generator'].includes(spec.type) ? 'Contrôle et décision' : spec.inputs.length === 0 ? 'Sources' : spec.type.includes('integrator') ? 'Intégrateurs' : 'Opérateurs';
 }
 export function ComponentLibrary({ catalog, error, onAdd, onRetry, definitions = [], onCreate, onOpen, onInstance, wrapperAvailable = false }: { catalog?: Catalog; error?: string; onAdd: (spec: ComponentSpec) => void; onRetry: () => void; definitions?: CoupledDefinition[]; onCreate?: (id: string, name: string) => string | undefined; onOpen?: (id: string) => void; onInstance?: (id: string) => void; wrapperAvailable?: boolean }) {
   const [query, setQuery] = useState('');

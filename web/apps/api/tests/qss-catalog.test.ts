@@ -47,7 +47,7 @@ test('real TCP HTTP: thirteen types, all six QSS3 operators, v1/v2, parameters a
   try {
     const response = await fetch(`${app.listeningOrigin}/api/v1/components`);
     assert.equal(response.status, 200); const received = await response.json() as typeof catalog;
-    assert.deepEqual(received, catalog); assert.equal(received.components.length, 19);
+    assert.deepEqual(received, catalog); assert.equal(received.components.length, 24);
     const expected = [[12, 27, 18], [6.5, 16.5, 17], [64, 729], [.25, 1 / 9], [16, 81], [2, 3]];
     const flat = await run(example(1));
     for (const [i, o] of flat.observations.entries()) assert.deepEqual(o.samples.map(s => s.value), expected[i]);

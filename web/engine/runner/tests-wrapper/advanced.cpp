@@ -43,6 +43,102 @@ void factors() {
     f->finish(); require(f->events.size()==4,"Cartesian outputs");
     near(f->events[3].value[1],.01); // Preserve native parameter triplet.
 }
+void feedback_initialization() {
+    for (const bool fixed : {false, true}) {
+        auto p = affine_plan();
+        p.factors.push_back({"initial", "X", fixed ? std::vector<double>{-777, -666} : std::vector<double>{-777}});
+        p.factors.back().type = fixed ? irt::factor_type::fixed : irt::factor_type::single;
+        auto f = make_affine(false, p);
+        command(*f, .5, 12, 3); command(*f, 1.5, 10, 3);
+        command(*f, 2, 0, 1);
+        f->initialize();
+        const auto inspect = [&](double initial) {
+            auto& resource = f->parent.sim.sims.get(f->bindings[0].resource);
+            const auto x = f->prospective.targets.at("X").model;
+            const auto u = f->prospective.targets.at("u").model;
+            near(resource.sim.parameters[x].reals[0], 1);
+            require(resource.embedded_sims.size() == (fixed ? 6u : 3u), "Initialization changed scenario cardinality");
+            size_t i = 0;
+            for (const auto id : resource.embedded_sims) {
+                const auto& sim = resource.embedded_sims.get<irt::simulation>(id);
+                const auto rate = p.factors[0].values[i++ % 3];
+                near(sim.parameters[x].reals[0], initial);
+                near(sim.parameters[x].reals[1], .01);
+                near(sim.parameters[u].reals[0], rate);
+                near(sim.parameters[u].reals[1], 0); // constant offset preserved
+                require(&sim.parameters[x] != &resource.sim.parameters[x], "Child parameters alias prototype");
+                const auto& mdl = sim.models.get(x);
+                const auto& dyn = irt::get_dyn<irt::qss3_integrator>(mdl);
+                near(dyn.observation(2, 2 - mdl.tl).value, initial + 2 * rate);
+            }
+        };
+        while (f->events.size() < 4 && !f->parent.sim.current_time_expired()) f->step();
+        require(f->events.size() == 4, "Missing first initialization campaign"); inspect(12);
+        f->finish(); require(f->events.size() == 8, "Missing second initialization campaign"); inspect(10);
+        near(f->events[0].value[0], 14); near(f->events[4].value[0], 12);
+    }
+}
+void feedback_loop() {
+    auto p = affine_plan(); p.scenario_results = true;
+    p.factors.push_back({"initial", "X", {-777}}); p.factors.back().type = irt::factor_type::single;
+    auto f = make_affine(false, p);
+    auto& s = f->parent.sim;
+    require(s.grow_models_to(128) && s.grow_connections_to(1024), "Feedback graph capacity");
+    auto& wrapper_model = s.models.get(f->bindings[0].wrapper);
+    auto& wrapper = irt::get_dyn<irt::simulation_wrapper>(wrapper_model);
+    auto& read1 = s.models.get(f->parent_targets.at("run").model);
+    s.disconnect(read1, 0, wrapper_model, 1);
+    auto& x = s.alloc<irt::qss3_integrator>(); s.parameters[s.get_id(x)].set_integrator(10, .01);
+    auto& hold = s.alloc<irt::zero_order_hold>();
+    auto& sample = s.alloc<irt::state_observer>();
+    auto& memory = s.alloc<irt::value_memory>(); s.parameters[s.get_id(memory)].integers[0] = 1;
+    auto& init = s.alloc<irt::event_operator>();
+    s.parameters[s.get_id(init)].integers[0] = 3; s.parameters[s.get_id(init)].reals[1] = 0;
+    auto& run = s.alloc<irt::event_operator>();
+    auto& distance = s.alloc<irt::event_operator>();
+    s.parameters[s.get_id(distance)].integers[0] = 2; s.parameters[s.get_id(distance)].reals[1] = 10.5;
+    auto& absolute = s.alloc<irt::event_operator>(); s.parameters[s.get_id(absolute)].integers[0] = 16;
+    auto& negative = s.alloc<irt::event_operator>();
+    s.parameters[s.get_id(negative)].integers[0] = 3; s.parameters[s.get_id(negative)].reals[1] = -1;
+    auto& filter = s.alloc<irt::candidate_filter>(); s.parameters[s.get_id(filter)].integers[0] = 3;
+    auto& select = s.alloc<irt::candidate_select>(); s.parameters[s.get_id(select)].integers[2] = 0;
+    auto& initial = s.alloc<irt::constant>(); s.parameters[s.get_id(initial)].set_constant(2, 0);
+    auto& read2 = s.alloc<irt::constant>(); s.parameters[s.get_id(read2)].set_constant(0, 3);
+    const auto wire = [&](auto& a, int ap, auto& b, int bp) { checked(s.connect(irt::get_model(a), ap, irt::get_model(b), bp), "Feedback connection"); };
+    checked(s.connect(read1, 0, irt::get_model(sample), 1), "First feedback read");
+    wire(read2, 0, sample, 1); wire(initial, 0, hold, 0); wire(select, 0, hold, 0); wire(hold, 0, x, 0);
+    wire(x, 0, sample, 0); wire(sample, 0, memory, 0); wire(memory, 0, wrapper, 3); wire(memory, 0, init, 0);
+    wire(init, 0, wrapper, 0); wire(init, 0, run, 0); wire(run, 0, wrapper, 1);
+    wire(wrapper, 7, distance, 0); wire(wrapper, 9, distance, 3); wire(wrapper, 5, filter, 1);
+    wire(distance, 0, absolute, 0); wire(distance, 2, absolute, 3); wire(absolute, 0, negative, 0); wire(absolute, 2, negative, 3);
+    wire(negative, 0, filter, 0); wire(negative, 2, filter, 3); wire(filter, 0, select, 0); wire(filter, 1, select, 1); wire(filter, 2, select, 2);
+    for (int port = 0; port < wrapper.y.size(); ++port) if (!irt::is_defined(wrapper.y[port])) {
+        auto& sink = s.alloc<irt::counter>(); wire(wrapper, port, sink, 0);
+    }
+    s.limits.set_bound(0, 5); f->initialize();
+    std::vector<std::array<double, 2>> observations, actions;
+    while (!s.current_time_expired()) {
+        f->step(); if (s.current_time_expired()) break;
+        for (const auto port : s.active_output_ports) {
+            if (port == sample.y[0]) observations.push_back({s.current_time(), s.output_ports.get(port).msg[0]});
+            if (port == hold.y[0]) actions.push_back({s.current_time(), s.output_ports.get(port).msg[0]});
+        }
+    }
+    checked(s.finalize(), "Feedback finalize");
+    require(observations.size() == 2 && observations[0][0] == 1 && observations[1][0] == 3, "Real native feedback observation dates");
+    near(observations[0][1], 12); near(observations[1][1], 10);
+    require(actions == std::vector<std::array<double, 2>>{{0,2},{1,-1},{3,0}}, "Actual DEVS actions or dates differ");
+    near(x.observation(5, 5 - irt::get_model(x).tl).value, 10);
+    size_t count = 0;
+    for (const auto& event : f->events) if (event.port == 6) {
+        const auto campaign = event.value[2];
+        require((campaign == 1 && event.time == 1) || (campaign == 2 && event.time == 3), "Native prospective campaign date");
+        near(event.value[0], campaign == 1 ? 12 : 10);
+        ++count;
+    }
+    require(count == 6, "Missing actual prospective scenario inputs");
+    std::cout << "NATIVE FEEDBACK observation=[(1,12),(3,10)] hold=[(0,2),(1,-1),(3,0)] X(5)=10\n";
+}
 void distributions() {
     std::cout.precision(17);
     using D=irt::distribution_type;
@@ -175,6 +271,8 @@ void objectives() {
 void advanced_case(const std::string& name) {
     if(name == "objectives") objectives();
     else if(name == "factors") factors();
+    else if(name == "feedback") feedback_initialization();
+    else if(name == "feedback-loop") feedback_loop();
     else if(name == "distributions") distributions();
     else if(name == "modes") modes();
     else if(name == "commands") commands();

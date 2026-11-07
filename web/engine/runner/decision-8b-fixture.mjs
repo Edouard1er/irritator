@@ -1,5 +1,6 @@
 // Model construction only. Every prospective simulation and decision runs in C++.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { atom, edge } from './decision-fixtures.mjs';
 
 export function decisionFiltrage(threshold = 140) {
@@ -22,7 +23,7 @@ export function decisionFiltrage(threshold = 140) {
   };
 }
 export function schaeferExternal(threshold = 140) {
-  const m = JSON.parse(readFileSync(new URL('../../examples/wrapper-schaefer-v3.json', import.meta.url), 'utf8'));
+  const m = JSON.parse(readFileSync(new URL('../../model-test/schaefer-six-scenarios.source.json', import.meta.url), 'utf8'));
   m.model.id = 'decision-schaefer-external';
   const w = m.model.components.find(c => c.type === 'simulation_wrapper');
   Object.assign(w.experiment, {
@@ -40,7 +41,8 @@ export function schaeferExternal(threshold = 140) {
     ...['internalNmin', 'internalCH', 'internalE', 'internalQ', 'action'].map(id => atom(id, 'qss1_sum_2')),
     // A sentinel distinguishes no emission from an emitted action equal to zero.
     atom('actionReceipt', 'value_memory', { initial: -999, emitOnWrite: 1 }),
-    ...['identity', 'score', 'selected'].map(id => atom(id, 'value_memory', { emitOnWrite: 1 })),
+    ...['identity', 'score'].map(id => atom(id, 'qss1_sum_2')),
+    atom('selected', 'value_memory', { emitOnWrite: 1 }),
   ];
   m.model.connections = [edge('run', 0, 'decision', 1),
     ...['internalNmin', 'internalCH', 'internalE', 'internalQ'].map((id, p) => edge('decision', p, id, 0)),
@@ -52,4 +54,4 @@ export function schaeferExternal(threshold = 140) {
   m.model.observations = ['internalNmin', 'internalCH', 'internalE', 'internalQ', 'action', 'actionReceipt', 'identity', 'score', 'selected'].map(component => ({ component, samplingInterval: 0.1 }));
   return m;
 }
-if (process.argv.includes('--write')) writeFileSync(new URL('../../examples/decision-schaefer-external-v3.json', import.meta.url), JSON.stringify(schaeferExternal(), null, 2) + '\n');
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv.includes('--write')) writeFileSync(new URL('../../examples/decision-schaefer-external-v3.json', import.meta.url), JSON.stringify(schaeferExternal(), null, 2) + '\n');

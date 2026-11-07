@@ -326,6 +326,19 @@ wrappers récursifs sont conservés. Campagne reproductible :
 
 Le catalogue comprend aussi `generator` (natif existant), `event_tag`,
 `value_memory`, `event_operator`, `candidate_filter` et `candidate_select`.
+
+Le Test 8C ajoute `campaign_aggregate` (min/max/somme/moyenne/count),
+`campaign_broadcast` (jointure d'un agrégat avec chaque candidat) et
+`selection_priority` (arbitrage de deux sélections réelles). Les fins sont
+obligatoires ; les calculs restent dans libirritator. Le filtre peut transporter
+un second score (entrée 5, sortie 4, bit required=8). Le sélecteur accepte
+`requireSecondary` et `secondaryDirection`, optionnels et à 0 par défaut,
+ainsi que l'entrée 4=secondary. Ses sorties supplémentaires 4/5/6 sont
+taggedAction/secondary/end ; les indices historiques sont conservés.
+L'arbitre reçoit les sorties 4/2/5/3 de chaque sélecteur et choisit la branche
+non vide de plus petite priorité. Son repli conserve l'action, les deux scores
+et l'identité du vrai candidat ; deux branches vides n'émettent aucune action.
+Voir `reports/bstar-generic-components-test-8C.md` et les exemples `decision-8c-*-v3.json`.
 Les paramètres numériques et entiers, leurs défauts et leurs descriptions
 sont fournis par `catalog.json` et validés par TypeScript et C++.
 
@@ -347,3 +360,19 @@ journal ; elle ne calcule aucune décision.
 Exemples portables : `web/examples/decision-*.json`.
 Sémantique détaillée, cas limites et vérifications :
 [`reports/bstar-generic-components-test-8A.md`](../../../reports/bstar-generic-components-test-8A.md).
+
+## Boucle native 8D
+
+`state_observer` expose `source`, `read`, `reset` → `value`, `missing`.
+Relier une seule sortie d'intégrateur QSS1/2/3 à `source` : cette connexion lie
+l'état natif ; ses messages quantifiés ne servent pas de données mémorisées.
+Une commande read `[_,identité,campagne]` produit, après les transitions du sac
+reçu, `[X(t),identité,campagne]`. Sans source, elle produit missing. Une source
+ambiguë ou d'un autre type échoue à l'initialisation. La capacité 1–4096 borne
+les commandes et réponses en attente ; reset les annule.
+
+`zero_order_hold`, atome natif existant, conserve une commande entre les sacs
+et émet seulement `[valeur,0,0]`, pour éviter qu'une identité devienne une
+dérivée QSS3. Dans un même sac, sa règle native retient la valeur maximale.
+L'exemple `decision-feedback-minimal-v3.json` assemble lecture, mémoire,
+configuration prospective, commandes, décision couplée et action maintenue.

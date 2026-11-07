@@ -52,6 +52,8 @@ set(private_irritator_sources
     src/variable-observer.cpp)
 
 add_library(libirritator STATIC ${public_irritator_header} ${private_irritator_sources})
+set_property(SOURCE src/event.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/campaign-event.hpp")
 add_library(libirritator::libirritator ALIAS libirritator)
 
 target_sources(libirritator

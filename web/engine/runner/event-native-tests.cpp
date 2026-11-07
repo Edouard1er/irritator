@@ -28,7 +28,7 @@ auto& tag(irt::simulation& sim, double value, double key, double campaign, doubl
     checked(wire(sim, source, 0, d, 0), "source -> tag");
     return d;
 }
-template<class T> std::vector<emission> execute(irt::simulation& sim, T& observed)
+template<class T> std::vector<emission> execute(irt::simulation& sim, T& observed, int observed_ports = T::outputs)
 {
     for (int p = 0; p < T::outputs; ++p) {
         auto& sink = add<irt::counter>(sim);
@@ -42,14 +42,16 @@ template<class T> std::vector<emission> execute(irt::simulation& sim, T& observe
         require(++calls < 10000, "zero-time livelock");
         checked(sim.run(), "run");
         if (sim.current_time_expired()) break;
-        for (int p = 0; p < T::outputs; ++p)
+        for (int p = 0; p < observed_ports; ++p)
             if (std::find(sim.active_output_ports.begin(), sim.active_output_ports.end(), observed.y[p]) != sim.active_output_ports.end())
                 output.push_back({ sim.current_time(), p, sim.output_ports.get(observed.y[p]).msg });
     }
     checked(sim.finalize(), "finalize");
     return output;
 }
-int main()
+#include "campaign-native-tests.hpp"
+#include "feedback-native-tests.hpp"
+int main(int argc, char** argv)
 {
 #ifdef _MSC_VER
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -61,6 +63,75 @@ int main()
 #endif
 #endif
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "feedback-audit") {
+            feedback_audit_tests();
+            std::cout << "feedback observation/action audit passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "feedback-observer") {
+            feedback_observer_tests();
+            std::cout << "feedback native observer groups passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "heap-remove") {
+            // A distinct allocator type keeps this reduced template test
+            // independent of instantiations linked from the engine archive.
+            struct heap_test_allocator : irt::allocator<irt::new_delete_memory_resource> {};
+            irt::heap<heap_test_allocator> h;
+            require(h.reserve(512), "heap reserve");
+            const auto root = h.alloc(0, static_cast<irt::model_id>(1));
+            const auto leaf = h.alloc(1, static_cast<irt::model_id>(2));
+            std::cerr << "before removing non-root leaf\n";
+            h.remove(leaf);
+            require(h.size() == 1 && h.top() == root, "leaf removal changed root");
+            h.destroy(leaf);
+            // More leaf removals and ordered pops.
+            const auto branch = h.alloc(2, static_cast<irt::model_id>(3));
+            h.alloc(3, static_cast<irt::model_id>(4));
+            h.alloc(4, static_cast<irt::model_id>(5));
+            h.decrease(1, branch);
+            h.remove(branch); h.destroy(branch);
+            for (const double expected : {0., 3., 4.}) {
+                require(h.tn(h.top()) == expected, "heap pop order");
+                h.pop();
+            }
+            require(h.empty(), "heap retained nodes");
+            irt::heap<heap_test_allocator> nested;
+            require(nested.reserve(512), "nested heap reserve");
+            const auto internal = nested.alloc(2, static_cast<irt::model_id>(1));
+            nested.alloc(3, static_cast<irt::model_id>(2));
+            nested.alloc(4, static_cast<irt::model_id>(3));
+            nested.alloc(1, static_cast<irt::model_id>(4));
+            nested.remove(internal); nested.destroy(internal);
+            for (const double expected : {1., 3., 4.}) {
+                require(nested.tn(nested.top()) == expected, "child subheap merge order");
+                nested.pop();
+            }
+            require(nested.empty(), "nested heap retained nodes");
+            std::cerr << "heap removal passed\n";
+            return 0;
+        }
+        if (argc == 2 && (std::string_view(argv[1]) == "deallocate-connected" || std::string_view(argv[1]) == "deallocate-stages")) {
+            irt::simulation s;
+            auto& m = add<irt::value_memory>(s);
+            const auto id = s.get_id(m);
+            s.parameters[id].integers[0] = 1;
+            auto& source = constant(s, 42);
+            checked(wire(s, source, 0, m, 0), "connected write");
+            const auto events = execute(s, m); // connected sinks, completed run
+            require(events.size() == 1, "connected memory output");
+            std::cerr << "before connected deallocate\n";
+            if (std::string_view(argv[1]) == "deallocate-stages") {
+                auto& mdl = s.models.get(id);
+                s.unobserve(mdl); std::cerr << "unobserve passed\n";
+                s.do_deallocate(m); std::cerr << "dynamics cleanup passed\n";
+                s.sched.free(mdl); std::cerr << "scheduler cleanup passed\n";
+                s.models.free(mdl); std::cerr << "model cleanup passed\n";
+            } else s.deallocate(id);
+            require(!s.models.exists(id) && s.event_states.get(id) == nullptr, "connected runtime retained");
+            std::cerr << "after connected deallocate\n";
+            return 0;
+        }
         { // Keyed memory and an unknown read identity.
             irt::simulation s;
             auto& m = add<irt::value_memory>(s);
@@ -123,9 +194,49 @@ int main()
             irt::simulation s; auto& pick = add<irt::candidate_select>(s);
             auto& score = tag(s, 11, 3, 2); auto& action = tag(s, 99, 3, 2, 1); auto& end = tag(s, 1, 0, 2);
             checked(wire(s, score, 0, pick, 0), "score"); checked(wire(s, action, 0, pick, 1), "action"); checked(wire(s, end, 0, pick, 2), "end");
-            const auto events = execute(s, pick);
+            const auto events = execute(s, pick, 4);
             require(events.size() == 4 && events[0].time == 1 && events[0].value[0] == 99 && events[1].value[0] == 3 && events[1].value[2] == 2, "delayed selection");
         }
-        std::cout << "5 native event groups passed\n";
+        { // Empty cohort is a status, not an action, unless fallback is enabled.
+            for (int fallback = 0; fallback <= 1; ++fallback) {
+                irt::simulation s; auto& pick = add<irt::candidate_select>(s);
+                auto& p = s.parameters[s.get_id(pick)]; p.integers[2] = fallback; p.reals[0] = -7;
+                auto& end = tag(s, 0, 0, 9);
+                checked(wire(s, end, 0, pick, 2), "empty end");
+                const auto events = execute(s, pick, 4);
+                require(events.size() == (fallback ? 4u : 3u), "empty output count");
+                require(std::count_if(events.begin(), events.end(), [](const auto& e) { return e.port == 0; }) == fallback, "fictitious empty action");
+                require(events.back().port == 3 && events.back().value[0] == 0 && events.back().value[2] == 9, "empty status/campaign");
+                require(s.event_states.get(s.get_id(pick))->barriers.empty(), "empty campaign leaked");
+            }
+        }
+        { // Two overlapping campaigns, early ends, delayed fields, three primitives.
+            irt::simulation s;
+            auto& op = add<irt::event_operator>(s); auto& filter = add<irt::candidate_filter>(s); auto& pick = add<irt::candidate_select>(s);
+            auto& o = s.parameters[s.get_id(op)]; o.integers[0] = 10; o.reals[1] = 140;
+            s.parameters[s.get_id(filter)].integers[0] = 7;
+            s.parameters[s.get_id(pick)].integers[2] = 0;
+            checked(wire(s, op, 0, filter, 2), "condition"); checked(wire(s, op, 2, filter, 3), "condition end");
+            checked(wire(s, filter, 0, pick, 0), "filtered score"); checked(wire(s, filter, 1, pick, 1), "filtered action"); checked(wire(s, filter, 2, pick, 2), "filtered end");
+            for (int campaign = 1; campaign <= 2; ++campaign) {
+                auto& end = tag(s, 1, 0, campaign);
+                auto& biomass = tag(s, campaign == 1 ? 150 : 123, 4, campaign, .5);
+                auto& score = tag(s, campaign == 1 ? 497 : 542, 4, campaign);
+                auto& action = tag(s, campaign == 1 ? 150 : 260, 4, campaign, campaign == 1 ? 1.5 : 1);
+                checked(wire(s, end, 0, op, 3), "early end"); checked(wire(s, biomass, 0, op, 0), "biomass");
+                checked(wire(s, score, 0, filter, 0), "score"); checked(wire(s, action, 0, filter, 1), "delayed action");
+            }
+            const auto events = execute(s, pick, 4);
+            require(events.size() == 7, "overlapping cohort outputs");
+            require(events[0].port == 1 && events[0].time == 1 && events[0].value[0] == -1 && events[0].value[2] == 2, "empty second campaign");
+            require(events[2].port == 3 && events[2].value[0] == 0, "empty status");
+            require(events[3].port == 0 && events[3].time == 1.5 && events[3].value[0] == 150, "late action");
+            require(events[4].port == 1 && events[4].value[0] == 4 && events[4].value[2] == 1, "identity joined across campaigns");
+            require(s.event_states.get(s.get_id(pick))->rows.empty(), "selection rows retained");
+            require(s.event_states.get(s.get_id(filter))->rows.empty(), "filter rows retained");
+            require(s.event_states.get(s.get_id(op))->rows.empty(), "operator rows retained");
+        }
+        campaign_native_tests();
+        std::cout << "7 historical + 10 campaign native groups passed\n";
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

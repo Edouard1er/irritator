@@ -5,7 +5,7 @@ const evidence = path.resolve('../../../build-web-test6-1/logs/browser-qss3');
 async function start(page: Page) {
   page.on('dialog', d => d.accept()); await page.goto('/');
   await expect(page.getByRole('button', { name: /Moteur connecté/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Ajouter / }).filter({ hasNotText: 'Simulation imbriquée' })).toHaveCount(19);
+  await expect(page.getByRole('button', { name: /^Ajouter / }).filter({ hasNotText: 'Simulation imbriquée' })).toHaveCount(24);
 }
 async function add(page: Page, type: string, parameters: Record<string, number> = {}) {
   await page.getByRole('button', { name: `Ajouter ${type}`, exact: true }).click();

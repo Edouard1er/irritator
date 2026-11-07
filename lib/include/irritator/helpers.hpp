@@ -414,17 +414,47 @@ template<> struct event_model_tag<event_kind::numeric> {
 };
 template<> struct event_model_tag<event_kind::filter> {
     static constexpr event_kind kind = event_kind::filter;
-    static constexpr std::string_view x_names[] = { "score", "action", "condition", "end", "reset" };
-    static constexpr std::string_view y_names[] = { "score", "action", "end", "rejected" };
-    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss };
-    static constexpr port_type y_types[] = { qss, qss, qss, qss };
+    static constexpr std::string_view x_names[] = { "score", "action", "condition", "end", "reset", "secondary" };
+    static constexpr std::string_view y_names[] = { "score", "action", "end", "rejected", "secondary" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss, qss };
 };
 template<> struct event_model_tag<event_kind::select> {
     static constexpr event_kind kind = event_kind::select;
-    static constexpr std::string_view x_names[] = { "score", "action", "end", "reset" };
-    static constexpr std::string_view y_names[] = { "action", "identity", "score", "selected" };
-    static constexpr port_type x_types[] = { qss, qss, qss, qss };
+    static constexpr std::string_view x_names[] = { "score", "action", "end", "reset", "secondary" };
+    static constexpr std::string_view y_names[] = { "action", "identity", "score", "selected", "taggedAction", "secondary", "end" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss, qss, qss, qss };
+};
+
+template<> struct event_model_tag<event_kind::aggregate> {
+    static constexpr event_kind kind = event_kind::aggregate;
+    static constexpr std::string_view x_names[] = { "value", "end", "reset" };
+    static constexpr std::string_view y_names[] = { "aggregate", "invalid", "end" };
+    static constexpr port_type x_types[] = { qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss };
+};
+template<> struct event_model_tag<event_kind::broadcast> {
+    static constexpr event_kind kind = event_kind::broadcast;
+    static constexpr std::string_view x_names[] = { "value", "aggregate", "end", "aggregateEnd", "reset" };
+    static constexpr std::string_view y_names[] = { "value", "aggregate", "end", "invalid" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss };
     static constexpr port_type y_types[] = { qss, qss, qss, qss };
+};
+template<> struct event_model_tag<event_kind::priority> {
+    static constexpr event_kind kind = event_kind::priority;
+    static constexpr std::string_view x_names[] = { "primaryAction", "primaryScore", "primarySecondary", "primarySelected", "secondaryAction", "secondaryScore", "secondarySecondary", "secondarySelected", "reset" };
+    static constexpr std::string_view y_names[] = { "action", "identity", "score", "selected", "taggedAction", "secondary", "end" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss, qss, qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss, qss, qss, qss };
+};
+
+template<> struct event_model_tag<event_kind::state_observer> {
+    static constexpr event_kind kind = event_kind::state_observer;
+    static constexpr std::string_view x_names[] = { "source", "read", "reset" };
+    static constexpr std::string_view y_names[] = { "value", "missing" };
+    static constexpr port_type x_types[] = { qss, qss, qss };
+    static constexpr port_type y_types[] = { qss, qss };
 };
 
 struct simulation_wrapper_tag {
@@ -830,6 +860,14 @@ constexpr auto dispatch(const dynamics_type type,
         return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::filter>{}, std::forward<Args>(args)...);
     case dynamics_type::candidate_select:
         return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::select>{}, std::forward<Args>(args)...);
+    case dynamics_type::campaign_aggregate:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::aggregate>{}, std::forward<Args>(args)...);
+    case dynamics_type::campaign_broadcast:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::broadcast>{}, std::forward<Args>(args)...);
+    case dynamics_type::state_observer:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::state_observer>{}, std::forward<Args>(args)...);
+    case dynamics_type::selection_priority:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::priority>{}, std::forward<Args>(args)...);
     case dynamics_type::simulation_wrapper:
         return std::invoke(std::forward<Function>(f), simulation_wrapper_tag{},
                            std::forward<Args>(args)...);

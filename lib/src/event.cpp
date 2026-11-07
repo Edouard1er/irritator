@@ -29,11 +29,12 @@ status barrier(event_state& s, const message& m, sz capacity) noexcept
 {
     if (not event_identifier(m[0]) or not tagged(m) or m[0] > real(capacity)) return protocol_error();
     for (auto& b : s.barriers) if (b.campaign == m[2]) {
-        if (b.expected != sz(m[0])) return protocol_error();
+        if (b.sent or (b.ended and b.expected != sz(m[0]))) return protocol_error();
+        b.expected = sz(m[0]); b.ended = true;
         return success();
     }
     if (s.barriers.size() >= capacity or not s.barriers.reserve(s.barriers.size() + 1)) return capacity_error();
-    s.barriers.emplace_back(event_barrier{ m[2], sz(m[0]), false });
+    s.barriers.emplace_back(event_barrier{ m[2], sz(m[0]), false, true });
     return success();
 }
 real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
@@ -65,6 +66,7 @@ real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
     default: return std::numeric_limits<real>::quiet_NaN();
     }
 }
+#include "campaign-event.hpp"
 } // namespace
 
 template<event_kind K>
@@ -76,15 +78,43 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
         if (integers[0] < 0 or integers[0] > 21 or integers[1] < 0 or integers[1] > 3 or
             integers[2] < 0 or integers[2] > 1 or reals[2] < 0) return protocol_error();
     if constexpr (K == event_kind::filter)
-        if (integers[0] < 1 or integers[0] > 7) return protocol_error();
+        if (integers[0] < 1 or integers[0] > 15) return protocol_error();
     if constexpr (K == event_kind::select)
         if (integers[0] < 0 or integers[0] > 1 or integers[1] < 0 or integers[1] > 1 or
-            integers[2] < 0 or integers[2] > 1) return protocol_error();
+            integers[2] < 0 or integers[2] > 1 or
+            (reals[1] != 0 and reals[1] != 1) or (reals[2] != 0 and reals[2] != 1)) return protocol_error();
+    if constexpr (K == event_kind::aggregate)
+        if (integers[0] < 0 or integers[0] > 4) return protocol_error();
     if constexpr (K == event_kind::tag)
         if (not event_identifier(reals[0]) or not event_identifier(reals[1])) return protocol_error();
     if (not sim.event_states.data.reserve(sim.event_states.size() + 1)) return capacity_error();
     sim.event_states.set(sim.get_id(*this), event_state{});
     auto& s = *sim.event_states.get(sim.get_id(*this));
+    if constexpr (K == event_kind::state_observer) {
+        // The ordinary graph edge into source binds exactly one integrator.
+        // Notifications on this port are ignored: they are quantized outputs,
+        // not an observation of its current continuous state.
+        const auto self = sim.get_id(*this);
+        sz bindings = 0;
+        bool supported = true;
+        for (auto& candidate : sim.models) {
+            dispatch(candidate, [&]<typename D>(D& dyn) {
+                if constexpr (has_output_port<D>) {
+                    for (auto port : dyn.y) if (auto* y = sim.output_ports.try_to_get(port)) {
+                        sim.for_each(*y, [&](const model& dst, int input) {
+                            if (sim.models.get_id(dst) == self and input == 0) {
+                                ++bindings;
+                                s.source = sim.models.get_id(candidate);
+                                supported = supported and (candidate.type == dynamics_type::qss1_integrator or
+                                  candidate.type == dynamics_type::qss2_integrator or candidate.type == dynamics_type::qss3_integrator);
+                            }
+                        });
+                    }
+                }
+            });
+        }
+        if (bindings > 1 or not supported) return protocol_error();
+    }
     if constexpr (K == event_kind::memory) {
         auto* r = row(s, message{ reals[0], 0, 0 }, sz(integers[3]), reals[0], 0, 1);
         if (not r) return capacity_error();
@@ -97,7 +127,7 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
 }
 
 template<event_kind K>
-status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
+status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexcept
 {
     auto* storage = sim.event_states.get(sim.get_id(*this));
     if (not storage) return protocol_error();
@@ -105,8 +135,8 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
     const auto capacity = sz(integers[3]);
     if (emitted) {
         const auto& sent = s.pending.front();
-        if constexpr (K == event_kind::numeric or K == event_kind::filter or K == event_kind::select) {
-            const bool closed = sent.port == (K == event_kind::select ? 3 : 2);
+        if constexpr (K != event_kind::tag and K != event_kind::memory and K != event_kind::state_observer) {
+            const bool closed = sent.port == (K == event_kind::select or K == event_kind::priority ? 6 : 2);
             if (closed) {
                 const auto campaign = sent.value[2];
                 s.rows.erase(std::remove_if(s.rows.begin(), s.rows.end(), [campaign](const auto& r) { return r.campaign == campaign; }), s.rows.end());
@@ -116,8 +146,10 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
         s.pending.erase(s.pending.begin()); emitted = false;
     }
     if constexpr (K != event_kind::tag) {
-        if (not get_message(sim, x[inputs - 1]).empty()) {
-            s.rows.clear(); s.barriers.clear(); s.pending.clear();
+        constexpr int reset_port = K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
+        if (not get_message(sim, x[reset_port]).empty()) {
+            s.rows.clear(); s.barriers.clear(); s.pending.clear(); s.reads.clear();
+            if constexpr (K == event_kind::state_observer) value = 0;
             if constexpr (K == event_kind::memory) {
                 auto* r = row(s, message{ reals[0], 0, 0 }, capacity, reals[0], 0, 1);
                 if (not r) return capacity_error();
@@ -131,6 +163,28 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
         for (const auto& m : get_message(sim, x[2])) { if (not event_identifier(m[0])) return protocol_error(); reals[1] = m[0]; }
         for (const auto& m : get_message(sim, x[0])) {
             irt_check(emit(s, 0, m[0], reals[0], reals[1])); value = std::isfinite(m[0]) ? m[0] : value;
+        }
+    } else if constexpr (K == event_kind::state_observer) {
+        // One internal transition after the read bag: concurrent source
+        // transitions from that bag have completed, independent of model order.
+        real current = std::numeric_limits<real>::quiet_NaN();
+        if (not s.reads.empty()) if (const auto* source = sim.models.try_to_get(s.source)) {
+            current = dispatch(*source, [t, source]<typename D>(const D& dyn) -> real {
+                if constexpr (std::is_same_v<D, qss1_integrator> or std::is_same_v<D, qss2_integrator> or std::is_same_v<D, qss3_integrator>)
+                    return dyn.observation(t, t - source->tl).value;
+                else return std::numeric_limits<real>::quiet_NaN();
+            });
+        }
+        for (const auto& read : s.reads) {
+            const bool valid = std::isfinite(current);
+            irt_check(emit(s, valid ? 0 : 1, valid ? current : 0, read[1], read[2]));
+            if (valid) value = current;
+        }
+        s.reads.clear();
+        for (const auto& read : get_message(sim, x[1])) {
+            if (not tagged(read)) return protocol_error();
+            if (s.reads.size() + s.pending.size() >= capacity or not s.reads.reserve(s.reads.size() + 1)) return capacity_error();
+            s.reads.push_back(read);
         }
     } else if constexpr (K == event_kind::memory) {
         // Reset, writes, then reads. Confluent reads see the new value.
@@ -148,16 +202,21 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
             for (const auto& r : s.rows) if (r.key == m[1] and r.campaign == m[2]) { found = &r; break; }
             irt_check(emit(s, found ? 0 : 1, found ? found->a : 0, m[1], m[2]));
         }
+    } else if constexpr (K == event_kind::aggregate or K == event_kind::broadcast or K == event_kind::priority) {
+        irt_check(campaign_transition(sim, *this, s, capacity));
     } else {
-        constexpr int data_inputs = K == event_kind::filter ? 3 : 2;
-        for (int port = 0; port < data_inputs; ++port) for (const auto& m : get_message(sim, x[port])) {
+        constexpr int data_inputs = K == event_kind::filter ? 4 : K == event_kind::select ? 3 : 2;
+        for (int field = 0; field < data_inputs; ++field) {
+          const int port = K == event_kind::filter and field == 3 ? 5 : K == event_kind::select and field == 2 ? 4 : field;
+          for (const auto& m : get_message(sim, x[port])) {
             if (not tagged(m)) return protocol_error();
             for (const auto& b : s.barriers) if (b.campaign == m[2] and b.sent) return protocol_error();
             auto* r = row(s, m, capacity, K == event_kind::numeric ? reals[0] : 0,
                           K == event_kind::numeric ? reals[1] : reals[0], reals[1]);
             if (not r) return capacity_error();
-            (port == 0 ? r->a : port == 1 ? r->b : r->condition) = m[0];
-            r->mask |= 1u << port; r->dirty = true;
+            (field == 0 ? r->a : field == 1 ? r->b : K == event_kind::select or field == 3 ? r->secondary : r->condition) = m[0];
+            r->mask |= 1u << field; r->dirty = true;
+          }
         }
         if constexpr (K == event_kind::numeric) {
             for (const auto& m : get_message(sim, x[2])) {
@@ -183,7 +242,8 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
         if constexpr (K == event_kind::filter) {
             const auto required = unsigned(integers[0]) | 1u; // a score is always required
             for (auto& r : s.rows) if (r.dirty and (r.mask & required) == required) {
-                r.accepted = std::isfinite(r.a) and std::isfinite(r.b) and std::isfinite(r.condition) and r.condition != 0;
+                r.accepted = std::isfinite(r.a) and std::isfinite(r.b) and std::isfinite(r.condition) and r.condition != 0 and
+                    (not (required & 8) or std::isfinite(r.secondary));
                 r.processed = true; r.dirty = false;
             }
         }
@@ -196,10 +256,14 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
                 ++received;
                 if constexpr (K == event_kind::select) {
                     if (integers[1] and not (r.mask & 2)) continue;
+                    if (reals[1] and not (r.mask & 4)) continue;
                     ++ready;
-                    if (not std::isfinite(r.a) or not std::isfinite(r.b)) continue;
+                    if (not std::isfinite(r.a) or not std::isfinite(r.b) or (reals[1] and not std::isfinite(r.secondary))) continue;
                     const bool better = best and (integers[0] ? r.a < best->a : r.a > best->a);
-                    if (not best or better or (r.a == best->a and r.key < best->key)) best = &r;
+                    const bool tied = best and r.a == best->a;
+                    const bool better_secondary = tied and reals[1] and (reals[2] ? r.secondary < best->secondary : r.secondary > best->secondary);
+                    const bool same_secondary = not reals[1] or (best and r.secondary == best->secondary);
+                    if (not best or better or better_secondary or (tied and same_secondary and r.key < best->key)) best = &r;
                 } else if (r.processed) { ++ready; if (r.accepted) ++accepted; }
             }
             if (received > b.expected) return protocol_error();
@@ -211,7 +275,12 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
                     irt_check(emit(s, 0, action, 0, 0)); // ordinary scalar DEVS action
                 irt_check(emit(s, 1, id, id, b.campaign));
                 irt_check(emit(s, 2, best ? best->a : 0, id, b.campaign));
+                if (best) {
+                    irt_check(emit(s, 4, best->b, id, b.campaign));
+                    irt_check(emit(s, 5, best->secondary, id, b.campaign));
+                }
                 irt_check(emit(s, 3, best ? 1 : 0, 0, b.campaign));
+                irt_check(emit(s, 6, best ? 1 : 0, 0, b.campaign));
                 if (best or integers[2]) value = action;
             } else {
                 if constexpr (K == event_kind::filter) {
@@ -221,6 +290,7 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
                         if (r.accepted) {
                             irt_check(emit(s, 0, r.a, r.key, r.campaign));
                             irt_check(emit(s, 1, r.b, r.key, r.campaign));
+                            if (integers[0] & 8) irt_check(emit(s, 4, r.secondary, r.key, r.campaign));
                             value = r.a;
                         } else irt_check(emit(s, 3, 0, r.key, r.campaign));
                     }
@@ -230,7 +300,7 @@ status event_dynamics<K>::transition(simulation& sim, time, time, time) noexcept
             b.sent = true;
         }
     }
-    sigma = s.pending.empty() ? time_domain<time>::infinity : zero;
+    sigma = s.pending.empty() and s.reads.empty() ? time_domain<time>::infinity : zero;
     return success();
 }
 
@@ -253,4 +323,8 @@ template struct event_dynamics<event_kind::memory>;
 template struct event_dynamics<event_kind::numeric>;
 template struct event_dynamics<event_kind::filter>;
 template struct event_dynamics<event_kind::select>;
+template struct event_dynamics<event_kind::aggregate>;
+template struct event_dynamics<event_kind::broadcast>;
+template struct event_dynamics<event_kind::priority>;
+template struct event_dynamics<event_kind::state_observer>;
 } // namespace irt

@@ -1,32 +1,44 @@
 // Included by core.hpp inside namespace irt, before simulation_snapshot.
 // Runtime storage is owned by simulation, never by the model's raw byte buffer.
-enum class event_kind : u8 { tag, memory, numeric, filter, select };
+enum class event_kind : u8 { tag, memory, numeric, filter, select, aggregate, broadcast, priority, state_observer };
 
 struct event_row {
     real key = 0, campaign = 0;
     real a = 0, b = 0, condition = 1;
     unsigned mask = 0;
     bool dirty = false, processed = false, accepted = false;
+    real secondary = 0, identity = 0;
 };
 struct event_emission { int port; message value; };
 struct event_barrier {
     real campaign = 0;
     sz expected = 0;
     bool sent = false;
+    bool ended = false;
+    real aggregate = 0;
+    bool has_aggregate = false, aggregate_ended = false;
+    sz aggregate_expected = 0;
 };
 struct event_state {
     vector<event_row> rows;
     vector<event_emission> pending;
     vector<event_barrier> barriers;
+    // Observation bindings use model IDs, so simulation copies and snapshots
+    // remain local to their own model storage. No pointers to live dynamics.
+    model_id source = undefined<model_id>();
+    vector<message> reads;
 };
 
 template<event_kind Kind>
 struct event_dynamics {
     static constexpr auto kind = Kind;
     static constexpr int inputs = Kind == event_kind::tag ? 3 :
-      Kind == event_kind::memory ? 3 : Kind == event_kind::select ? 4 : 5;
+      Kind == event_kind::memory or Kind == event_kind::aggregate or Kind == event_kind::state_observer ? 3 :
+      Kind == event_kind::select ? 5 : Kind == event_kind::filter ? 6 :
+      Kind == event_kind::priority ? 9 : 5;
     static constexpr int outputs = Kind == event_kind::tag ? 1 :
-      Kind == event_kind::memory ? 2 : Kind == event_kind::numeric ? 3 : 4;
+      Kind == event_kind::memory or Kind == event_kind::state_observer ? 2 : Kind == event_kind::numeric or Kind == event_kind::aggregate ? 3 :
+      Kind == event_kind::select or Kind == event_kind::priority ? 7 : Kind == event_kind::filter ? 5 : 4;
     input_port x[inputs] = {};
     output_port_id y[outputs] = {};
     std::array<real, 4> reals{};
@@ -50,6 +62,7 @@ struct event_dynamics {
             integers[1] = 1; // require associated action
             integers[2] = 1; // preserve the historical explicit fallback mode
         }
+        if constexpr (Kind == event_kind::priority) reals[1] = 1;
     }
     status initialize(simulation& sim) noexcept;
     status transition(simulation& sim, time t, time e, time r) noexcept;
@@ -61,3 +74,7 @@ using value_memory = event_dynamics<event_kind::memory>;
 using event_operator = event_dynamics<event_kind::numeric>;
 using candidate_filter = event_dynamics<event_kind::filter>;
 using candidate_select = event_dynamics<event_kind::select>;
+using campaign_aggregate = event_dynamics<event_kind::aggregate>;
+using campaign_broadcast = event_dynamics<event_kind::broadcast>;
+using selection_priority = event_dynamics<event_kind::priority>;
+using state_observer = event_dynamics<event_kind::state_observer>;

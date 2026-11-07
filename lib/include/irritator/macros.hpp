@@ -66,6 +66,14 @@ inline constexpr void ensure(T&& assertion) noexcept
 
 namespace debug {
 
+// Scientific tables are optional diagnostics, independent of process errors
+// and assertions. Hosts may disable them or supply a separate owned stream.
+inline std::FILE*& scientific_trace() noexcept
+{
+    static std::FILE* stream = stderr;
+    return stream;
+}
+
 #ifdef IRRITATOR_ENABLE_DEBUG
 static constexpr bool enable_ensure     = true;
 static constexpr bool enable_memory_log = true;

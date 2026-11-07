@@ -34,7 +34,7 @@
             "id": "InvK",
             "type": "constant",
             "parameters": {
-              "value": 0.003333,
+              "value": 0.0033333333333333335,
               "offset": 0
             }
           },
@@ -609,21 +609,13 @@
       },
       {
         "id": "identity",
-        "type": "value_memory",
-        "parameters": {
-          "initial": 0,
-          "emitOnWrite": 1,
-          "capacity": 128
-        }
+        "type": "qss1_sum_2",
+        "parameters": {}
       },
       {
         "id": "score",
-        "type": "value_memory",
-        "parameters": {
-          "initial": 0,
-          "emitOnWrite": 1,
-          "capacity": 128
-        }
+        "type": "qss1_sum_2",
+        "parameters": {}
       },
       {
         "id": "selected",

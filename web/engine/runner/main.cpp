@@ -68,6 +68,11 @@ const std::map<std::string,atomic_type> registry{
  {"event_operator",atomic<irt::event_operator>()},
  {"candidate_filter",atomic<irt::candidate_filter>()},
  {"candidate_select",atomic<irt::candidate_select>()},
+ {"campaign_aggregate",atomic<irt::campaign_aggregate>()},
+ {"campaign_broadcast",atomic<irt::campaign_broadcast>()},
+ {"selection_priority",atomic<irt::selection_priority>()},
+ {"state_observer",atomic<irt::state_observer>()},
+ {"zero_order_hold",atomic<irt::zero_order_hold>()},
     {"constant",atomic<irt::constant>()}, {"qss1_sum_2",atomic<irt::qss1_sum_2>()},
     {"qss1_sum_3",atomic<irt::qss1_sum_3>()}, {"qss1_integrator",atomic<irt::qss1_integrator>()},
     {"qss3_integrator",atomic<irt::qss3_integrator>()}, {"qss2_integrator",atomic<irt::qss2_integrator>()},
@@ -80,10 +85,16 @@ const std::map<std::string,atomic_type> registry{
 void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
     if (registry.contains(type)) target.init_from(registry.at(type).dynamics);
     if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); }
+    else if(type=="state_observer") { target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="value_memory") { target.reals[0]=p["initial"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["emitOnWrite"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="event_operator") { target.reals[0]=p["left"].GetDouble(); target.reals[1]=p["right"].GetDouble(); target.reals[2]=p["epsilon"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["automatic"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="candidate_filter") { target.reals[0]=p["defaultAction"].GetDouble(); target.reals[1]=p["defaultCondition"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
-    else if(type=="candidate_select") { target.reals[0]=p["fallback"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["direction"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["requireAction"].GetDouble()); if(p.HasMember("emitFallback")) target.integers[2]=static_cast<irt::i64>(p["emitFallback"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="candidate_select") { target.reals[0]=p["fallback"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["direction"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["requireAction"].GetDouble()); if(p.HasMember("emitFallback")) target.integers[2]=static_cast<irt::i64>(p["emitFallback"].GetDouble()); if(p.HasMember("requireSecondary")) target.reals[1]=p["requireSecondary"].GetDouble(); if(p.HasMember("secondaryDirection")) target.reals[2]=p["secondaryDirection"].GetDouble(); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="campaign_aggregate" || type=="campaign_broadcast" || type=="selection_priority") {
+        target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble());
+        if(type=="campaign_aggregate") target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble());
+        if(type=="selection_priority") { target.reals[0]=p["primaryPriority"].GetDouble(); target.reals[1]=p["secondaryPriority"].GetDouble(); }
+    }
     else if(type=="generator") { target.set_generator_ta(p["period"].GetDouble()); target.reals[1]=p["value"].GetDouble(); }
     else if(type=="constant") target.set_constant(p["value"].GetDouble(),p["offset"].GetDouble());
     else if(type=="qss1_integrator" || type=="qss2_integrator" || type=="qss3_integrator") target.set_integrator(p["X"].GetDouble(),p["dQ"].GetDouble());
@@ -99,6 +110,14 @@ int limit(const D& doc,const char* name,int cap) {
 }
 void configure_debug_diagnostics() {
 #ifdef IRRITATOR_ENABLE_DEBUG
+    irt::debug::scientific_trace() = nullptr;
+    if (const auto* path = std::getenv("IRRITATOR_TRACE_FILE"); path && *path) {
+        auto* trace = std::fopen(path, "a");
+        if (!trace) fail("INITIALIZATION_ERROR", "Cannot open scientific diagnostic log");
+        irt::debug::scientific_trace() = trace;
+    } else if (const auto* verbose = std::getenv("IRRITATOR_TRACE"); verbose && std::string_view(verbose) == "stderr") {
+        irt::debug::scientific_trace() = stderr;
+    }
     // The native Debug allocator opens irt-mem.txt, with stdout as fallback.
     // Allocation-by-allocation tracing grows with scenario copies and can
     // exhaust the HTTP stderr budget even for small valid v3 graphs. Silence

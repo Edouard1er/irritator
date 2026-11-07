@@ -1,0 +1,728 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "decision-feedback-minimal",
+    "definitions": [
+      {
+        "id": "Plant",
+        "name": "Système dynamique observable",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "read"
+          },
+          {
+            "port": 1,
+            "name": "action"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "observation"
+          }
+        ],
+        "components": [
+          {
+            "id": "X",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 10,
+              "dQ": 0.01
+            }
+          },
+          {
+            "id": "hold",
+            "type": "zero_order_hold",
+            "parameters": {}
+          },
+          {
+            "id": "sample",
+            "type": "state_observer",
+            "parameters": {
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "sample",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "hold",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "hold",
+              "port": 0
+            },
+            "to": {
+              "component": "X",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "X",
+              "port": 0
+            },
+            "to": {
+              "component": "sample",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sample",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "Prospect",
+        "name": "Intégrale prospective",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "u",
+            "type": "constant",
+            "parameters": {
+              "value": 0,
+              "offset": 0
+            }
+          },
+          {
+            "id": "X",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": -777,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "u",
+              "port": 0
+            },
+            "to": {
+              "component": "X",
+              "port": 0
+            }
+          }
+        ]
+      },
+      {
+        "id": "ChooseAction",
+        "name": "Choix par composition",
+        "inputs": [
+          {
+            "port": 0,
+            "name": "terminal"
+          },
+          {
+            "port": 1,
+            "name": "action"
+          },
+          {
+            "port": 2,
+            "name": "end"
+          }
+        ],
+        "outputs": [
+          {
+            "port": 0,
+            "name": "action"
+          },
+          {
+            "port": 1,
+            "name": "identity"
+          },
+          {
+            "port": 2,
+            "name": "score"
+          },
+          {
+            "port": 3,
+            "name": "selected"
+          },
+          {
+            "port": 4,
+            "name": "taggedAction"
+          },
+          {
+            "port": 5,
+            "name": "end"
+          }
+        ],
+        "components": [
+          {
+            "id": "distance",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 2,
+              "left": 0,
+              "right": 10.5,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "absolute",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 16,
+              "left": 0,
+              "right": 0,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "negative",
+            "type": "event_operator",
+            "parameters": {
+              "operation": 3,
+              "left": 0,
+              "right": -1,
+              "epsilon": 0,
+              "required": 1,
+              "automatic": 1,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "filter",
+            "type": "candidate_filter",
+            "parameters": {
+              "defaultAction": 0,
+              "defaultCondition": 1,
+              "required": 3,
+              "capacity": 128
+            }
+          },
+          {
+            "id": "select",
+            "type": "candidate_select",
+            "parameters": {
+              "direction": 0,
+              "fallback": 0,
+              "requireAction": 1,
+              "emitFallback": 0,
+              "capacity": 128,
+              "requireSecondary": 0,
+              "secondaryDirection": 0
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "$input",
+              "port": 0
+            },
+            "to": {
+              "component": "distance",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 2
+            },
+            "to": {
+              "component": "distance",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "distance",
+              "port": 0
+            },
+            "to": {
+              "component": "absolute",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "distance",
+              "port": 2
+            },
+            "to": {
+              "component": "absolute",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "absolute",
+              "port": 0
+            },
+            "to": {
+              "component": "negative",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "absolute",
+              "port": 2
+            },
+            "to": {
+              "component": "negative",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "negative",
+              "port": 0
+            },
+            "to": {
+              "component": "filter",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "negative",
+              "port": 2
+            },
+            "to": {
+              "component": "filter",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "$input",
+              "port": 1
+            },
+            "to": {
+              "component": "filter",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 0
+            },
+            "to": {
+              "component": "select",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 1
+            },
+            "to": {
+              "component": "select",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "filter",
+              "port": 2
+            },
+            "to": {
+              "component": "select",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 0
+            },
+            "to": {
+              "component": "$output",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 1
+            },
+            "to": {
+              "component": "$output",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 2
+            },
+            "to": {
+              "component": "$output",
+              "port": 2
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 3
+            },
+            "to": {
+              "component": "$output",
+              "port": 3
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 4
+            },
+            "to": {
+              "component": "$output",
+              "port": 4
+            }
+          },
+          {
+            "from": {
+              "component": "select",
+              "port": 6
+            },
+            "to": {
+              "component": "$output",
+              "port": 5
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "plant",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "Plant"
+      },
+      {
+        "id": "initialCommand",
+        "type": "constant",
+        "parameters": {
+          "value": 2,
+          "offset": 0
+        }
+      },
+      {
+        "id": "read1",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "read2",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 3
+        }
+      },
+      {
+        "id": "observation",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 0,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "initValue",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 3,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 1,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "runValue",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 1,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 1,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "forecast",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Prospect",
+          "simulation": {
+            "start": 0,
+            "end": 2
+          },
+          "run": "complete",
+          "scenarioResults": true,
+          "factors": [
+            {
+              "id": "initial",
+              "target": "X",
+              "parameter": "X",
+              "type": "single",
+              "value": -777
+            },
+            {
+              "id": "rate",
+              "target": "u",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                -1,
+                0,
+                1
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "terminal",
+              "target": "X",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "terminal"
+          }
+        }
+      },
+      {
+        "id": "decide",
+        "type": "coupled",
+        "parameters": {},
+        "definition": "ChooseAction"
+      },
+      {
+        "id": "applied",
+        "type": "value_memory",
+        "parameters": {
+          "initial": 2,
+          "emitOnWrite": 1,
+          "capacity": 128
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "initialCommand",
+          "port": 0
+        },
+        "to": {
+          "component": "plant",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "read1",
+          "port": 0
+        },
+        "to": {
+          "component": "plant",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "read2",
+          "port": 0
+        },
+        "to": {
+          "component": "plant",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "plant",
+          "port": 0
+        },
+        "to": {
+          "component": "observation",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "observation",
+          "port": 0
+        },
+        "to": {
+          "component": "forecast",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "observation",
+          "port": 0
+        },
+        "to": {
+          "component": "initValue",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "initValue",
+          "port": 0
+        },
+        "to": {
+          "component": "forecast",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "initValue",
+          "port": 0
+        },
+        "to": {
+          "component": "runValue",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "runValue",
+          "port": 0
+        },
+        "to": {
+          "component": "forecast",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 6
+        },
+        "to": {
+          "component": "decide",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 5
+        },
+        "to": {
+          "component": "decide",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 7
+        },
+        "to": {
+          "component": "decide",
+          "port": 2
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 0
+        },
+        "to": {
+          "component": "plant",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "decide",
+          "port": 0
+        },
+        "to": {
+          "component": "applied",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "plant/X",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "plant/hold",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "plant/sample",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "observation",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "applied",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "decide/select",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 5
+  }
+}

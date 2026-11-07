@@ -1,5 +1,15 @@
 # Irritator Web : modèles DEVS atomiques et hiérarchiques
 
+Le Test 8C fournit les exemples v3 `decision-8c-aggregation-v3.json`,
+`decision-8c-normalization-v3.json`, `decision-8c-fallback-v3.json` et
+`decision-8c-schaefer-v3.json` dans `examples/`. La bibliothèque « Contrôle et
+décision » permet de construire leurs réductions, diffusions et sélections
+prioritaires dans React Flow. Voir `../reports/bstar-generic-components-test-8C.md`.
+En Debug, les tables scientifiques sont désactivées dans le runner par défaut ;
+`IRRITATOR_TRACE_FILE` les dirige vers un journal séparé, ou
+`IRRITATOR_TRACE=stderr` réactive la verbosité détaillée. Les assertions et les
+plafonds HTTP restent actifs.
+
 Backend local Fastify/TypeScript et runner C++20 utilisant **libirritator**.
 Le modèle est un graphe JSON dynamique. Le backend lance un nouveau processus
 natif par simulation avec `spawn`, transmet la requête sur stdin et contrôle
@@ -429,3 +439,56 @@ refuse un ancien catalogue. La construction native standard reste
 Voir [le rapport 8A](../reports/bstar-generic-components-test-8A.md) pour les ports,
 les interfaces DEVS, les commandes de validation et les limites, dont le CSV
 historique 7G manquant.
+
+## Décision externe Schaefer — Test 8B
+
+Importer `examples/decision-schaefer-external-v3.json`. Le wrapper évalue six
+scénarios et maximise CH : E=260, q=0.0008. Le couplé `DecisionFiltrage`
+compare Nmin à 140, filtre les lignes identifiées puis maximise CH parmi les
+admissibles : E=150, identité native 4 (e5), q=0.001.
+
+Ouvrir la définition, sélectionner `admissible` et changer `right` dans
+l'inspecteur : 120 donne E=260 ; 160 donne selected=0 sans émission d'action.
+Le sélecteur est configuré avec `emitFallback=0`. Pour un repli explicite,
+choisir `emitFallback=1` et régler `fallback`. Les anciens documents sans
+ce paramètre gardent le comportement 8A (repli activé).
+
+Cet exemple nécessite le runner 8B reconstruit avec le catalogue courant.
+Pour lancer l'API depuis `web`, définir
+`$env:IRRITATOR_RUNNER='D:\these\irritator\build-web-test8b\Release\runner\irritator-runner.exe'`
+puis exécuter `npm.cmd start` ; lancer le frontend selon les instructions de
+`apps/frontend/README.md`.
+
+Reconstruction et campagnes :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-8b.ps1 -Configuration Release
+powershell -NoProfile -ExecutionPolicy Bypass -File web/engine/runner/tests-wrapper/run-8b.ps1 -Configuration Debug
+```
+
+Les commandes ci-dessus partent de la racine du dépôt. Voir le
+[rapport 8B](../reports/bstar-generic-components-test-8B.md) pour le protocole,
+les mesures, les parcours React Flow et les incidents historiques conservés.
+
+## Boucle de rétroaction générique (8D)
+
+Ouvrir `examples/decision-feedback-minimal-v3.json` dans l'éditeur. Le système
+QSS3 évolue avec dX/dt=u, lit son état natif à t=1 et t=3, initialise trois
+prospectives, choisit une action dans `ChooseAction` puis l'applique à sa
+dérivée via `zero_order_hold`. X passe par 12 puis 10 ; les commandes retenues
+sont −1 puis 0. Exporter et réimporter conserve les définitions et connexions.
+
+Dans la bibliothèque « Contrôle et décision », `state_observer` lie une seule
+sortie d'intégrateur à `source` et lit l'état courant sur commande `read`.
+La connexion ne mémorise pas le dernier message quantifié. Le maintien natif
+émet un scalaire sans identités utilisable par QSS3. Tous les calculs de
+décision s'exécutent dans le moteur C++.
+
+La commande init explicite du wrapper annule les réponses différées en attente.
+En mode complete, un changement de facteur suivi de run réinitialise aussi
+les enfants sans init explicite. Voir `../reports/bstar-generic-components-test-8D.md`
+pour la chronologie, les campagnes chevauchantes et les limites.
+
+Tests : `npm run test:decision-8d` avec `IRRITATOR_RUNNER` configuré ;
+`engine/runner/tests-wrapper/run-8d.ps1 -Configuration Release` ou `Debug`
+reconstruit les bibliothèques et leurs clients avant les non-régressions.

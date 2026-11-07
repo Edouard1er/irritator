@@ -1,0 +1,1062 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "campaign-aggregations",
+    "definitions": [],
+    "components": [
+      {
+        "id": "min",
+        "type": "campaign_aggregate",
+        "parameters": {
+          "operation": 0,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "s1",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s1t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s3",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s3t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s5",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s5t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s7",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s7t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "minResult",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "minEnd",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "minInvalid",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "max",
+        "type": "campaign_aggregate",
+        "parameters": {
+          "operation": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "s13",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s13t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s15",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s15t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s17",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s17t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s19",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s19t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "maxResult",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "maxEnd",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "maxInvalid",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "sum",
+        "type": "campaign_aggregate",
+        "parameters": {
+          "operation": 2,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "s25",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s25t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s27",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s27t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s29",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s29t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s31",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s31t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "sumResult",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "sumEnd",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "sumInvalid",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "mean",
+        "type": "campaign_aggregate",
+        "parameters": {
+          "operation": 3,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "s37",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s37t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s39",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s39t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s41",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s41t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s43",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s43t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "meanResult",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "meanEnd",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "meanInvalid",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "count",
+        "type": "campaign_aggregate",
+        "parameters": {
+          "operation": 4,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "s49",
+        "type": "constant",
+        "parameters": {
+          "value": 10,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s49t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s51",
+        "type": "constant",
+        "parameters": {
+          "value": 20,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s51t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s53",
+        "type": "constant",
+        "parameters": {
+          "value": 40,
+          "offset": 0
+        }
+      },
+      {
+        "id": "s53t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "s55",
+        "type": "constant",
+        "parameters": {
+          "value": 3,
+          "offset": 0.05
+        }
+      },
+      {
+        "id": "s55t",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "countResult",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "countEnd",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "countInvalid",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "s1",
+          "port": 0
+        },
+        "to": {
+          "component": "s1t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s1t",
+          "port": 0
+        },
+        "to": {
+          "component": "min",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s3",
+          "port": 0
+        },
+        "to": {
+          "component": "s3t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s3t",
+          "port": 0
+        },
+        "to": {
+          "component": "min",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s5",
+          "port": 0
+        },
+        "to": {
+          "component": "s5t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s5t",
+          "port": 0
+        },
+        "to": {
+          "component": "min",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s7",
+          "port": 0
+        },
+        "to": {
+          "component": "s7t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s7t",
+          "port": 0
+        },
+        "to": {
+          "component": "min",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "min",
+          "port": 0
+        },
+        "to": {
+          "component": "minResult",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "min",
+          "port": 2
+        },
+        "to": {
+          "component": "minEnd",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "min",
+          "port": 1
+        },
+        "to": {
+          "component": "minInvalid",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s13",
+          "port": 0
+        },
+        "to": {
+          "component": "s13t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s13t",
+          "port": 0
+        },
+        "to": {
+          "component": "max",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s15",
+          "port": 0
+        },
+        "to": {
+          "component": "s15t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s15t",
+          "port": 0
+        },
+        "to": {
+          "component": "max",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s17",
+          "port": 0
+        },
+        "to": {
+          "component": "s17t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s17t",
+          "port": 0
+        },
+        "to": {
+          "component": "max",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s19",
+          "port": 0
+        },
+        "to": {
+          "component": "s19t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s19t",
+          "port": 0
+        },
+        "to": {
+          "component": "max",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "max",
+          "port": 0
+        },
+        "to": {
+          "component": "maxResult",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "max",
+          "port": 2
+        },
+        "to": {
+          "component": "maxEnd",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "max",
+          "port": 1
+        },
+        "to": {
+          "component": "maxInvalid",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s25",
+          "port": 0
+        },
+        "to": {
+          "component": "s25t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s25t",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s27",
+          "port": 0
+        },
+        "to": {
+          "component": "s27t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s27t",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s29",
+          "port": 0
+        },
+        "to": {
+          "component": "s29t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s29t",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s31",
+          "port": 0
+        },
+        "to": {
+          "component": "s31t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s31t",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "sum",
+          "port": 0
+        },
+        "to": {
+          "component": "sumResult",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "sum",
+          "port": 2
+        },
+        "to": {
+          "component": "sumEnd",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "sum",
+          "port": 1
+        },
+        "to": {
+          "component": "sumInvalid",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s37",
+          "port": 0
+        },
+        "to": {
+          "component": "s37t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s37t",
+          "port": 0
+        },
+        "to": {
+          "component": "mean",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s39",
+          "port": 0
+        },
+        "to": {
+          "component": "s39t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s39t",
+          "port": 0
+        },
+        "to": {
+          "component": "mean",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s41",
+          "port": 0
+        },
+        "to": {
+          "component": "s41t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s41t",
+          "port": 0
+        },
+        "to": {
+          "component": "mean",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s43",
+          "port": 0
+        },
+        "to": {
+          "component": "s43t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s43t",
+          "port": 0
+        },
+        "to": {
+          "component": "mean",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "mean",
+          "port": 0
+        },
+        "to": {
+          "component": "meanResult",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "mean",
+          "port": 2
+        },
+        "to": {
+          "component": "meanEnd",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "mean",
+          "port": 1
+        },
+        "to": {
+          "component": "meanInvalid",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s49",
+          "port": 0
+        },
+        "to": {
+          "component": "s49t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s49t",
+          "port": 0
+        },
+        "to": {
+          "component": "count",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s51",
+          "port": 0
+        },
+        "to": {
+          "component": "s51t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s51t",
+          "port": 0
+        },
+        "to": {
+          "component": "count",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s53",
+          "port": 0
+        },
+        "to": {
+          "component": "s53t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s53t",
+          "port": 0
+        },
+        "to": {
+          "component": "count",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s55",
+          "port": 0
+        },
+        "to": {
+          "component": "s55t",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "s55t",
+          "port": 0
+        },
+        "to": {
+          "component": "count",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "count",
+          "port": 0
+        },
+        "to": {
+          "component": "countResult",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "count",
+          "port": 2
+        },
+        "to": {
+          "component": "countEnd",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "count",
+          "port": 1
+        },
+        "to": {
+          "component": "countInvalid",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "minResult",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "minEnd",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "minInvalid",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "maxResult",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "maxEnd",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "maxInvalid",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "sumResult",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "sumEnd",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "sumInvalid",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "meanResult",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "meanEnd",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "meanInvalid",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "countResult",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "countEnd",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "countInvalid",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}
