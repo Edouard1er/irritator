@@ -46,13 +46,12 @@ void resampler::tick(observer& obs, const real now) noexcept
     while (obs.raw_buffer().pop(s))
         ingest(s);
 
-    if (m_has_pending && now > m_pending.t) {
+    if (std::isinf(now)) {
+        finalize();
+    } else if (m_has_pending && now > m_pending.t) {
         commit_pending();
         m_has_pending = false;
     }
-
-    if (std::isinf(now))
-        finalize();
 
     flush_batch(obs);
 }
@@ -71,7 +70,7 @@ void resampler::ingest(const raw_sample& s) noexcept
     m_has_pending = true;
 }
 
-void resampler::commit_pending() noexcept
+void resampler::commit_pending(const bool sealing) noexcept
 {
     if (!m_has_prev) {
         m_prev             = m_pending;
@@ -82,7 +81,11 @@ void resampler::commit_pending() noexcept
         return;
     }
 
-    while (m_next_sample_time <= m_pending.t) {
+    // At the final boundary publish the sealed native endpoint below, rather
+    // than both an interpolated grid point and the native value at that date.
+    // Interior interpolation, the grid and value deduplication are unchanged.
+    while (m_next_sample_time < m_pending.t ||
+           (!sealing && m_next_sample_time == m_pending.t)) {
         double v = m_interp.evaluate(m_prev, m_pending, m_next_sample_time);
         push_resampled(m_next_sample_time, v);
         m_next_sample_time += m_dt;
@@ -94,7 +97,7 @@ void resampler::commit_pending() noexcept
 void resampler::finalize() noexcept
 {
     if (m_has_pending) {
-        commit_pending();
+        commit_pending(true);
         m_has_pending = false;
     }
 

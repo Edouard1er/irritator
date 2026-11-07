@@ -63,7 +63,9 @@ test('real TCP HTTP: thirteen types, all six QSS3 operators, v1/v2, parameters a
     assert.deepEqual(changed.observations[7]!.samples, [{ time: 0, value: 35.5 }]);
     assert.deepEqual(changed.observations[8]!.samples, [{ time: 0, value: 81 }]);
     // Exercise controlled native failures (422) and the existing isolation of
-    // an abnormal native pow exit (502). No successful partial data is returned.
+    // non-finite observations (422). Validation must not throw through the
+    // noexcept history reader and turn a numeric-domain error into an abort.
+    // No successful partial data is returned.
     for (const version of [1, 2] as const) for (const [type, input] of [['qss3_inverse', 0], ['qss3_sqrt', 0], ['qss3_sqrt', -4], ['qss3_power', -4]] as const) {
       const r = example(1); const op = component(r, type); if (type === 'qss3_power') op.parameters.n = .5;
       r.model.components = [r.model.components[0]!, op]; r.model.components[0]!.parameters.value = input;
@@ -72,8 +74,8 @@ test('real TCP HTTP: thirteen types, all six QSS3 operators, v1/v2, parameters a
       if (version === 2) { r.schemaVersion = 2; r.model.definitions = []; }
       const response = await fetch(`${app.listeningOrigin}/api/v1/simulations/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(r) });
       const error = await response.json() as { status: string; error: { code: string }; observations?: unknown };
-      assert.equal(response.status, type === 'qss3_power' ? 502 : 422, JSON.stringify(error)); assert.equal(error.status, 'failed');
-      assert.ok((type === 'qss3_power' ? ['RUNNER_PROTOCOL_ERROR'] : ['EXECUTION_ERROR', 'OBSERVATION_ERROR']).includes(error.error.code)); assert.equal(error.observations, undefined);
+      assert.equal(response.status, 422, JSON.stringify(error)); assert.equal(error.status, 'failed');
+      assert.ok((type === 'qss3_power' ? ['OBSERVATION_ERROR'] : ['EXECUTION_ERROR', 'OBSERVATION_ERROR']).includes(error.error.code)); assert.equal(error.observations, undefined);
       evidence.push({ request: r, httpStatus: response.status, result: error });
     }
     assert.deepEqual((await run(example(2))).observations, nested.observations);

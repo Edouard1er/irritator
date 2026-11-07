@@ -1577,7 +1577,7 @@ public:
 
 private:
     void ingest(const raw_sample& s) noexcept;
-    void commit_pending() noexcept;
+    void commit_pending(bool sealing = false) noexcept;
     void finalize() noexcept;
 
     void push_resampled(double t, double value) noexcept;

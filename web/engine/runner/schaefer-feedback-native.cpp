@@ -17,10 +17,12 @@ int main(int argc, char** argv) {
         json_wrappers graph(doc, catalog); graph.build();
         auto& s = graph.parent->project->sim;
         const auto& ids = graph.parent->models;
+        const bool composed = ids.contains("observer/request");
+        const std::string decision_prefix = composed ? "observer/" : "";
         irt_web::require(s.grow_models_to(static_cast<int>(s.models.size()+2)),"Native trace taps");
         for(const auto port : {4,5}) {
             auto& sink=irt::get_model(s.alloc<irt::counter>());
-            irt_web::checked(s.connect(s.models.get(ids.at("decide/choose/priority")),port,sink,0),"Native selected-row trace tap");
+            irt_web::checked(s.connect(s.models.get(ids.at(decision_prefix+"decide/choose/priority")),port,sink,0),"Native selected-row trace tap");
         }
         s.limits.set_bound(0, 5);
         irt_web::checked(s.srcs.prepare(), "Prepare");
@@ -32,6 +34,7 @@ int main(int argc, char** argv) {
         std::map<double, std::array<double, 2>> observed;
         std::map<double, std::array<unsigned, 2>> read_bags;
         std::map<double, unsigned> initialized, ran, applied, init_sent;
+        std::map<double, unsigned> requested;
         std::map<std::string, std::map<double, irt::message>> events;
         std::vector<std::array<double, 2>> actions;
         std::vector<std::array<double, 3>> deltas;
@@ -46,16 +49,19 @@ int main(int argc, char** argv) {
             irt_web::checked(s.run(), "Run"); graph.collect(bag);
             if (s.current_time_expired()) break;
             const auto t = s.current_time();
-            for (const auto& [path, id] : ids) {
+            for (const auto& [full_path, id] : ids) {
+                const auto path = composed && full_path.starts_with(decision_prefix) ? full_path.substr(decision_prefix.size()) : full_path;
                 const bool selected = path.starts_with("synchronize/") || path.starts_with("decide/") ||
+                  (composed && path == "request") ||
                   path == "plant/observeN" || path == "plant/observeC" || path == "plant/effort" || path == "plant/modelHalieutique" || path == "forecast";
                 if (!selected) continue;
                 irt::dispatch(s.models.get(id), [&]<class T>(const T& d) {
                     if constexpr (irt::has_output_port<T>) for (int p=0; p<std::ssize(d.y); ++p) {
                         if (std::find(s.active_output_ports.begin(), s.active_output_ports.end(), d.y[p]) == s.active_output_ports.end()) continue;
                         const auto m = s.output_ports.get(d.y[p]).msg;
-                        std::cout << "EVENT " << bag << ' ' << t << ' ' << path << ':' << p << " [" << m[0] << ',' << m[1] << ',' << m[2] << "]\n";
+                        std::cout << "EVENT " << bag << ' ' << t << ' ' << full_path << ':' << p << " [" << m[0] << ',' << m[1] << ',' << m[2] << "]\n";
                         events[path+":"+std::to_string(p)][m[2]] = m;
+                        if(composed && path=="request" && p==0) requested[m[2]]=bag;
                         if(path=="decide/deltaC" && p==0) deltas.push_back({m[0],m[1],m[2]});
                         if(path=="synchronize/initValue" && p==0) init_sent[m[2]]=bag;
                         if(path=="plant/modelHalieutique" && t==1) changed_derivative=m[0];
@@ -99,6 +105,7 @@ int main(int argc, char** argv) {
         near(changed_derivative,.35*observed[1][0]*(1-observed[1][0]/300)-.001*150*observed[1][0],.01);
         irt_web::require(changed_derivative>0 && deltas.size()==6,"Effort did not change the derivative or missing deltas");
         for (const auto cycle : {1.,2.}) {
+            if(composed) irt_web::require(requested[cycle] && requested[cycle]<read_bags[cycle][0], "B* did not initiate native observation");
             irt_web::require(read_bags[cycle][0] == read_bags[cycle][1], "Observations were not simultaneous");
             irt_web::require(initialized[cycle] < ran[cycle] && ran[cycle] < applied[cycle], "Causal bag order differs");
             near(events["decide/choose/primary:3"][cycle][0], cycle == 1 ? 0 : 1);

@@ -252,17 +252,21 @@ D execute(const D& doc,const D& catalog) {
     for(const auto& o:model["observations"].GetArray()) {
         V output(rapidjson::kObjectType), samples(rapidjson::kArrayType);
         output.AddMember("component",V(o["component"],a),a).AddMember("samplingInterval",o["samplingInterval"].GetDouble(),a);
+        const char* history_error=nullptr;
         sim.observers.try_to_get(observers.at(index++))->read_history([&](const auto& history,const auto) {
             double previous=-std::numeric_limits<double>::infinity();
             for(const auto& s:history) {
-                if(++total>unsigned(max_points)) fail("LIMIT_EXCEEDED","Output point budget exceeded");
-                if(!std::isfinite(s.t) || !std::isfinite(s.value) || s.t<start || s.t>end || s.t<=previous) fail("OBSERVATION_ERROR","Non-finite or unordered history");
+                // read_history is noexcept. Report validation failures after
+                // releasing its pinned snapshot, never throw through it.
+                if(++total>unsigned(max_points)) { history_error="LIMIT_EXCEEDED"; break; }
+                if(!std::isfinite(s.t) || !std::isfinite(s.value) || s.t<start || s.t>end || s.t<=previous) { history_error="OBSERVATION_ERROR"; break; }
                 previous=s.t;
                 V point(rapidjson::kObjectType);
                 point.AddMember("time",s.t,a).AddMember("value",s.value,a);
                 samples.PushBack(point,a);
             }
         });
+        if(history_error) fail(history_error,std::string_view(history_error)=="LIMIT_EXCEEDED"?"Output point budget exceeded":"Non-finite or unordered history");
         if(samples.Empty()) fail("OBSERVATION_ERROR","No published samples for requested component");
         output.AddMember("samples",samples,a); observations.PushBack(output,a);
     }
