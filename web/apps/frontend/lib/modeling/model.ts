@@ -1,8 +1,7 @@
 import { Ajv } from 'ajv';
-import { ApiError, requestSchema, requestV2Schema, requestV3Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
+import { ApiError, catalog, requestSchema, requestV2Schema, requestV3Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
 import { validateHierarchy } from '@contracts';
 import { componentSpec, validateDependencies } from './wrapper';
-import type { catalog } from '@contracts';
 
 export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
 export interface ComponentSpec { type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
@@ -68,6 +67,13 @@ export function serializeModel(state: EditorState): RunRequest {
   return result;
 }
 
+// Include the card's port rows and controls, with room between adjacent cards.
+export function nodeRowSpacing(c: Component, request: RunRequest): number {
+  const d = c.type === 'coupled' || c.type.startsWith('coupled:') ? request.model.definitions?.find(d => d.id === (c.definition ?? c.type.slice(8))) : undefined;
+  const spec = d ?? componentSpec(c, catalog);
+  const ports = Math.max(spec?.inputs.length ?? 0, spec?.outputs.length ?? 0, 1);
+  return Math.max(170, 125 + ports * 25 + (c.experiment || d ? 30 : 0));
+}
 export function deserializeModel(input: unknown, draft = false): EditorState {
   validateEditorDocument(input);
   if (input.schemaVersion === 3 && !draft) validateRequest(input);
@@ -84,8 +90,8 @@ export function deserializeModel(input: unknown, draft = false): EditorState {
   const rows = new Map<number, number>();
   for (const c of request.model.components) {
     const column = depth(c.id), row = rows.get(column) ?? 0;
-    positions[c.id] = { x: column * 285, y: row * 170 };
-    rows.set(column, row + 1);
+    positions[c.id] = { x: column * 285, y: row };
+    rows.set(column, row + nodeRowSpacing(c, request));
   }
   return { request, positions, viewport: { ...initialViewport } };
 }

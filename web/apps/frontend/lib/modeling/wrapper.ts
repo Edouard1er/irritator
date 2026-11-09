@@ -8,8 +8,8 @@ export const wrapperPaletteSpec: ComponentSpec = {
 export const scenarioCount = (e: { factors: FactorPlan[] }): number => e.factors.reduce((n, f) => n * factorCardinality(f), 1);
 export function wrapperSpec(e?: WrapperExperiment): ComponentSpec {
   return { type: wrapperPaletteSpec.type, name: wrapperPaletteSpec.name, parameters: {}, required: [],
-    inputs: [...wrapperPaletteSpec.inputs, ...(e?.factors ?? []).map((f, i) => ({ port: i + 2, name: f.name || f.id }))],
-    outputs: e ? wrapperOutputs(e).map(p => ({ port: p.port, name: p.kind === 'selection' ? (e.selections.find(s => s.id === p.id)?.name || p.id) : p.kind === 'factor' ? `${e.factors.find(f => f.id === p.id)?.name || p.id} choisi` : p.kind === 'scenario-selection' ? `${p.id} par scénario` : p.kind === 'scenario-factor' ? `${p.id} par scénario` : p.kind === 'campaign-end' ? 'Fin de campagne' : 'Validité du scénario' })) : [],
+    inputs: [...wrapperPaletteSpec.inputs, ...(e?.factors ?? []).map((f, i) => ({ port: i + 2, name: f.name || f.id })), ...(e?.dynamicPlan ? [{ port: e.factors.length + 2, name: 'plan' }] : [])],
+    outputs: e ? wrapperOutputs(e).map(p => ({ port: p.port, name: p.kind === 'selection' ? (e.selections.find(s => s.id === p.id)?.name || p.id) : p.kind === 'factor' ? `${e.factors.find(f => f.id === p.id)?.name || p.id} choisi` : p.kind === 'scenario-selection' ? `${p.id} par scénario` : p.kind === 'scenario-factor' ? `${p.id} par scénario` : p.kind === 'campaign-end' ? 'Fin de campagne' : p.kind === 'plan-ready' ? 'Plan prêt' : 'Validité du scénario' })) : [],
   };
 }
 export const componentSpec = (c: Component, metadata?: Catalog): ComponentSpec | undefined => c.type === 'simulation_wrapper' ? wrapperSpec(c.experiment) : metadata?.components.find(s => s.type === c.type);
@@ -82,7 +82,7 @@ export { planOnly };
 function portKeys(e: WrapperExperiment, direction: 'in' | 'out', rename: IdentityRename = {}) {
   const factor = (id: string) => `factor:${id === rename.factor?.[0] ? rename.factor[1] : id}`;
   const selection = (id: string) => `selection:${id === rename.selection?.[0] ? rename.selection[1] : id}`;
-  return direction === 'in' ? ['init', 'run', ...e.factors.map(f => factor(f.id))] : [...e.selections.map(s => selection(s.id)), ...e.factors.map(f => factor(f.id)), ...(e.scenarioResults ? ['scenario-status', ...e.factors.map(f => 'scenario-' + factor(f.id)), ...e.selections.map(s => 'scenario-' + selection(s.id)), 'campaign-end'] : [])];
+  return direction === 'in' ? ['init', 'run', ...e.factors.map(f => factor(f.id)), ...(e.dynamicPlan ? ['plan'] : [])] : [...e.selections.map(s => selection(s.id)), ...e.factors.map(f => factor(f.id)), ...(e.scenarioResults ? ['scenario-status', ...e.factors.map(f => 'scenario-' + factor(f.id)), ...e.selections.map(s => 'scenario-' + selection(s.id)), 'campaign-end'] : []), ...(e.dynamicPlan ? ['plan-ready'] : [])];
 }
 // Numeric handles are transport indices. Remap by logical identity in a single
 // transaction, including coupled interface edges and plans on all occurrences.

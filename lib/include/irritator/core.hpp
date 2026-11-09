@@ -2447,6 +2447,25 @@ struct embedded_simulation {
     };
     vector<input_frame> input_frames;
 
+    // Opt-in dynamic experiments stage bounded, campaign-addressed domains.
+    // The prospective graph and configured factors remain immutable.
+    struct dynamic_plan_frame {
+        real campaign = 0;
+        real plan_id = 0;
+        real version = 0;
+        real horizon = 0;
+        unsigned fields = 0;
+        std::array<unsigned, 9> cardinalities{};
+        std::array<unsigned, 9> received{};
+        std::array<std::array<real, 128>, 9> domains{};
+        std::array<std::array<u64, 2>, 9> indices{};
+        sz scenarios = 0;
+        bool sealed = false;
+    };
+    vector<dynamic_plan_frame> dynamic_frames;
+    sz dynamic_capacity = 0;
+    real dynamic_max_horizon = 0;
+
     // Results belong to the typed embedded resource, whose destruction
     // releases their storage even when the parent model's byte buffer is
     // discarded. Later experiments cannot change these response snapshots.
@@ -8117,6 +8136,7 @@ struct simulation_wrapper {
     // lambda precedes transition, also when external inputs are confluent.
     bool response_emitted = false;
     bool scenario_results = false;
+    bool dynamic_plan = false;
     u64 campaign = 0;
     unsigned required_inputs = 0;
     u64 last_input_campaign = 0;

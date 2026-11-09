@@ -85,7 +85,7 @@ const std::map<std::string,atomic_type> registry{
 // Flat and coupled models use exactly the same native parameter setters.
 void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
     if (registry.contains(type)) target.init_from(registry.at(type).dynamics);
-    if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); }
+    if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); target.integers[0]=p.HasMember("preserveCampaign") ? static_cast<irt::i64>(p["preserveCampaign"].GetDouble()) : 0; }
     else if(type=="group_aggregate") { target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["validation"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); target.reals[0]=p["endCount"].GetDouble(); }
     else if(type=="state_observer") { target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="value_memory") { target.reals[0]=p["initial"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["emitOnWrite"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }

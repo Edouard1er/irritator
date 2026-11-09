@@ -76,7 +76,8 @@ struct native_hierarchy {
             if(inserted) {
                 // Values own their allocator: this document outlives validation.
                 const auto& e=c["experiment"];
-                const auto n=std::string(direction)=="inputs"?e["factors"].Size()+2:(e.HasMember("scenarioResults") && e["scenarioResults"].GetBool()?2*(e["factors"].Size()+e["selections"].Size())+2:e["factors"].Size()+e["selections"].Size());
+                const auto dynamic=e.HasMember("dynamicPlan") && e["dynamicPlan"].GetBool();
+                const auto n=(std::string(direction)=="inputs"?e["factors"].Size()+2:(e.HasMember("scenarioResults") && e["scenarioResults"].GetBool()?2*(e["factors"].Size()+e["selections"].Size())+2:e["factors"].Size()+e["selections"].Size()))+(dynamic?1:0);
                 for(unsigned p=0;p<n;++p) { V item(rapidjson::kObjectType); item.AddMember("port",p,port_storage.GetAllocator()); it->second.PushBack(item,port_storage.GetAllocator()); }
             }
             return it->second;

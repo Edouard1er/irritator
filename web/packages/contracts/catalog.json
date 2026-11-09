@@ -416,6 +416,14 @@
           "maximum": 1000000000000,
           "default": 0,
           "description": ""
+        },
+        "preserveCampaign": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Conserver la campagne du message entrant en changeant son identité.",
+          "choices": ["Campagne configurée", "Campagne entrante"]
         }
       },
       "required": [

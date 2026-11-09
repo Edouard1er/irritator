@@ -985,6 +985,10 @@
         },
         "scenarioResults": {
           "type": "boolean"
+        },
+        "dynamicPlan": {
+          "type": "boolean",
+          "default": false
         }
       }
     }

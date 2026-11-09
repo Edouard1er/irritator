@@ -90,7 +90,7 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
         if (integers[0] < 0 or integers[0] > 6 or integers[1] < 0 or integers[1] > 1 or
             integers[2] < 0 or integers[2] > 15 or (reals[0] != 0 and reals[0] != 1)) return protocol_error();
     if constexpr (K == event_kind::tag)
-        if (not event_identifier(reals[0]) or not event_identifier(reals[1])) return protocol_error();
+        if (not event_identifier(reals[0]) or not event_identifier(reals[1]) or integers[0] < 0 or integers[0] > 1) return protocol_error();
     if (not sim.event_states.data.reserve(sim.event_states.size() + 1)) return capacity_error();
     sim.event_states.set(sim.get_id(*this), event_state{});
     auto& s = *sim.event_states.get(sim.get_id(*this));
@@ -169,7 +169,8 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
         for (const auto& m : get_message(sim, x[1])) { if (not event_identifier(m[0])) return protocol_error(); reals[0] = m[0]; }
         for (const auto& m : get_message(sim, x[2])) { if (not event_identifier(m[0])) return protocol_error(); reals[1] = m[0]; }
         for (const auto& m : get_message(sim, x[0])) {
-            irt_check(emit(s, 0, m[0], reals[0], reals[1])); value = std::isfinite(m[0]) ? m[0] : value;
+            if (integers[0] and not event_identifier(m[2])) return protocol_error();
+            irt_check(emit(s, 0, m[0], reals[0], integers[0] ? m[2] : reals[1])); value = std::isfinite(m[0]) ? m[0] : value;
         }
     } else if constexpr (K == event_kind::state_observer) {
         // One internal transition after the read bag: concurrent source

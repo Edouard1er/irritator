@@ -454,3 +454,70 @@ son absence ne vaut ni un indicateur nul ni une contrainte satisfaite.
 Les exemples `decision-grouped-schaefer-v3.json` et
 `tstar-schaefer-uncertainty-v3.json` exposent poids et scellement dans les
 interfaces couplées ; le q prospectif n'est relié à aucune action du Plant.
+
+## Test 8H : domaines et horizon transmis par campagne
+
+`experiment.dynamicPlan` est optionnel et vaut false en son absence. Avec true,
+le wrapper conserve sa définition prospective, ses cibles, ses critères et son
+objectif déclarés. Il reçoit pour chaque campagne des valeurs initiales single,
+des domaines fixed directs et une durée H. Il exige complete, scenarioResults,
+F ≤ 9, et requiredInputs exactement égal aux facteurs single. Les variantes
+add/mult et les distributions aléatoires ne sont pas admises dans ce mode.
+
+Les ports existants conservent leur indice. L'entrée supplémentaire x[F+2]
+transporte `[valeur,champ,campagne]` : champ 0 = identifiant positif du plan,
+1 = version entière positive, 2 = H strictement positif, 3 = scellement de valeur
+0, 4 = annulation de valeur 0, 5+i = cardinalité positive du facteur fixed i.
+L'indice i suit l'ordre de tous les facteurs, y compris les single. Aucune
+cardinalité n'est transmise pour les single. H est au plus égal à la durée
+prospective déclarée ; le début enfant reste celui du document.
+
+Sur x[2+i], un domaine fixed transmet `[valeur,indice,campagne]`, avec tous les
+indices de 0 à cardinalité−1. Un single transmet `[valeur,0,campagne]`.
+Les valeurs de facteurs sont finies dans ±1e12. Les identifiants de campagne,
+de plan et de version sont des entiers compris entre 1 et 2^53−1. Le produit
+des cardinalités ne dépasse pas le produit statique déclaré, qui reste la
+capacité publiée dans `wrappers[].scenarioCount`. Un plan ne reprend aucun
+champ absent d'une autre campagne. Les champs sont accumulés sans ordre entre
+ports ; le scellement vérifie les valeurs, métadonnées et domaines complets.
+Il rejette immédiatement les absences, doublons, contradictions, domaines vides
+ou excessifs. Un plan non scellé attend sa complétude, sans lancer de simulation.
+
+La sortie `plan-ready` est ajoutée après toutes les sorties historiques,
+y[2*(F+S)+2]. Elle émet `[nombre réel,identifiant du plan,campagne]` à validation.
+Une composition native peut transformer ce message en run `[délai,0,campagne]`.
+Un run sans plan complet scellé est rejeté. Les messages tardifs et campagnes
+déjà exécutées sont rejetés. Jusqu'à 128 trames et, séparément, 128 réponses
+peuvent être en attente ; initialize efface cet état. Les scénarios suivent
+l'ordre cartésien déterministe du wrapper et reçoivent des identités locales
+contiguës depuis 0.
+Une commande init exige un plan scellé et annule les réponses d'exécution en
+attente. Elle conserve les plans scellés et leurs validations plan-ready ;
+l'annulation par le champ 4 ferme les campagnes d'identifiant inférieur ou égal
+et retire leurs validations en attente.
+La clôture des résultats annonce `[nombre valide,nombre réel,campagne]` ; le
+parseur vérifie les identités et tous les champs attendus des scénarios valides.
+Un critère enfant non fini fait échouer toute la campagne dans l'optimiseur
+historique avant la restitution individuelle (erreur moteur 67) ; aucun résultat
+partiel ni aucune valeur de remplacement n'est fabriqué.
+
+`event_tag.preserveCampaign=1` conserve le troisième champ entrant tout en
+remplaçant l'identité. Le défaut 0 conserve la campagne configurée historique.
+Cette option permet d'assembler le protocole avec comparateurs, filtres,
+opérateurs configurés, sources et connexions DEVS ordinaires. Le frontend édite
+ces paramètres et ports ; il ne construit ni ne choisit le plan à l'exécution.
+
+### Composition dynamique sous incertitude (8I)
+
+`tstar-schaefer-dynamic-uncertainty-v3.json` compose les contrats 8G et 8H
+sans nouvelle primitive : domaines indépendants E/q, observations N0/C0,
+horizon H, puis `event_operator` pour CH−C0 avant `group_aggregate` par E.
+Les couplés ReceiveResults, AggregateActions et EvaluateGroups séparent
+réception/validité, indicateurs et sélection avec ConditionalDecision.
+Les identités des groupes sont locales au manifeste de chaque campagne.
+La variante `-single` ne garde que E=80 au second cycle ; `-context` ne garde
+que q=0.0008. Ce dernier choix forme des groupes complets à un membre et
+ne démontre aucune robustesse sur l'hypothèse explicitement retirée.
+Les plans utilisent six puis quatre/deux vrais enfants ; seuls les efforts
+sélectionnés sont reliés au Plant. Aucun calcul décisionnel n'est effectué
+par les générateurs de documents ou par React.

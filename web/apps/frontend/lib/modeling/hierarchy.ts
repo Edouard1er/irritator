@@ -1,5 +1,5 @@
 import type { Component, CoupledDefinition, RunRequest } from '@contracts';
-import { initialViewport, type Catalog, type ComponentSpec, type EditorState } from './model';
+import { initialViewport, nodeRowSpacing, type Catalog, type ComponentSpec, type EditorState } from './model';
 
 export const rootScope = '$root';
 export const definitions = (r: RunRequest) => r.model.definitions ?? [];
@@ -18,7 +18,12 @@ export function scopeView(state: EditorState, id: string): EditorState {
   const d = definitions(state.request).find(d => d.id === id);
   const scope = d ?? state.request.model;
   const layout = d ? state.scopes?.[id] : state;
-  const defaults = d ? Object.fromEntries([...d.components.map((c, i) => [c.id, { x: (i % 2) * 285, y: Math.floor(i / 2) * 170 }]), ['$input', { x: -285, y: 0 }], ['$output', { x: 570, y: 0 }]]) : {};
+  const rowHeights = [0, 0];
+  const defaults = d ? Object.fromEntries([...d.components.map((c, i) => {
+    const column = i % 2, position = { x: column * 285, y: rowHeights[column]! };
+    rowHeights[column]! += nodeRowSpacing(c, state.request);
+    return [c.id, position];
+  }), ['$input', { x: -285, y: 0 }], ['$output', { x: 570, y: 0 }]]) : {};
   return { ...state, positions: { ...defaults, ...layout?.positions }, viewport: layout?.viewport ?? initialViewport, request: { ...state.request, model: {
     ...state.request.model, components: [...scope.components.map(displayComponent), ...(d ? [{ id: '$input', type: '$input', parameters: {} }, { id: '$output', type: '$output', parameters: {} }] : [])], connections: scope.connections,
     observations: d ? [] : state.request.model.observations.filter(o => !o.component.includes('/')),

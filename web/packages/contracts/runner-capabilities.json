@@ -23,6 +23,7 @@
     "group_aggregate"
   ],
   "wrapper": {
+    "dynamicPlan": "addressed-fixed-domains-horizon-seal-v1",
     "requiredInputs": "complete-addressed-campaign-transactions-128",
     "scenarioResults": "raw-keyed-frames-zero-time-fifo",
     "implementation": "native-wrapper-7F",

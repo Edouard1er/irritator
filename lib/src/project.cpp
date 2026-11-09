@@ -578,10 +578,11 @@ static auto make_tree_simulation_leaf(const project_to_simulation& sc,
     debug::ensure(sc.pj.sim.sims.try_to_get(ssim_id));
     const auto ssim_ord = ordinal(ssim_id);
 
-    dyn.x.resize(2 + ids.sim_components.get(sim_id).factors.size());
+    dyn.dynamic_plan = mod_parameter.reals[2] != zero;
+    dyn.x.resize(2 + ids.sim_components.get(sim_id).factors.size() + (dyn.dynamic_plan ? 1 : 0));
     const auto base_outputs = ids.sim_components.get(sim_id).factors.size() + ids.sim_components.get(sim_id).selections.size();
     dyn.scenario_results = mod_parameter.reals[0] != zero;
-    dyn.y.resize(dyn.scenario_results ? 2 * base_outputs + 2 : base_outputs);
+    dyn.y.resize((dyn.scenario_results ? 2 * base_outputs + 2 : base_outputs) + (dyn.dynamic_plan ? 1 : 0));
 
     sim_parameter.integers[simulation_wrapper_tag::id] = ssim_ord;
     dyn.sim_id                                         = ssim_id;

@@ -131,6 +131,18 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
             "Native wrapper dimensions require 1<=F<=10, S>=1, 3<=F+S<=12");
     require(!spec.required_inputs || (spec.mode == irt::simulation_wrapper::run_type::complete &&
         (spec.required_inputs >> f) == 0), "Addressed factor inputs require complete mode and valid slots");
+    if (spec.dynamic_plan) {
+        require(f <= 9 && spec.mode == irt::simulation_wrapper::run_type::complete && spec.scenario_results,
+            "Dynamic plans require F<=9, complete mode, and scenarioResults");
+        unsigned observations = 0;
+        for (std::size_t i = 0; i < f; ++i) {
+            const auto type = spec.factors[i].type;
+            if (type == irt::factor_type::single) observations |= 1u << i;
+            else require(type == irt::factor_type::fixed, "Dynamic plans support only direct single observations and direct fixed domains");
+        }
+        require(spec.required_inputs == observations,
+            "Dynamic requiredInputs must contain every single observation and no fixed domain");
+    }
     require(spec.method == irt::optimization_method::simple ||
             spec.method == irt::optimization_method::weighted_sum ||
             spec.method == irt::optimization_method::epsilon_constrained, "Invalid optimization method");
@@ -219,6 +231,7 @@ irt::child_id add_wrapper(irt::generic_component& gen, std::string_view name,
     gen.children_parameters[id].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(desc.spec.mode);
     gen.children_parameters[id].reals[0] = desc.spec.scenario_results ? 1 : 0;
     gen.children_parameters[id].reals[1] = desc.spec.required_inputs;
+    gen.children_parameters[id].reals[2] = desc.spec.dynamic_plan ? 1 : 0;
     return id;
 }
 
@@ -278,7 +291,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
     require(parent.sims.exists(wrapper.sim_id) &&
             parent.parameters[model].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(wrapper.sim_id),
             "project::set did not associate the wrapper resource");
-    require(wrapper.x.size() == occurrence.factors.size() + 2 &&
+    require(wrapper.x.size() == occurrence.input_count() &&
             wrapper.y.size() == occurrence.output_count(), "Invalid connected wrapper dimensions");
     const auto after_set = audit_copy(parent.sims.get(wrapper.sim_id), desc);
     const auto old_id = wrapper.sim_id;
@@ -296,6 +309,10 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         require(resource.sim.limits.begin() == source.pj.sim.limits.begin() &&
                 resource.sim.limits.end() == source.pj.sim.limits.end(), "copy_to changed prototype horizon");
         configure(resource.factors, resource.selections, resource.objective, source.pj, desc.targets, occurrence);
+        if (occurrence.dynamic_plan) {
+            resource.dynamic_capacity = std::min(count, occurrence.max_scenarios);
+            resource.dynamic_max_horizon = source.pj.sim.limits.end() - source.pj.sim.limits.begin();
+        }
         if(occurrence.seed) resource.seed=*occurrence.seed;
         for (const auto& [path, target] : desc.targets)
             require(resource.sim.models.exists(target.model) &&
@@ -304,9 +321,11 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         wrapper.sim_id = resource_id;
         wrapper.run = occurrence.mode;
         wrapper.required_inputs = occurrence.required_inputs;
+        wrapper.dynamic_plan = occurrence.dynamic_plan;
         parent.parameters[model].integers[irt::simulation_wrapper_tag::id] = irt::ordinal(resource_id);
         parent.parameters[model].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(occurrence.mode);
         parent.parameters[model].reals[1] = occurrence.required_inputs;
+        parent.parameters[model].reals[2] = occurrence.dynamic_plan ? 1 : 0;
         wrapper_binding ret{model, resource_id, after_set, after_copy, count};
         validate_binding(parent, ret, occurrence);
         return ret;
@@ -314,6 +333,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         wrapper.sim_id = old_id;
         wrapper.run = old_run;
         wrapper.required_inputs = static_cast<unsigned>(old_parameters.reals[1]);
+        wrapper.dynamic_plan = old_parameters.reals[2] != 0;
         parent.parameters[model] = old_parameters;
         parent.sims.free(resource_id);
         throw;
@@ -326,14 +346,19 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
     require(parent.models.exists(binding.wrapper) && parent.sims.exists(binding.resource), "Missing bound resource/model");
     const auto& wrapper = irt::get_dyn<irt::simulation_wrapper>(parent.models.get(binding.wrapper));
     const auto& resource = parent.sims.get(binding.resource);
-    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results && wrapper.required_inputs == spec.required_inputs &&
+    require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results && wrapper.required_inputs == spec.required_inputs && wrapper.dynamic_plan == spec.dynamic_plan &&
+            (parent.parameters[binding.wrapper].reals[2] != 0) == spec.dynamic_plan &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(binding.resource) &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::run] == irt::ordinal(spec.mode),
             "Wrapper parameters and dynamics disagree");
-    require(wrapper.x.size() == spec.factors.size() + 2 && wrapper.y.size() == spec.output_count(),
+    require(wrapper.x.size() == spec.input_count() && wrapper.y.size() == spec.output_count(),
             "Bound port dimensions changed");
     require(resource.factors.size() == spec.factors.size() && resource.selections.size() == spec.selections.size(),
             "Incomplete runtime factors/selections");
+    if (spec.dynamic_plan) require(resource.dynamic_capacity == std::min(binding.scenarios, spec.max_scenarios) &&
+            resource.dynamic_capacity > 0 && resource.dynamic_capacity <= 128 &&
+            resource.dynamic_max_horizon == resource.sim.limits.end() - resource.sim.limits.begin(),
+            "Dynamic capacity or horizon bound differs from the declared experiment");
     for (const auto id : resource.factors) require(resource.sim.models.exists(resource.factors.get<irt::model_id>(id)), "Foreign factor model id");
     std::size_t slot = 0;
     for (const auto id : resource.selections) {

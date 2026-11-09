@@ -87,6 +87,7 @@ struct json_wrappers {
         const std::map<std::string,R> modes{{"complete",R::complete},{"bag",R::bag},{"time",R::time},{"until",R::until},{"during",R::during}};
         spec.mode=modes.at(str(e["run"]));
         spec.scenario_results=e.HasMember("scenarioResults") && e["scenarioResults"].GetBool();
+        spec.dynamic_plan=e.HasMember("dynamicPlan") && e["dynamicPlan"].GetBool();
         if(e.HasMember("seed")) {
             std::array<irt::u64,6> seed{};
             for(unsigned i=0;i<6;++i) {
@@ -122,6 +123,18 @@ struct json_wrappers {
             }
             if(spec.required_inputs && spec.mode!=R::complete)
                 fail("INVALID_EXPERIMENT","Addressed factor inputs require complete mode");
+        }
+        if(spec.dynamic_plan) {
+            if(f>9||spec.mode!=R::complete||!spec.scenario_results)
+                fail("INVALID_EXPERIMENT","Dynamic plans require F<=9, complete mode, and scenarioResults");
+            unsigned observations=0;
+            for(unsigned i=0;i<f;++i) {
+                if(spec.factors[i].type==irt::factor_type::single) observations|=1u<<i;
+                else if(spec.factors[i].type!=irt::factor_type::fixed)
+                    fail("INVALID_FACTOR","Dynamic plans require direct single observations and direct fixed domains");
+            }
+            if(spec.required_inputs!=observations)
+                fail("INVALID_EXPERIMENT","Dynamic requiredInputs must contain every single observation and no fixed domain");
         }
         names.clear();
         const std::map<std::string,irt::criteria_type> criteria{
@@ -220,7 +233,7 @@ struct json_wrappers {
             const auto n=scenarios(o.plan);
             const auto& e=(*o.component)["experiment"];
             const auto& g=parent->summaries.at(str(e["definition"]));
-            const auto ports=o.plan.factors.size()+o.plan.selections.size();
+            const auto ports=o.plan.dynamic_plan ? o.plan.output_count() : o.plan.factors.size()+o.plan.selections.size();
             total_scenarios+=n; models+=(n+1)*g.atoms+ports; edges+=(n+1)*g.connections+ports;
             std::set<std::string> selected;
             for(const auto& s:o.plan.selections) selected.insert(s.target);
@@ -345,7 +358,7 @@ struct json_wrappers {
             const auto& b=bindings[i];
             try { irt_web::validate_binding(sim,b,occurrences[i].plan); }
             catch(const std::exception& e) { fail("INITIALIZATION_ERROR",e.what()); }
-            if(!resources.insert(b.resource).second || sim.sims.get(b.resource).embedded_sims.size()!=b.scenarios)
+            if(!resources.insert(b.resource).second || sim.sims.get(b.resource).embedded_sims.size()!=(occurrences[i].plan.dynamic_plan?0:b.scenarios))
                 fail("INITIALIZATION_ERROR","Incorrect private resource/scenario allocation");
         }
         if(resources.size()!=sim.sims.size()) fail("INITIALIZATION_ERROR","Unreferenced wrapper resource remains");
@@ -378,7 +391,8 @@ struct json_wrappers {
                 for(const auto& s:o.plan.selections) add(s.id,"scenario-selection");
                 add("campaign-end","campaign-end");
             }
-            item.AddMember("component",V(o.path.c_str(),a),a).AddMember("inputs",static_cast<unsigned>(o.plan.factors.size()+2),a)
+            if(o.plan.dynamic_plan) add("plan-ready","plan-ready");
+            item.AddMember("component",V(o.path.c_str(),a),a).AddMember("inputs",static_cast<unsigned>(o.plan.input_count()),a)
                 .AddMember("outputs",outputs,a).AddMember("scenarioCount",static_cast<unsigned>(scenarios(o.plan)),a)
                 .AddMember("criteriaScale",V(o.plan.method==irt::optimization_method::weighted_sum?"normalized":"raw",a),a);
             layouts.PushBack(item,a);

@@ -7,7 +7,7 @@ import { applyScopeView, coupledSpec, definitions, renameObservationPaths, rootS
 import { HierarchyTools } from './hierarchy-tools';
 import type { RunRequest } from '@contracts';
 import { ClientError, getCatalog, getHealth, runSimulation, errorText, type HttpResult } from '@/lib/api/client';
-import { connectionError, defaultParameters, deserializeModel, edgeId, emptyModel, fingerprint, handleId, removeComponents, renameComponent, serializeModel, toConnection, uniqueId, type Catalog, type ComponentSpec, type EditorState, type FlowConnection } from '@/lib/modeling/model';
+import { connectionError, defaultParameters, deserializeModel, edgeId, emptyModel, fingerprint, handleId, nodeRowSpacing, removeComponents, renameComponent, serializeModel, toConnection, uniqueId, type Catalog, type ComponentSpec, type EditorState, type FlowConnection } from '@/lib/modeling/model';
 import { downloadFile, loadWorkspace, saveWorkspace, legacyStorageKey, storageKey } from '@/lib/serialization/workspace';
 import { ComponentLibrary } from '@/components/panels/component-library';
 import { Inspector } from '@/components/panels/inspector';
@@ -134,7 +134,12 @@ function Editor() {
     if (wrapper && document.request.schemaVersion !== 3 && !window.confirm('Ajouter ce wrapper convertit explicitement le document en JSON v3. Tous les composants, définitions et connexions sont conservés. Continuer ?')) return;
     const count = state.request.model.components.length;
     const component = { id, type: spec.type, parameters: defaultParameters(spec), ...(wrapper ? { experiment: newWrapperExperiment(document.request, scopeId) } : {}) };
-    const trial = applyScopeView(document, scopeId, { ...state, positions: { ...state.positions, [id]: position ?? { x: Math.floor(count / 3) * 285, y: (count % 3) * 165 } }, request: { ...state.request, model: { ...state.request.model, components: [...state.request.model.components, component] } } });
+    const column = Math.floor(count / 3) * 285;
+    const row = state.request.model.components.reduce((bottom, c) => {
+      const placed = state.positions[c.id];
+      return placed?.x === column ? Math.max(bottom, placed.y + Math.max(nodeRowSpacing(c, document.request), (nodeDimensions[c.id]?.height ?? 0) + 35)) : bottom;
+    }, 0);
+    const trial = applyScopeView(document, scopeId, { ...state, positions: { ...state.positions, [id]: position ?? { x: column, y: row } }, request: { ...state.request, model: { ...state.request.model, components: [...state.request.model.components, component] } } });
     if (wrapper) trial.request = promoteToV3(trial.request);
     try { if (wrapper || spec.type.startsWith('coupled:')) validateEditorDocument(trial.request); else validateDependencies(trial.request, true); } catch (e) { setError(errorText(e)); return; }
     setDocument(trial); setError(undefined);
@@ -233,7 +238,7 @@ function Editor() {
           onBeforeDelete={async ({ nodes }) => { try { assertCanRemove(document.request, scopeId, new Set(nodes.map(n => n.id))); return true; } catch (e) { setError(errorText(e)); return false; } }}
           onConnect={(c: Connection) => connect(c)} isValidConnection={c => !!catalog && !connectionError(c, state.request, catalog)}
           onNodeClick={(_, node) => { setSelected(node.id); setSelectedEdge(undefined); }} onEdgeClick={(_, edge) => { setSelectedEdge(edge.id); setSelected(undefined); }} onPaneClick={() => { setSelected(undefined); setSelectedEdge(undefined); }}
-          onMoveEnd={(_, viewport) => setState(s => ({ ...s, viewport }))} defaultViewport={state.viewport} minZoom={0.2} maxZoom={2}
+          onMoveEnd={(_, viewport) => setState(s => ({ ...s, viewport }))} defaultViewport={state.viewport} minZoom={0.05} maxZoom={2}
           deleteKeyCode={['Backspace', 'Delete']} selectionOnDrag connectOnClick connectionRadius={28} snapToGrid snapGrid={[10, 10]} proOptions={{ hideAttribution: false }}
           aria-label="Graphe Irritator" defaultEdgeOptions={{ interactionWidth: 24 }}>
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#dce2e7" />

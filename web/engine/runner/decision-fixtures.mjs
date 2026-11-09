@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const catalog = JSON.parse(readFileSync(new URL('../../packages/contracts/catalog.json', import.meta.url), 'utf8'));
-export const atom = (id, type, parameters = {}) => ({ id, type, parameters: { ...Object.fromEntries(Object.entries(catalog.components.find(c => c.type === type).parameters).map(([key, b]) => [key, b.default ?? 0])), ...parameters } });
+export const atom = (id, type, parameters = {}) => ({ id, type, parameters: { ...Object.fromEntries(Object.entries(catalog.components.find(c => c.type === type).parameters).filter(([key]) => key !== 'preserveCampaign').map(([key, b]) => [key, b.default ?? 0])), ...parameters } });
 export const edge = (from, fp, to, tp) => ({ from: { component: from, port: fp }, to: { component: to, port: tp } });
 const model = (id, components, connections, observed, definitions) => ({ schemaVersion: definitions ? 3 : 1, model: { id, components, connections, observations: observed.map(component => ({ component, samplingInterval: 0.1 })), ...(definitions ? { definitions } : {}) }, simulation: { start: 0, end: 3 } });
 export const memory = () => model('memory-demand', [atom('input', 'constant', { value: 42 }), atom('read', 'constant', { offset: 1 }), atom('memory', 'value_memory'), atom('received', 'qss1_sum_2')], [edge('input', 0, 'memory', 0), edge('read', 0, 'memory', 1), edge('memory', 0, 'received', 0)], ['memory', 'received']);

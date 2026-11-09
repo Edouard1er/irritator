@@ -12,7 +12,7 @@ export function IrritatorNodeView({ data, selected }: NodeProps<IrritatorNode>) 
   // A restored document may render before the HTTP catalogue. Handle geometry
   // must be measured again even when the node's outer dimensions stay equal.
   useEffect(() => { if (spec) updateNodeInternals(c.id); }, [c.id, spec, updateNodeInternals]);
-  const invalid = !spec || Object.entries(spec.parameters).some(([key, bounds]) => parameterError(c.parameters[key] ?? NaN, bounds));
+  const invalid = !spec || Object.entries(spec.parameters).some(([key, bounds]) => parameterError(c.parameters[key] ?? (spec.required.includes(key) ? NaN : bounds.default ?? NaN), bounds));
   const rows = Math.max(spec?.inputs.length ?? 0, spec?.outputs.length ?? 0, 1);
   return <div className={`model-node ${c.experiment ? 'wrapper-node' : ''} ${selected ? 'is-selected' : ''} ${invalid ? 'has-error' : ''}`} data-testid={`node-${c.id}`}>
     <div className={`node-header ${spec?.inputs.length === 0 ? 'source' : c.type.includes('sum') ? 'operator' : 'integrator'}`}>

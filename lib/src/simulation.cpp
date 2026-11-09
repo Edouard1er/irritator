@@ -263,8 +263,9 @@ static status embedded_sims_alloc(embedded_simulation& embed_sims,
     return success();
 }
 
-static status embedded_sims_copy_parameters(
-  embedded_simulation& embed_sims) noexcept
+static status embedded_sims_copy_parameters_from_plan(
+  embedded_simulation& embed_sims,
+  const embedded_simulation::dynamic_plan_frame* dynamic = nullptr) noexcept
 {
     const auto nb_sims = embed_sims.embedded_sims.size();
     auto&      sims    = embed_sims.embedded_sims.get<simulation>();
@@ -298,7 +299,13 @@ static status embedded_sims_copy_parameters(
 
         auto values = vector<real>{};
 
-        switch (types[f_idx]) {
+        if (dynamic) {
+            const auto count = types[f_idx] == factor_type::single
+                                 ? 1u : dynamic->cardinalities[i];
+            if (not values.resize(count))
+                return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+            std::copy_n(dynamic->domains[i].begin(), count, values.begin());
+        } else switch (types[f_idx]) {
         case factor_type::single:
         case factor_type::single_add:
         case factor_type::single_mult:
@@ -426,6 +433,11 @@ static status embedded_sims_copy_parameters(
     return success();
 }
 
+static status embedded_sims_copy_parameters(embedded_simulation& resource) noexcept
+{
+    return embedded_sims_copy_parameters_from_plan(resource, nullptr);
+}
+
 static status embedded_sims_init(embedded_simulation& embed_sims) noexcept
 {
     auto& sims    = embed_sims.embedded_sims.get<simulation>();
@@ -476,6 +488,7 @@ simulation_wrapper::simulation_wrapper(const simulation_wrapper& other) noexcept
   : sim_id{ undefined<embedded_simulation_id>() }
   , run{ other.run }
   , scenario_results{ other.scenario_results }
+  , dynamic_plan{ other.dynamic_plan }
   , required_inputs{ other.required_inputs }
 {}
 
@@ -533,6 +546,45 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     embed_sims->embedded_sims.clear();
     embed_sims->pending_responses.clear();
     embed_sims->input_frames.clear();
+    embed_sims->dynamic_frames.clear();
+    if (dynamic_plan) {
+        const auto factors = embed_sims->factors.size();
+        const auto selections = embed_sims->selections.size();
+        const auto duration = embed_sims->sim.limits.end() - embed_sims->sim.limits.begin();
+        if (factors < 1 or factors > 9 or selections < 1 or factors + selections < 3 or
+            factors + selections > 12 or run != run_type::complete or not scenario_results or
+            x.size() != factors + 3 or y.size() != 2 * (factors + embed_sims->selections.size()) + 3 or
+            nb_sims > 128 or not std::isfinite(duration) or duration <= zero)
+            return make_error(simulation_errc::simulation_wrapper_parameter_error);
+        unsigned singles = 0;
+        sz slot = 0;
+        sz bounded_count = 1;
+        for (const auto id : embed_sims->factors) {
+            const auto type = embed_sims->factors.get<factor_type>(id);
+            if (type == factor_type::single) singles |= 1u << slot;
+            else if (type != factor_type::fixed)
+                return make_error(simulation_errc::simulation_wrapper_parameter_error);
+            else {
+                const auto count = embed_sims->factors.get<fixed_factor>(id).values.size();
+                if (not count or count > 128 or bounded_count > 128 / count)
+                    return make_error(simulation_errc::simulation_wrapper_parameter_error);
+                bounded_count *= count;
+            }
+            ++slot;
+        }
+        if (required_inputs != singles or bounded_count != nb_sims)
+            return make_error(simulation_errc::simulation_wrapper_parameter_error);
+        if (not embed_sims->dynamic_capacity) embed_sims->dynamic_capacity = nb_sims;
+        if (not embed_sims->dynamic_max_horizon) embed_sims->dynamic_max_horizon = duration;
+        if (embed_sims->dynamic_capacity > nb_sims or embed_sims->dynamic_capacity > 128 or
+            not std::isfinite(embed_sims->dynamic_max_horizon) or
+            embed_sims->dynamic_max_horizon > duration or embed_sims->dynamic_max_horizon <= zero)
+            return make_error(simulation_errc::simulation_wrapper_parameter_error);
+        if (not embed_sims->input_parameters.resize(factors))
+            return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+        state = run_state::initialized;
+        return success();
+    }
     if (required_inputs and (run != run_type::complete or embed_sims->factors.size() > 10 or
         (required_inputs >> embed_sims->factors.size()) != 0))
         return make_error(simulation_errc::simulation_wrapper_parameter_error);
@@ -588,6 +640,195 @@ static status scenario_response(const embedded_simulation& resource,
     return success();
 }
 
+// Dynamic plans only replace domains, observations, and the bounded child
+// horizon. They never compile a graph or pick a preconfigured plan template.
+static status transition_dynamic_plan(simulation_wrapper& wrapper,
+                                      simulation& parent,
+                                      embedded_simulation& resource,
+                                      time t) noexcept
+{
+    auto& frames = resource.dynamic_frames;
+    auto& pending = resource.pending_responses;
+    const auto factor_count = resource.factors.size();
+    const auto ready_port = 2 * (factor_count + resource.selections.size()) + 2;
+    const auto safe_integer = [](real value) noexcept {
+        return std::isfinite(value) and value >= zero and
+          value <= 9007199254740991.0 and std::floor(value) == value;
+    };
+    const auto valid_campaign = [&](real value) noexcept {
+        return safe_integer(value) and value >= one and value > real(wrapper.last_input_campaign);
+    };
+    const auto frame_for = [&](real campaign) noexcept -> embedded_simulation::dynamic_plan_frame* {
+        auto it = std::find_if(frames.begin(), frames.end(),
+          [&](const auto& frame) { return frame.campaign == campaign; });
+        if (it != frames.end()) return &*it;
+        if (frames.size() >= 128 or not frames.reserve(frames.size() + 1)) return nullptr;
+        frames.emplace_back(embedded_simulation::dynamic_plan_frame{});
+        frames.back().campaign = campaign;
+        return &frames.back();
+    };
+    const auto enqueue = [&](embedded_simulation::response&& response) noexcept -> status {
+        if (pending.size() >= 128 or not pending.reserve(pending.size() + 1))
+            return make_error(simulation_errc::event_capacity_error);
+        auto pos = pending.begin();
+        while (pos != pending.end() and pos->due <= response.due) ++pos;
+        pending.emplace(pos, std::move(response));
+        return success();
+    };
+
+    sz slot = 0;
+    for (const auto factor : resource.factors) {
+        const auto single = resource.factors.get<factor_type>(factor) == factor_type::single;
+        for (const auto& msg : get_message(parent, wrapper.x[slot + 2])) {
+            if (not valid_campaign(msg[2]) or not safe_integer(msg[1]) or
+                msg[1] >= real(resource.dynamic_capacity) or (single and msg[1] != zero) or
+                not std::isfinite(msg[0]) or std::abs(msg[0]) > 1e12)
+                return make_error(simulation_errc::event_protocol_error);
+            auto* frame = frame_for(msg[2]);
+            if (not frame) return make_error(simulation_errc::event_capacity_error);
+            const auto index = static_cast<unsigned>(msg[1]);
+            const auto bit = u64{1} << (index % 64);
+            if (frame->sealed or (frame->indices[slot][index / 64] & bit))
+                return make_error(simulation_errc::event_protocol_error);
+            frame->indices[slot][index / 64] |= bit;
+            frame->domains[slot][index] = msg[0];
+            ++frame->received[slot];
+        }
+        ++slot;
+    }
+
+    // A bag is unordered: collect every metadata field before interpreting
+    // its seal/cancel commands. Duplicate fields are always an error.
+    for (const auto& msg : get_message(parent, wrapper.x[factor_count + 2])) {
+        if (not valid_campaign(msg[2]) or not safe_integer(msg[1]) or msg[1] >= real(factor_count + 5))
+            return make_error(simulation_errc::event_protocol_error);
+        const auto field = static_cast<unsigned>(msg[1]);
+        auto* frame = frame_for(msg[2]);
+        if (not frame) return make_error(simulation_errc::event_capacity_error);
+        const auto bit = 1u << field;
+        if ((frame->sealed and field != 4) or (frame->fields & bit))
+            return make_error(simulation_errc::event_protocol_error);
+        frame->fields |= bit;
+        if (field <= 1) {
+            if (not safe_integer(msg[0]) or msg[0] < one)
+                return make_error(simulation_errc::event_protocol_error);
+            if (field == 0) frame->plan_id = msg[0]; else frame->version = msg[0];
+        } else if (field == 2) {
+            const auto begin = resource.sim.limits.begin();
+            const auto end = begin + msg[0];
+            if (not std::isfinite(msg[0]) or msg[0] <= zero or
+                msg[0] > resource.dynamic_max_horizon or not std::isfinite(end) or
+                end <= begin or end > resource.sim.limits.end())
+                return make_error(simulation_errc::event_protocol_error);
+            frame->horizon = msg[0];
+        } else if (field == 3 or field == 4) {
+            if (msg[0] != zero) return make_error(simulation_errc::event_protocol_error);
+        } else {
+            const auto index = field - 5;
+            if ((wrapper.required_inputs & (1u << index)) or not safe_integer(msg[0]) or
+                msg[0] < one or msg[0] > real(resource.dynamic_capacity))
+                return make_error(simulation_errc::event_protocol_error);
+            frame->cardinalities[index] = static_cast<unsigned>(msg[0]);
+        }
+    }
+
+    real canceled = zero;
+    for (auto& frame : frames) {
+        if (not frame.sealed and (frame.fields & (1u << 3)) and (frame.fields & (1u << 4)))
+            return make_error(simulation_errc::event_protocol_error);
+        if (frame.fields & (1u << 4)) canceled = std::max(canceled, frame.campaign);
+    }
+    if (canceled > zero) {
+        wrapper.last_input_campaign = static_cast<u64>(canceled);
+        frames.erase(std::remove_if(frames.begin(), frames.end(),
+          [&](const auto& frame) { return frame.campaign <= canceled; }), frames.end());
+        pending.erase(std::remove_if(pending.begin(), pending.end(), [&](const auto& response) {
+            return response.values.empty() and response.scenarios.size() == 1 and
+              response.scenarios.front().port == int(ready_port) and response.scenarios.front().value[2] <= canceled;
+        }), pending.end());
+    }
+    for (auto& frame : frames) {
+        if (frame.sealed or not (frame.fields & (1u << 3))) continue;
+        unsigned required_fields = 7u | (1u << 3);
+        sz count = 1;
+        for (sz i = 0; i < factor_count; ++i) {
+            const auto single = (wrapper.required_inputs & (1u << i)) != 0;
+            const auto cardinality = single ? 1u : frame.cardinalities[i];
+            if (not single) required_fields |= 1u << (5 + i);
+            if (not cardinality or frame.received[i] != cardinality or
+                count > resource.dynamic_capacity / cardinality)
+                return make_error(simulation_errc::event_protocol_error);
+            for (unsigned index = 0; index < cardinality; ++index)
+                if (not (frame.indices[i][index / 64] & (u64{1} << (index % 64))))
+                    return make_error(simulation_errc::event_protocol_error);
+            count *= cardinality;
+        }
+        if (frame.fields != required_fields)
+            return make_error(simulation_errc::event_protocol_error);
+        frame.scenarios = count;
+        frame.sealed = true;
+        embedded_simulation::response ready{t, {}};
+        if (not ready.scenarios.reserve(1)) return make_error(simulation_errc::event_capacity_error);
+        ready.scenarios.emplace_back(event_emission{int(ready_port), message{real(count), frame.plan_id, frame.campaign}});
+        irt_check(enqueue(std::move(ready)));
+    }
+
+    const auto init = get_message(parent, wrapper.x[0]);
+    const auto run = get_message(parent, wrapper.x[1]);
+    if (init.size() > 1 or run.size() > 1)
+        return make_error(simulation_errc::event_protocol_error);
+    for (const auto& msg : init)
+        if (not valid_campaign(msg[2]) or msg[1] != zero or msg[0] != zero)
+            return make_error(simulation_errc::event_protocol_error);
+    for (const auto& msg : run)
+        if (not valid_campaign(msg[2]) or msg[1] != zero or std::isnan(msg[0]) or msg[0] < zero)
+            return make_error(simulation_errc::event_protocol_error);
+    if (not init.empty() and not run.empty() and init.front()[2] != run.front()[2])
+        return make_error(simulation_errc::event_protocol_error);
+    if (not init.empty()) {
+        const auto frame = std::find_if(frames.begin(), frames.end(),
+          [&](const auto& f) { return f.campaign == init.front()[2]; });
+        if (frame == frames.end() or not frame->sealed)
+            return make_error(simulation_errc::event_protocol_error);
+        // Init cancels execution responses, while staged sealed plans remain
+        // valid. Preserve their acknowledgements, including plans sealed in
+        // this unordered bag, so every later run retains its validation event.
+        pending.erase(std::remove_if(pending.begin(), pending.end(), [&](const auto& response) {
+            return not (response.values.empty() and response.scenarios.size() == 1 and
+              response.scenarios.front().port == int(ready_port));
+        }), pending.end());
+    }
+    if (not run.empty()) {
+        const auto& command = run.front();
+        const auto frame = std::find_if(frames.begin(), frames.end(),
+          [&](const auto& f) { return f.campaign == command[2]; });
+        if (frame == frames.end() or not frame->sealed)
+            return make_error(simulation_errc::event_protocol_error);
+        const auto delay = std::isinf(command[0]) ? zero : command[0];
+        auto due = t + delay;
+        if (delay > zero and due == t) due = std::nextafter(t, time_domain<time>::infinity);
+        if (not std::isfinite(due)) return make_error(simulation_errc::event_protocol_error);
+        irt_check(embedded_sims_alloc(resource, frame->scenarios));
+        irt_check(embedded_sims_copy_parameters_from_plan(resource, &*frame));
+        for (const auto child : resource.embedded_sims)
+            resource.embedded_sims.get<simulation>(child).limits.set_bound(
+              resource.sim.limits.begin(), resource.sim.limits.begin() + frame->horizon);
+        irt_check(embedded_sims_init(resource));
+        wrapper.state = simulation_wrapper::run_state::running;
+        irt_check(run_complete(resource));
+        wrapper.state = simulation_wrapper::run_state::finish;
+        embedded_simulation::response result{due, {}};
+        irt_check(compute_response(resource, result.values));
+        irt_check(scenario_response(resource, command[2], result.scenarios));
+        irt_check(enqueue(std::move(result)));
+        wrapper.last_input_campaign = static_cast<u64>(command[2]);
+        frames.erase(std::remove_if(frames.begin(), frames.end(),
+          [&](const auto& f) { return f.campaign <= command[2]; }), frames.end());
+    }
+    wrapper.sigma = pending.empty() ? time_domain<time>::infinity : pending.front().due - t;
+    return success();
+}
+
 status simulation_wrapper::transition(simulation& sim,
                                       time t,
                                       [[maybe_unused]] time e,
@@ -601,6 +842,8 @@ status simulation_wrapper::transition(simulation& sim,
         pending_responses.erase(pending_responses.begin());
         response_emitted = false;
     }
+
+    if (dynamic_plan) return transition_dynamic_plan(*this, sim, *embed_sims, t);
 
     debug::ensure(x.size() == embed_sims->input_parameters.size() + 2);
 

@@ -46,6 +46,7 @@ export type WrapperObjective = { type: OptimizationType } & (
   { method: 'weighted-sum'; primary?: string; weights: number[]; types: OptimizationType[]; norm: 'min-max' | 'z-score' } |
   { method: 'epsilon-constrained'; primary: string; epsilons: number[]; operations: ConstraintOperation[] });
 export interface WrapperExperiment {
+  dynamicPlan?: boolean;
   scenarioResults?: boolean;
   requiredInputs?: string[];
   definition: string; simulation: { start: number; end: number }; run: 'complete' | 'bag' | 'time' | 'until' | 'during';
@@ -57,10 +58,11 @@ export interface WrapperExperiment {
 export interface ExperimentOverride { target: string; factors: FactorPlan[] }
 export interface WrapperOccurrence { component: string; experiment: WrapperExperiment }
 export interface WrapperEvent { component: string; time: number; port: number; bag: number; value: [number, number, number] }
-export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; criteriaScale?: 'raw' | 'normalized'; outputs: { port: number; kind: 'selection' | 'factor' | 'scenario-status' | 'scenario-factor' | 'scenario-selection' | 'campaign-end'; id: string }[] }
+export interface WrapperLayout { component: string; inputs: number; scenarioCount: number; criteriaScale?: 'raw' | 'normalized'; outputs: { port: number; kind: 'selection' | 'factor' | 'scenario-status' | 'scenario-factor' | 'scenario-selection' | 'campaign-end' | 'plan-ready'; id: string }[] }
 export function wrapperOutputs(e: WrapperExperiment): WrapperLayout['outputs'] {
   const out: Omit<WrapperLayout['outputs'][number], 'port'>[] = [...e.selections.map(s => ({ kind: 'selection' as const, id: s.id })), ...e.factors.map(f => ({ kind: 'factor' as const, id: f.id }))];
   if (e.scenarioResults) out.push({ kind: 'scenario-status', id: 'scenario-status' }, ...e.factors.map(f => ({ kind: 'scenario-factor' as const, id: f.id })), ...e.selections.map(s => ({ kind: 'scenario-selection' as const, id: s.id })), { kind: 'campaign-end', id: 'campaign-end' });
+  if (e.dynamicPlan) out.push({ kind: 'plan-ready', id: 'plan-ready' });
   return out.map((p, port) => ({ port, ...p }));
 }
 export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[] }
@@ -159,6 +161,7 @@ export function validateWrapperRequest(r: RunRequest): void {
   if (declared.length > limits.maxWrappers) fail('LIMIT_EXCEEDED', 'Declared wrapper budget exceeded');
   function validate(e: WrapperExperiment) {
     if (e.requiredInputs?.length && (e.run !== 'complete' || new Set(e.requiredInputs).size !== e.requiredInputs.length || e.requiredInputs.some(id => !e.factors.some(f => f.id === id)))) fail('INVALID_EXPERIMENT', 'Required inputs must name distinct factors in complete mode');
+    if (e.dynamicPlan && (e.factors.length > 9 || e.run !== 'complete' || !e.scenarioResults || e.factors.some(f => f.type !== 'single' && f.type !== 'fixed') || e.factors.filter(f => f.type === 'single').some(f => !e.requiredInputs?.includes(f.id)) || e.requiredInputs?.some(id => e.factors.find(f => f.id === id)?.type !== 'single'))) fail('INVALID_EXPERIMENT', 'Dynamic plans require F<=9, complete mode, scenarioResults, all direct single factors as required inputs, and direct fixed domains');
     if(e.seed && !e.seed.every(validU64)) fail('INVALID_EXPERIMENT', 'Seed must contain six exact unsigned 64-bit decimal strings');
     const { start, end } = e.simulation;
     if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start) || end - start > 1e9 || !(start + .1 > start) || !(end + .1 > end)) fail('INVALID_TIME', 'Invalid prospective horizon');
@@ -187,7 +190,7 @@ export function validateWrapperRequest(r: RunRequest): void {
     for (const e of declared) { const g = sizes.get(e.definition)!; models += 2 * g.atoms; edges += 2 * g.connections; }
     for (const o of list) {
       const e = o.experiment; validate(e);
-      const n = cardinality(e, limits.maxScenarios), g = sizes.get(e.definition)!, ports = e.factors.length + e.selections.length;
+      const n = cardinality(e, limits.maxScenarios), g = sizes.get(e.definition)!, ports = e.dynamicPlan ? wrapperOutputs(e).length : e.factors.length + e.selections.length;
       scenarios += n; models += (n + 1) * g.atoms + ports; edges += (n + 1) * g.connections + ports;
       points += n * new Set(e.selections.map(s => s.target)).size * (Math.ceil((e.simulation.end - e.simulation.start) / .1) + 2);
     }
@@ -210,7 +213,7 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
   for (let i = 0; i < expected.length; ++i) {
     const o = expected[i]!, w = r.wrappers[i], e = o.experiment;
     const ports = wrapperOutputs(e);
-    if (!w || w.component !== o.component || w.inputs !== e.factors.length + 2 || w.scenarioCount !== cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios) || !Array.isArray(w.outputs) || w.outputs.length !== ports.length || w.outputs.some((p, j) => !p || p.port !== ports[j]!.port || p.kind !== ports[j]!.kind || p.id !== ports[j]!.id)) return bad();
+    if (!w || w.component !== o.component || w.inputs !== e.factors.length + 2 + Number(!!e.dynamicPlan) || w.scenarioCount !== cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios) || !Array.isArray(w.outputs) || w.outputs.length !== ports.length || w.outputs.some((p, j) => !p || p.port !== ports[j]!.port || p.kind !== ports[j]!.kind || p.id !== ports[j]!.id)) return bad();
     const scale=e.objective.method==='weighted-sum'?'normalized':'raw';
     if((w.criteriaScale!==undefined || scale==='normalized') && w.criteriaScale!==scale) return bad();
     layouts.set(w.component, ports.length);
@@ -218,7 +221,7 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
   if (r.resultEvents.length > (request.limits?.maxResultEvents ?? wrapperCaps.maxResultEvents)) return bad();
   let previousBag = 0, previousTime = -Infinity;
   const seen = new Set<string>();
-  const campaigns = new Map<string, { fields: Set<string>; status: Map<number, number>; ended: boolean }>();
+  const campaigns = new Map<string, { fields: Set<string>; status: Map<number, number>; ended: boolean; planCount: number | undefined }>();
   for (const event of r.resultEvents) {
     if (!event || !layouts.has(event.component) || !Number.isInteger(event.port) || event.port < 0 || event.port >= layouts.get(event.component)! || !Number.isSafeInteger(event.bag) || event.bag < 1 || event.bag > r.simulation.runCalls || event.bag < previousBag || !Number.isFinite(event.time) || event.time < request.simulation.start || event.time >= request.simulation.end || event.time < previousTime || !Array.isArray(event.value) || event.value.length !== 3 || event.value.some(v => !Number.isFinite(v))) return bad();
     const key = JSON.stringify([event.component, event.port, event.bag]);
@@ -226,20 +229,27 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
     seen.add(key); previousBag = event.bag; previousTime = event.time;
     const layout = r.wrappers.find(w => w.component === event.component)!;
     const kind = layout.outputs[event.port]!.kind;
-    if (kind.startsWith('scenario-') || kind === 'campaign-end') {
+    if (kind.startsWith('scenario-') || kind === 'campaign-end' || kind === 'plan-ready') {
       const [value, candidate, campaign] = event.value;
       if (!Number.isSafeInteger(campaign) || campaign < 1) return bad();
       const campaignKey = JSON.stringify([event.component, campaign]);
-      const state = campaigns.get(campaignKey) ?? { fields: new Set<string>(), status: new Map<number, number>(), ended: false };
+      const state = campaigns.get(campaignKey) ?? { fields: new Set<string>(), status: new Map<number, number>(), ended: false, planCount: undefined };
       campaigns.set(campaignKey, state);
       if (state.ended) return bad();
-      if (kind === 'campaign-end') {
-        if (!Number.isSafeInteger(value) || value < 0 || value > layout.scenarioCount || candidate !== layout.scenarioCount || state.status.size !== layout.scenarioCount || [...state.status.values()].filter(v => v === 1).length !== value) return bad();
+      const dynamic = expected.find(o => o.component === event.component)!.experiment.dynamicPlan;
+      if (kind === 'plan-ready') {
+        if (!Number.isSafeInteger(value) || value < 1 || value > layout.scenarioCount || !Number.isSafeInteger(candidate) || candidate < 1 || state.planCount !== undefined || state.fields.size) return bad();
+        state.planCount = value;
+      } else if (kind === 'campaign-end') {
+        const actual = dynamic ? candidate : layout.scenarioCount;
+        if (!Number.isSafeInteger(actual) || actual < 1 || actual > layout.scenarioCount || candidate !== actual || (dynamic && state.planCount !== actual) || !Number.isSafeInteger(value) || value < 0 || value > actual || state.status.size !== actual || [...state.status.values()].filter(v => v === 1).length !== value) return bad();
+        for (let id = 0; id < actual; ++id) if (!state.status.has(id)) return bad();
+        if (state.fields.size !== state.status.size + value * layout.outputs.filter(p => p.kind === 'scenario-factor' || p.kind === 'scenario-selection').length) return bad();
         for (const [id, valid] of state.status) for (const port of layout.outputs.filter(p => p.kind === 'scenario-factor' || p.kind === 'scenario-selection'))
           if (state.fields.has(`${port.port}:${id}`) !== (valid === 1)) return bad();
         state.ended = true;
       } else {
-        if (!Number.isSafeInteger(candidate) || candidate < 0 || candidate >= layout.scenarioCount) return bad();
+        if ((dynamic && state.planCount === undefined) || !Number.isSafeInteger(candidate) || candidate < 0 || candidate >= (state.planCount ?? layout.scenarioCount)) return bad();
         const field = `${event.port}:${candidate}`;
         if (state.fields.has(field)) return bad(); state.fields.add(field);
         if (kind === 'scenario-status') {
