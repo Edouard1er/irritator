@@ -739,6 +739,7 @@ static void model_init(const parameter& param, simulation_wrapper& dyn) noexcept
 
     dyn.scenario_results = param.reals[0] != zero;
     dyn.dynamic_plan = param.reals[2] != zero;
+    dyn.execution_status = param.reals[3] != zero;
     dyn.required_inputs = std::isfinite(param.reals[1]) and param.reals[1] >= 0 and
       param.reals[1] <= 1023 and std::floor(param.reals[1]) == param.reals[1]
         ? static_cast<unsigned>(param.reals[1]) : 1024u;
@@ -751,6 +752,7 @@ static void parameter_init(parameter&                param,
 {
     param.reals[0] = dyn.scenario_results ? one : zero;
     param.reals[2] = dyn.dynamic_plan ? one : zero;
+    param.reals[3] = dyn.execution_status ? one : zero;
     param.reals[1] = dyn.required_inputs;
     param.integers[simulation_wrapper_tag::run] = ordinal(dyn.run);
     param.integers[simulation_wrapper_tag::id]  = ordinal(dyn.sim_id);

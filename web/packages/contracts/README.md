@@ -521,3 +521,86 @@ ne démontre aucune robustesse sur l'hypothèse explicitement retirée.
 Les plans utilisent six puis quatre/deux vrais enfants ; seuls les efforts
 sélectionnés sont reliés au Plant. Aucun calcul décisionnel n'est effectué
 par les générateurs de documents ou par React.
+
+## Exécution prospective bornée — 8J
+
+`experiment.execution` est optionnel. Son absence conserve le comportement
+historique. Sa présence exige `run: "complete"` et `scenarioResults: true`.
+
+```json
+"execution": {
+  "failurePolicy": "isolate",
+  "resultMode": "optimize",
+  "maxChildRunCalls": 10000,
+  "maxCampaignRunCalls": 100000
+}
+```
+
+Défauts : failurePolicy=`fail-fast`, resultMode=`optimize`, budgets=0.
+0 signifie absence de cette limite supplémentaire ; aucun plafond du parent
+n'est augmenté. Les budgets, entiers 0–1000000000, comptent les appels natifs
+`simulation::run()` avant chaque appel : un appel est un sac, pas une transition
+atomique ni une durée murale. Les micro-étapes à la même date comptent normalement.
+Le compteur campagne somme les appels des enfants de la requête courante.
+Après une campagne comportant une issue invalide, la commande complete suivante
+prépare de nouveaux enfants, même sans facteur changé. Une campagne entièrement
+valide conserve la réutilisation historique de complete : sans nouveau facteur
+ni init, les mêmes résultats sont restitués avec zéro nouvel appel enfant.
+Un plan aléatoire n'est donc pas redessiné par l'instrumentation. Init, facteur
+modifié et dynamicPlan préparent les enfants selon leur contrat existant.
+
+En fail-fast, un critère non fini ou absent donne l'erreur native 67 ; une
+limite d'appels donne 71. En isolation, seuls les critères invalides d'enfants
+ayant achevé run/finalize/collecte et les interruptions à une frontière d'appel
+réussie sont isolés. Les erreurs d'initialisation, source, allocation, protocole,
+transition (dont ta_abnormal), finalisation et collecte restent globales. Un
+appel natif bloqué n'est pas préempté : le timeout API existant reste nécessaire.
+
+Les anciens ports et leur signification sont conservés. Après le dernier port
+historique (plan-ready compris), cinq sorties supplémentaires sont ajoutées :
+
+| Port relatif | kind | Triplet |
+|---|---|---|
+| 0 | scenario-outcome | [cause, scénario, campagne] |
+| 1 | scenario-run-calls | [appels réellement tentés, scénario, campagne] |
+| 2 | scenario-horizon | [H effectivement appliqué, scénario, campagne] |
+| 3 | campaign-run-calls | [somme des appels, 0, campagne] |
+| 4 | campaign-end-total | [nombre total, 0, campagne] |
+
+Cause : 1 succès, 2 numérique invalide, 3 budget dépassé, 4 annulé avant le
+premier appel (budget campagne épuisé), 5 critère indisponible. La validité
+scenario-status reste strictement 0/1, directement compatible avec 8G. Une
+annulation transactionnelle dynamicPlan avant run garde son contrat 8H : elle
+retire le plan et n'émet aucun résultat d'exécution, même après annulation.
+Elle ne possède pas de manifeste exécuté à restituer.
+
+Les facteurs réellement appliqués sont restitués pour tous les scénarios.
+Un scénario terminé numériquement invalide peut conserver d'autres critères
+finis ; les critères absents/non finis ne produisent aucune trame. Une
+interruption ou annulation ne produit aucun critère terminal. Absence de
+trame, invalidité du scénario et critère valide égal à zéro sont distincts.
+Les causes et critères partiels ne sont jamais convertis en booléens ou en
+valeurs de remplacement. campaign-end reste [valides,total,campagne] et arrive
+après les lignes et compteurs ; campaign-end-total permet aux filtres explicites
+de clôturer l'ensemble initial, indépendamment du nombre de succès.
+
+Les résultats et statuts sont capturés avant optimisation. En mode optimize,
+les trois méthodes historiques travaillent sur le seul sous-ensemble valide,
+y compris les normalisations weighted-sum ; aucun valide signifie aucune
+émission historique. En mode collect, les ports historiques restent présents
+mais silencieux. Ces absences ne désignent pas une sélection calculée à zéro.
+Les sorties individuelles restent brutes dans les deux modes. Une erreur dans
+l'optimisation des valeurs finies reste globale ; elle n'est pas masquée.
+
+Les modèles qui raccordent des critères à un décideur doivent explicitement
+filtrer la validité globale. Le démonstrateur Schaefer utilise deux étapes DEVS
+sans changer candidate_filter : un filtre required=5 reçoit la validité comme
+score et condition, puis campaign-end-total. Il n'émet qu'un jeton unité pour
+chaque scénario valide et signale les rejets. Un event_operator multiplication,
+required=3, joint ce jeton et le vrai champ numérique. Il attend ce dernier
+même si sa connexion manque ; ses valeurs par défaut ne deviennent jamais un
+critère scientifique. Les critères finis des scénarios invalides reçus sur
+l'autre entrée n'ont aucun jeton et ne passent pas la barrière. Les agrégateurs
+stricts gardent l'identité des membres invalides via les facteurs ; validation=1
+reste une réduction explicitement partielle. Les primitives et leurs timings
+historiques restent inchangés.

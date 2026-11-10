@@ -144,3 +144,16 @@ add_test(NAME runner-decision-8f COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RU
 set_tests_properties(runner-decision-8f PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
 add_test(NAME runner-decision-8g COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" "${NODE_EXECUTABLE}" --test "${CMAKE_CURRENT_LIST_DIR}/decision-8g-tests.mjs")
 set_tests_properties(runner-decision-8g PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 120)
+
+add_executable(execution-safety-native execution-safety-native.cpp)
+target_include_directories(execution-safety-native PRIVATE "${IRRITATOR_ROOT}/external/rapidjson/include" "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(execution-safety-native PRIVATE irritator-native-wrapper)
+set_property(SOURCE execution-safety-native.cpp APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/json_wrapper.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/hierarchy.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/native_wrapper.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/native_graph.hpp" "${CMAKE_CURRENT_BINARY_DIR}/contracts.hpp" "${IRRITATOR_ROOT}/lib/include/irritator/core.hpp" "${IRRITATOR_ROOT}/lib/include/irritator/event.hpp")
+if(MSVC)
+  target_compile_options(execution-safety-native PRIVATE /utf-8 /EHsc /bigobj /Zc:__cplusplus /wd5030)
+endif()
+
+add_test(NAME native-execution-safety COMMAND execution-safety-native "${CMAKE_CURRENT_LIST_DIR}/../../examples/decision-fault-tolerant-minimal-v3.json")
+set_tests_properties(native-execution-safety PROPERTIES TIMEOUT 30)
+add_test(NAME runner-decision-8j COMMAND "${CMAKE_COMMAND}" -E env "IRRITATOR_RUNNER=$<TARGET_FILE:irritator-runner>" node --test "${CMAKE_CURRENT_LIST_DIR}/decision-8j-tests.mjs")
+set_tests_properties(runner-decision-8j PROPERTIES FIXTURES_REQUIRED contracts-v3 TIMEOUT 180)

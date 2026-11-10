@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-const evidence = path.resolve('../../../build-web-test6-1/logs/browser-qss3');
+const evidence = path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, 'qss') : '../../../build-web-test6-1/logs/browser-qss3');
 async function start(page: Page) {
   page.on('dialog', d => d.accept()); await page.goto('/');
   await expect(page.getByRole('button', { name: /Moteur connecté/ })).toBeVisible();

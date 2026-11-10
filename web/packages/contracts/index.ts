@@ -129,7 +129,7 @@ export function validateHierarchy(r: RunRequest, editing = false): Map<string, {
   const ports = (c: Component, direction: 'inputs' | 'outputs') => {
     if (r.schemaVersion === 3 && c.type === 'simulation_wrapper') {
       const e = c.experiment!;
-      return Array.from({ length: (direction === 'inputs' ? e.factors.length + 2 : e.scenarioResults ? 2*(e.factors.length+e.selections.length)+2 : e.factors.length+e.selections.length) + Number(!!e.dynamicPlan) }, (_, port) => ({ port, name: String(port) }));
+      return Array.from({ length: (direction === 'inputs' ? e.factors.length + 2 : e.scenarioResults ? 2*(e.factors.length+e.selections.length)+2 : e.factors.length+e.selections.length) + Number(!!e.dynamicPlan) + (direction === 'outputs' && e.execution ? 5 : 0) }, (_, port) => ({ port, name: String(port) }));
     }
     const spec = c.type === 'coupled' ? getDefinition(c) : catalog.components.find(s => s.type === c.type) ?? fail('UNKNOWN_COMPONENT', `Unsupported component: ${c.type}`);
     return spec[direction];

@@ -2414,12 +2414,32 @@ struct embedded_simulation {
     using simulation_parameters  = vector<real>;
     using simulation_observation = table<model_id, embedded_model_observation>;
 
+    // Opt-in complete-campaign execution. Limits count native run() bags,
+    // including legitimate microsteps at an unchanged logical date.
+    struct execution_options {
+        bool enabled = false;
+        bool isolate = false;
+        bool collect_only = false;
+        u64 max_child_run_calls = 0; // zero: no additional limit
+        u64 max_campaign_run_calls = 0;
+    } execution;
+    enum class scenario_outcome : u8 {
+        success = 1, numerical_invalid = 2, budget_exceeded = 3,
+        canceled = 4, unavailable = 5
+    };
+    struct execution_result {
+        scenario_outcome outcome = scenario_outcome::success;
+        u64 run_calls = 0;
+    };
+    u64 campaign_run_calls = 0;
+
     using embedded_simulation_type = id_data_array<
       void,
       sub_id,
       allocator<new_delete_memory_resource>,
       simulation,
-      simulation_observation>;
+      simulation_observation,
+      execution_result>;
 
     /** Used to store a values receives from the @c x input port
      * vectors. */
@@ -8137,6 +8157,7 @@ struct simulation_wrapper {
     bool response_emitted = false;
     bool scenario_results = false;
     bool dynamic_plan = false;
+    bool execution_status = false;
     u64 campaign = 0;
     unsigned required_inputs = 0;
     u64 last_input_campaign = 0;

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import example from '../../../../examples/tstar-schaefer-three-coupled-v3.json' with { type: 'json' };
-const evidence = path.resolve('../../../build-web-test8f/browser');
+const evidence = path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, '8f') : '../../../build-web-test8f/browser');
 const runner = path.resolve(process.env.IRRITATOR_RUNNER!);
 const last = (r: any, id: string) => r.observations.find((o: any) => o.component === id).samples.at(-1).value;
 test.beforeEach(async ({ page }) => {

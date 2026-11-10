@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-const evidence = path.resolve('../../../build-web-test8a/browser');
+const evidence = path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, '8a') : '../../../build-web-test8a/browser');
 const runner = path.resolve(process.env.IRRITATOR_RUNNER ?? '../../../build-web-test8a/runner/irritator-runner.exe');
 async function start(page: Page, file?: string) {
   await page.goto('/');

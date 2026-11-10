@@ -981,7 +981,10 @@
           "type": "array",
           "maxItems": 10,
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,31}$" }
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,31}$"
+          }
         },
         "scenarioResults": {
           "type": "boolean"
@@ -989,6 +992,34 @@
         "dynamicPlan": {
           "type": "boolean",
           "default": false
+        },
+        "execution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "failurePolicy": {
+              "enum": [
+                "fail-fast",
+                "isolate"
+              ]
+            },
+            "resultMode": {
+              "enum": [
+                "optimize",
+                "collect"
+              ]
+            },
+            "maxChildRunCalls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            },
+            "maxCampaignRunCalls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000
+            }
+          }
         }
       }
     }

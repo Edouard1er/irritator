@@ -138,6 +138,7 @@ enum class simulation_errc : std::int16_t {
     simulation_wrapper_embedded_simulation_finalization_error,
     event_capacity_error,
     event_protocol_error,
+    simulation_wrapper_child_budget_error,
 };
 
 enum class project_errc : std::int16_t {

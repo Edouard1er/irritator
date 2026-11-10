@@ -101,7 +101,8 @@ int main(int argc, char** argv) {
                         near(irt::get_dyn<irt::qss3_integrator>(a).observation(H,H-a.tl).value,irt::get_dyn<irt::qss3_integrator>(b).observation(H,H-b.tl).value);
                     }
                 }
-                std::cout<<"RESOURCES "<<c<<" children="<<counts[c]<<" child_models="<<models<<" criterion_points="<<points<<" replay_internal_calls="<<replay_calls<<" wrapper_run_ms="<<milliseconds<<'\n';
+                irt_web::require(resource.campaign_run_calls==replay_calls,"Native child call counter differs from replay");
+                std::cout<<"RESOURCES "<<c<<" children="<<counts[c]<<" child_models="<<models<<" criterion_points="<<points<<" replay_internal_calls="<<replay_calls<<" native_internal_calls="<<resource.campaign_run_calls<<" wrapper_run_ms="<<milliseconds<<'\n';
             }
         }
         irt_web::checked(s.finalize(),"finalize");

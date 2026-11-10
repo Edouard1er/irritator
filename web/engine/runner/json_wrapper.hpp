@@ -88,6 +88,15 @@ struct json_wrappers {
         spec.mode=modes.at(str(e["run"]));
         spec.scenario_results=e.HasMember("scenarioResults") && e["scenarioResults"].GetBool();
         spec.dynamic_plan=e.HasMember("dynamicPlan") && e["dynamicPlan"].GetBool();
+        if(e.HasMember("execution")) {
+            const auto& execution=e["execution"];
+            spec.execution.enabled=true;
+            spec.execution.isolate=execution.HasMember("failurePolicy") && str(execution["failurePolicy"])=="isolate";
+            spec.execution.collect_only=execution.HasMember("resultMode") && str(execution["resultMode"])=="collect";
+            if(execution.HasMember("maxChildRunCalls")) spec.execution.max_child_run_calls=static_cast<irt::u64>(execution["maxChildRunCalls"].GetDouble());
+            if(execution.HasMember("maxCampaignRunCalls")) spec.execution.max_campaign_run_calls=static_cast<irt::u64>(execution["maxCampaignRunCalls"].GetDouble());
+            if(spec.mode!=R::complete||!spec.scenario_results) fail("INVALID_EXPERIMENT","Execution control requires complete mode and scenarioResults");
+        }
         if(e.HasMember("seed")) {
             std::array<irt::u64,6> seed{};
             for(unsigned i=0;i<6;++i) {
@@ -233,7 +242,7 @@ struct json_wrappers {
             const auto n=scenarios(o.plan);
             const auto& e=(*o.component)["experiment"];
             const auto& g=parent->summaries.at(str(e["definition"]));
-            const auto ports=o.plan.dynamic_plan ? o.plan.output_count() : o.plan.factors.size()+o.plan.selections.size();
+            const auto ports=(o.plan.dynamic_plan || o.plan.execution.enabled) ? o.plan.output_count() : o.plan.factors.size()+o.plan.selections.size();
             total_scenarios+=n; models+=(n+1)*g.atoms+ports; edges+=(n+1)*g.connections+ports;
             std::set<std::string> selected;
             for(const auto& s:o.plan.selections) selected.insert(s.target);
@@ -392,6 +401,10 @@ struct json_wrappers {
                 add("campaign-end","campaign-end");
             }
             if(o.plan.dynamic_plan) add("plan-ready","plan-ready");
+            if(o.plan.execution.enabled) {
+                add("scenario-outcome","scenario-outcome"); add("scenario-run-calls","scenario-run-calls");
+                add("scenario-horizon","scenario-horizon"); add("campaign-run-calls","campaign-run-calls"); add("campaign-end-total","campaign-end-total");
+            }
             item.AddMember("component",V(o.path.c_str(),a),a).AddMember("inputs",static_cast<unsigned>(o.plan.input_count()),a)
                 .AddMember("outputs",outputs,a).AddMember("scenarioCount",static_cast<unsigned>(scenarios(o.plan)),a)
                 .AddMember("criteriaScale",V(o.plan.method==irt::optimization_method::weighted_sum?"normalized":"raw",a),a);

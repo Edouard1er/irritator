@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import type { RunRequest, RunResultV2 } from '@contracts';
-const evidence=path.resolve('../../../build-web-test7g/logs/browser');
+const evidence=path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, '7g') : '../../../build-web-test7g/logs/browser');
 const runner=path.resolve(process.env.IRRITATOR_RUNNER??'../../../build-web-test7g/Release/runner/irritator-runner.exe');
 const file=path.resolve('../../examples/wrapper-schaefer-v3.json');
 async function document():Promise<RunRequest> {return JSON.parse(await readFile(file,'utf8'));}

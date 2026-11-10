@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { affine } from '../wrapper-fixtures';
 import type { RunRequest, RunResultV2 } from '@contracts';
 
-const evidence=path.resolve('../../../build-web-test7f/logs/browser');
+const evidence=path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, '7f') : '../../../build-web-test7f/logs/browser');
 const runner=path.resolve(process.env.IRRITATOR_RUNNER??'../../../build-web-test7f/Release/runner/irritator-runner.exe');
 async function open(page:Page,document:RunRequest=affine()) {
   page.on('dialog',dialog=>dialog.accept());await page.goto('/');

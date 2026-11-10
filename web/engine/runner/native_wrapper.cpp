@@ -127,6 +127,8 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
                                 const experiment_spec& spec)
 {
     const auto f = spec.factors.size(), s = spec.selections.size();
+    require(!spec.execution.enabled || (spec.mode == irt::simulation_wrapper::run_type::complete && spec.scenario_results),
+            "Execution control requires complete mode and scenarioResults");
     require(f >= 1 && f <= 10 && s >= 1 && f + s >= 3 && f + s <= 12,
             "Native wrapper dimensions require 1<=F<=10, S>=1, 3<=F+S<=12");
     require(!spec.required_inputs || (spec.mode == irt::simulation_wrapper::run_type::complete &&
@@ -232,6 +234,7 @@ irt::child_id add_wrapper(irt::generic_component& gen, std::string_view name,
     gen.children_parameters[id].reals[0] = desc.spec.scenario_results ? 1 : 0;
     gen.children_parameters[id].reals[1] = desc.spec.required_inputs;
     gen.children_parameters[id].reals[2] = desc.spec.dynamic_plan ? 1 : 0;
+    gen.children_parameters[id].reals[3] = desc.spec.execution.enabled ? 1 : 0;
     return id;
 }
 
@@ -309,6 +312,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         require(resource.sim.limits.begin() == source.pj.sim.limits.begin() &&
                 resource.sim.limits.end() == source.pj.sim.limits.end(), "copy_to changed prototype horizon");
         configure(resource.factors, resource.selections, resource.objective, source.pj, desc.targets, occurrence);
+        resource.execution = occurrence.execution;
         if (occurrence.dynamic_plan) {
             resource.dynamic_capacity = std::min(count, occurrence.max_scenarios);
             resource.dynamic_max_horizon = source.pj.sim.limits.end() - source.pj.sim.limits.begin();
@@ -322,10 +326,12 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         wrapper.run = occurrence.mode;
         wrapper.required_inputs = occurrence.required_inputs;
         wrapper.dynamic_plan = occurrence.dynamic_plan;
+        wrapper.execution_status = occurrence.execution.enabled;
         parent.parameters[model].integers[irt::simulation_wrapper_tag::id] = irt::ordinal(resource_id);
         parent.parameters[model].integers[irt::simulation_wrapper_tag::run] = irt::ordinal(occurrence.mode);
         parent.parameters[model].reals[1] = occurrence.required_inputs;
         parent.parameters[model].reals[2] = occurrence.dynamic_plan ? 1 : 0;
+        parent.parameters[model].reals[3] = occurrence.execution.enabled ? 1 : 0;
         wrapper_binding ret{model, resource_id, after_set, after_copy, count};
         validate_binding(parent, ret, occurrence);
         return ret;
@@ -334,6 +340,7 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
         wrapper.run = old_run;
         wrapper.required_inputs = static_cast<unsigned>(old_parameters.reals[1]);
         wrapper.dynamic_plan = old_parameters.reals[2] != 0;
+        wrapper.execution_status = old_parameters.reals[3] != 0;
         parent.parameters[model] = old_parameters;
         parent.sims.free(resource_id);
         throw;
@@ -346,6 +353,13 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
     require(parent.models.exists(binding.wrapper) && parent.sims.exists(binding.resource), "Missing bound resource/model");
     const auto& wrapper = irt::get_dyn<irt::simulation_wrapper>(parent.models.get(binding.wrapper));
     const auto& resource = parent.sims.get(binding.resource);
+    require(wrapper.execution_status == spec.execution.enabled &&
+            resource.execution.enabled == spec.execution.enabled &&
+            resource.execution.isolate == spec.execution.isolate &&
+            resource.execution.collect_only == spec.execution.collect_only &&
+            resource.execution.max_child_run_calls == spec.execution.max_child_run_calls &&
+            resource.execution.max_campaign_run_calls == spec.execution.max_campaign_run_calls,
+            "Runtime execution control differs from the declared experiment");
     require(wrapper.sim_id == binding.resource && wrapper.run == spec.mode && wrapper.scenario_results == spec.scenario_results && wrapper.required_inputs == spec.required_inputs && wrapper.dynamic_plan == spec.dynamic_plan &&
             (parent.parameters[binding.wrapper].reals[2] != 0) == spec.dynamic_plan &&
             parent.parameters[binding.wrapper].integers[irt::simulation_wrapper_tag::id] == irt::ordinal(binding.resource) &&

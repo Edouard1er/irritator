@@ -80,6 +80,7 @@
       "maxTotalConnections": 32768,
       "maxInternalPoints": 200000,
       "maxResultEvents": 20000
-    }
+    },
+    "execution": "native-bag-budgets-completed-criterion-isolation-v1"
   }
 }

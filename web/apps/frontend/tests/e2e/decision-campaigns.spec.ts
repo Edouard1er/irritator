@@ -35,6 +35,6 @@ test('8C E importe deux campagnes chevauchantes et relit la même identité sép
   expect(actual).toEqual(JSON.parse(execFileSync(path.resolve(process.env.IRRITATOR_RUNNER!), [], { input: JSON.stringify(request), encoding: 'utf8', windowsHide: true })));
   const samples = result.observations.find((o: any) => o.component === 'ratioReceipt').samples;
   expect(samples.some((s: any) => Math.abs(s.value - .25) < 1e-12)).toBe(true); expect(samples.at(-1).value).toBe(.4);
-  const evidence = path.resolve('../../../build-web-test8c/browser'); await mkdir(evidence, { recursive: true });
+  const evidence = path.resolve(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT ? path.join(process.env.IRRITATOR_BROWSER_REGRESSION_ROOT, '8c') : '../../../build-web-test8c/browser'); await mkdir(evidence, { recursive: true });
   await writeFile(path.join(evidence, 'overlapping-campaigns.json'), JSON.stringify({ request, result, httpEqualsNative: true }, null, 2));
 });

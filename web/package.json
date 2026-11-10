@@ -24,7 +24,8 @@
     "test:decision-8f": "npm run build && node --test engine/runner/decision-8f-tests.mjs",
     "test:decision-8g": "npm run build && node --test engine/runner/decision-8g-tests.mjs",
     "test:decision-8h": "npm run build && node --test engine/runner/decision-8h-tests.mjs",
-    "test:decision-8i": "npm run build && node --test engine/runner/decision-8i-tests.mjs"
+    "test:decision-8i": "npm run build && node --test engine/runner/decision-8i-tests.mjs",
+    "test:decision-8j": "npm run build && node --test engine/runner/decision-8j-tests.mjs"
   },
   "dependencies": {
     "ajv": "8.17.1",

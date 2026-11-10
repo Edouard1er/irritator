@@ -85,11 +85,37 @@ static status run_complete(embedded_simulation& embed_sims) noexcept
         const auto idx   = get_index(id);
         auto&      sim   = sims[idx];
         auto&      sim_o = sim_obs[idx];
+        auto& progress = embed_sims.embedded_sims.get<embedded_simulation::execution_result>(id);
+        using outcome = embedded_simulation::scenario_outcome;
+
+        if (progress.outcome != outcome::success) continue;
+        if (embed_sims.execution.max_campaign_run_calls and
+            embed_sims.campaign_run_calls >= embed_sims.execution.max_campaign_run_calls) {
+            if (not embed_sims.execution.isolate)
+                return make_error(simulation_errc::simulation_wrapper_child_budget_error);
+            progress.outcome = outcome::canceled;
+            irt_check(sim.finalize());
+            continue;
+        }
 
         if (sim.current_time_expired())
             continue;
 
         do {
+            if ((embed_sims.execution.max_child_run_calls and
+                 progress.run_calls >= embed_sims.execution.max_child_run_calls) or
+                (embed_sims.execution.max_campaign_run_calls and
+                 embed_sims.campaign_run_calls >= embed_sims.execution.max_campaign_run_calls)) {
+                if (not embed_sims.execution.isolate)
+                    return make_error(simulation_errc::simulation_wrapper_child_budget_error);
+                progress.outcome = outcome::budget_exceeded;
+                irt_check(sim.finalize());
+                break;
+            }
+            ++progress.run_calls;
+            ++embed_sims.campaign_run_calls;
+            // Any run/finalize/copy error remains fatal. A failed scheduler
+            // transition is never resumed or assumed safe to finalize.
             irt_check(sim.run());
             update_observations(sim);
         } while (not sim.current_time_expired());
@@ -248,6 +274,7 @@ static status embedded_sims_alloc(embedded_simulation& embed_sims,
         const auto idx = get_index(id);
 
         sims[idx] = embed_sims.sim;
+        embed_sims.embedded_sims.get<embedded_simulation::execution_result>(id) = {};
         sim_obs[idx].data.clear();
 
         for (const auto sel_id : embed_sims.selections) {
@@ -440,12 +467,14 @@ static status embedded_sims_copy_parameters(embedded_simulation& resource) noexc
 
 static status embedded_sims_init(embedded_simulation& embed_sims) noexcept
 {
+    embed_sims.campaign_run_calls = 0;
     auto& sims    = embed_sims.embedded_sims.get<simulation>();
     auto& sim_obs = embed_sims.embedded_sims
                       .get<embedded_simulation::simulation_observation>();
 
     for (const auto id : embed_sims.embedded_sims) {
         const auto idx = get_index(id);
+        embed_sims.embedded_sims.get<embedded_simulation::execution_result>(id) = {};
 
         for (auto i = 0, e = length(sim_obs[idx].data); i != e; ++i)
             sim_obs[idx].data[i].value.values.clear();
@@ -489,6 +518,7 @@ simulation_wrapper::simulation_wrapper(const simulation_wrapper& other) noexcept
   , run{ other.run }
   , scenario_results{ other.scenario_results }
   , dynamic_plan{ other.dynamic_plan }
+  , execution_status{ other.execution_status }
   , required_inputs{ other.required_inputs }
 {}
 
@@ -547,13 +577,25 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     embed_sims->pending_responses.clear();
     embed_sims->input_frames.clear();
     embed_sims->dynamic_frames.clear();
+    embed_sims->campaign_run_calls = 0;
+    if (execution_status != embed_sims->execution.enabled or
+        (execution_status and (run != run_type::complete or not scenario_results)) or
+        (not execution_status and (embed_sims->execution.isolate or
+          embed_sims->execution.collect_only or embed_sims->execution.max_child_run_calls or
+          embed_sims->execution.max_campaign_run_calls)))
+        return make_error(simulation_errc::simulation_wrapper_parameter_error);
+    if (execution_status and
+        (x.size() != embed_sims->factors.size() + 2 + (dynamic_plan ? 1 : 0) or
+         y.size() != 2 * (embed_sims->factors.size() + embed_sims->selections.size()) +
+                       7 + (dynamic_plan ? 1 : 0)))
+        return make_error(simulation_errc::simulation_wrapper_parameter_error);
     if (dynamic_plan) {
         const auto factors = embed_sims->factors.size();
         const auto selections = embed_sims->selections.size();
         const auto duration = embed_sims->sim.limits.end() - embed_sims->sim.limits.begin();
         if (factors < 1 or factors > 9 or selections < 1 or factors + selections < 3 or
             factors + selections > 12 or run != run_type::complete or not scenario_results or
-            x.size() != factors + 3 or y.size() != 2 * (factors + embed_sims->selections.size()) + 3 or
+            x.size() != factors + 3 or y.size() != 2 * (factors + embed_sims->selections.size()) + 3 + (execution_status ? 5 : 0) or
             nb_sims > 128 or not std::isfinite(duration) or duration <= zero)
             return make_error(simulation_errc::simulation_wrapper_parameter_error);
         unsigned singles = 0;
@@ -605,6 +647,45 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
 static status compute_response(const embedded_simulation& embed_sims,
                                vector<message>& values) noexcept;
 
+static bool scenario_valid(const embedded_simulation& r, embedded_simulation::sub_id id) noexcept
+{
+    return not r.execution.enabled or r.embedded_sims.get<embedded_simulation::execution_result>(id).outcome ==
+      embedded_simulation::scenario_outcome::success;
+}
+
+static bool has_failed_scenario(const embedded_simulation& r) noexcept
+{
+    for (const auto id : r.embedded_sims)
+        if (not scenario_valid(r, id)) return true;
+    return false;
+}
+
+static status establish_results(embedded_simulation& r) noexcept
+{
+    if (not r.execution.enabled) return success();
+    using outcome = embedded_simulation::scenario_outcome;
+    for (const auto id : r.embedded_sims) {
+        auto& result = r.embedded_sims.get<embedded_simulation::execution_result>(id);
+        if (result.outcome != outcome::success) continue;
+        const auto& obs = r.embedded_sims.get<embedded_simulation::simulation_observation>(id);
+        for (const auto selection : r.selections) {
+            const auto* values = obs.get(r.selections.get<model_id>(selection));
+            // A missing observation record violates the allocated manifest;
+            // it is not a safely isolated absence of scientific samples.
+            if (not values)
+                return make_error(simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+            if (values->values.empty()) {
+                if (result.outcome == outcome::success) result.outcome = outcome::unavailable;
+            }
+            else if (not std::isfinite(values->compute_result(r.selections.get<criteria_type>(selection))))
+                result.outcome = outcome::numerical_invalid;
+        }
+        if (result.outcome != outcome::success and not r.execution.isolate)
+            return make_error(simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+    }
+    return success();
+}
+
 // Raw per-scenario results are captured at the same logical request as the
 // legacy optimizer response. Never reconstruct unselected rows in the runner.
 static status scenario_response(const embedded_simulation& resource,
@@ -613,13 +694,13 @@ static status scenario_response(const embedded_simulation& resource,
 {
     const auto base = resource.factors.size() + resource.selections.size();
     const auto count = resource.embedded_sims.size();
-    if (not output.reserve(count * (base + 1) + 1))
+    if (not output.reserve(count * (base + 4) + 3))
         return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
     sz valid_count = 0, index = 0;
     for (const auto id : resource.embedded_sims) {
         const auto& child = resource.embedded_sims.get<simulation>(id);
         const auto& obs = resource.embedded_sims.get<embedded_simulation::simulation_observation>(id);
-        bool valid = true;
+        bool valid = scenario_valid(resource, id);
         for (const auto selection : resource.selections) {
             const auto* values = obs.get(resource.selections.get<model_id>(selection));
             valid = valid and values and std::isfinite(values->compute_result(resource.selections.get<criteria_type>(selection)));
@@ -628,13 +709,32 @@ static status scenario_response(const embedded_simulation& resource,
             valid = valid and std::isfinite(child.parameters[resource.factors.get<model_id>(factor)].reals[0]);
         const auto key = real(index++);
         output.emplace_back(event_emission{ int(base), message{ valid ? one : zero, key, campaign } });
-        if (not valid) continue;
-        ++valid_count;
+        if (valid) ++valid_count;
+        if (not valid and not resource.execution.enabled) continue;
         int port = int(base + 1);
         for (const auto factor : resource.factors)
             output.emplace_back(event_emission{ port++, message{ child.parameters[resource.factors.get<model_id>(factor)].reals[0], key, campaign } });
-        for (const auto selection : resource.selections)
-            output.emplace_back(event_emission{ port++, message{ obs.get(resource.selections.get<model_id>(selection))->compute_result(resource.selections.get<criteria_type>(selection)), key, campaign } });
+        const auto& progress = resource.embedded_sims.get<embedded_simulation::execution_result>(id);
+        for (const auto selection : resource.selections) {
+            const auto* data = obs.get(resource.selections.get<model_id>(selection));
+            const auto value = data ? data->compute_result(resource.selections.get<criteria_type>(selection)) : std::numeric_limits<real>::quiet_NaN();
+            if (std::isfinite(value) and (valid or (resource.execution.enabled and
+                (progress.outcome == embedded_simulation::scenario_outcome::numerical_invalid or
+                 progress.outcome == embedded_simulation::scenario_outcome::unavailable))))
+                output.emplace_back(event_emission{ port, message{ value, key, campaign } });
+            ++port;
+        }
+        if (resource.execution.enabled) {
+            const int extra = int(2 * base + 2 + (resource.dynamic_capacity ? 1 : 0));
+            output.emplace_back(event_emission{extra, message{real(ordinal(progress.outcome)), key, campaign}});
+            output.emplace_back(event_emission{extra + 1, message{real(progress.run_calls), key, campaign}});
+            output.emplace_back(event_emission{extra + 2, message{child.limits.end() - child.limits.begin(), key, campaign}});
+        }
+    }
+    if (resource.execution.enabled) {
+        const int extra = int(2 * base + 2 + (resource.dynamic_capacity ? 1 : 0));
+        output.emplace_back(event_emission{extra + 3, message{real(resource.campaign_run_calls), zero, campaign}});
+        output.emplace_back(event_emission{extra + 4, message{real(count), zero, campaign}});
     }
     output.emplace_back(event_emission{ int(2 * base + 1), message{ real(valid_count), real(count), campaign } });
     return success();
@@ -818,8 +918,9 @@ static status transition_dynamic_plan(simulation_wrapper& wrapper,
         irt_check(run_complete(resource));
         wrapper.state = simulation_wrapper::run_state::finish;
         embedded_simulation::response result{due, {}};
-        irt_check(compute_response(resource, result.values));
+        irt_check(establish_results(resource));
         irt_check(scenario_response(resource, command[2], result.scenarios));
+        if (not resource.execution.collect_only) irt_check(compute_response(resource, result.values));
         irt_check(enqueue(std::move(result)));
         wrapper.last_input_campaign = static_cast<u64>(command[2]);
         frames.erase(std::remove_if(frames.begin(), frames.end(),
@@ -932,6 +1033,8 @@ status simulation_wrapper::transition(simulation& sim,
     }
 
     if (not run_msg.empty()) {
+        if (execution_status and pending_responses.size() >= 128)
+            return make_error(simulation_errc::event_capacity_error);
         for (const auto& msg : run_msg)
             if (std::isnan(msg[0]) or msg[0] < zero)
                 return make_error(
@@ -952,7 +1055,8 @@ status simulation_wrapper::transition(simulation& sim,
 
         switch (run) {
         case run_type::complete:
-            if (state == run_state::input_changed) {
+            if (state == run_state::input_changed or
+                (execution_status and state == run_state::finish and has_failed_scenario(*embed_sims))) {
                 const auto ret = embedded_sims_copy_parameters(*embed_sims)
                                    .and_then(embedded_sims_init, *embed_sims);
 
@@ -960,6 +1064,13 @@ status simulation_wrapper::transition(simulation& sim,
                     return ret.error();
 
                 state = run_state::initialized;
+            } else if (execution_status and state == run_state::finish) {
+                // Preserve historical complete-mode reuse after an entirely
+                // valid run. This request makes no new child calls. Failed
+                // campaigns above always prepare fresh children instead.
+                embed_sims->campaign_run_calls = 0;
+                for (const auto id : embed_sims->embedded_sims)
+                    embed_sims->embedded_sims.get<embedded_simulation::execution_result>(id).run_calls = 0;
             }
 
             if (state == run_state::initialized or state == run_state::finish) {
@@ -987,12 +1098,13 @@ status simulation_wrapper::transition(simulation& sim,
         }
 
         embedded_simulation::response result{ due, {} };
-        irt_check(compute_response(*embed_sims, result.values));
+        irt_check(establish_results(*embed_sims));
         if (scenario_results) {
             if (campaign >= 9007199254740991ULL)
                 return make_error(simulation_errc::simulation_wrapper_parameter_error);
             irt_check(scenario_response(*embed_sims, required_inputs ? requested_campaign : real(++campaign), result.scenarios));
         }
+        if (not embed_sims->execution.collect_only) irt_check(compute_response(*embed_sims, result.values));
         if (not pending_responses.reserve(pending_responses.size() + 1))
             return make_error(
               simulation_errc::simulation_wrapper_not_enough_memory);
@@ -1208,6 +1320,7 @@ static auto compute_embedded_simulation_results(
                       .get<embedded_simulation::simulation_observation>();
 
     for (const auto sub_id : embed_sims.embedded_sims) {
+        if (not scenario_valid(embed_sims, sub_id)) continue;
         for (const auto obj_fn_id : embed_sims.selections) {
             const auto type = embed_sims.selections.get<criteria_type>(
               obj_fn_id);
@@ -1238,6 +1351,7 @@ static auto compute_embedded_simulation_results(
         const auto mdl_id = embed_sims.selections.get<model_id>(obj_fn_id);
 
         for (const auto sub_id : embed_sims.embedded_sims) {
+            if (not scenario_valid(embed_sims, sub_id)) continue;
             dlogln(4, "- sub-id {}", get_index(sub_id));
             dlogln(4, "|{:^12}|{:^12}|", "time", "value");
             dlogln(4, "|{:-^12}|{:-^12}|", "", "");
@@ -1263,6 +1377,7 @@ static auto compute_embedded_simulation_results(
 
     dlogln(0, "");
     for (const auto sub_id : embed_sims.embedded_sims) {
+        if (not scenario_valid(embed_sims, sub_id)) continue;
         dlog(4, "|{:^12}|", get_index(sub_id));
 
         for (const auto obj_fn_id : embed_sims.selections) {
@@ -1295,6 +1410,10 @@ static auto compute_weighted_sum_objective(
     debug::ensure(embed_sims.objective.weighted_sum_params.weights.size() ==
                   embed_sims.selections.size());
 
+    sz valid_count = 0;
+    for (const auto id : embed_sims.embedded_sims) if (scenario_valid(embed_sims, id)) ++valid_count;
+    if (not valid_count) return undefined<embedded_simulation::sub_id>();
+
     // If min-max linearization
 
     if (embed_sims.objective.weighted_sum_params.norm == norm_type::min_max) {
@@ -1307,6 +1426,7 @@ static auto compute_weighted_sum_objective(
             auto max_val = std::numeric_limits<real>::lowest();
 
             for (const auto sub_id : embed_sims.embedded_sims) {
+                if (not scenario_valid(embed_sims, sub_id)) continue;
                 const auto idx = pos(sub_id, obj_fn_id);
                 const auto val = objective_fn[idx];
 
@@ -1319,11 +1439,13 @@ static auto compute_weighted_sum_objective(
 
             if (is_max) {
                 for (const auto sub_id : embed_sims.embedded_sims) {
+                    if (not scenario_valid(embed_sims, sub_id)) continue;
                     const auto idx    = pos(sub_id, obj_fn_id);
                     objective_fn[idx] = (objective_fn[idx] - min_val) / div;
                 }
             } else {
                 for (const auto sub_id : embed_sims.embedded_sims) {
+                    if (not scenario_valid(embed_sims, sub_id)) continue;
                     const auto idx    = pos(sub_id, obj_fn_id);
                     objective_fn[idx] = (max_val - objective_fn[idx]) / div;
                 }
@@ -1337,19 +1459,21 @@ static auto compute_weighted_sum_objective(
 
             auto sum = 0.0;
             for (const auto sub_id : embed_sims.embedded_sims)
-                sum += objective_fn[pos(sub_id, obj_fn_id)];
-            const auto mean = sum / embed_sims.embedded_sims.size();
+                if (scenario_valid(embed_sims, sub_id)) sum += objective_fn[pos(sub_id, obj_fn_id)];
+            const auto mean = sum / valid_count;
             auto squared_deviations = 0.0;
             for (const auto sub_id : embed_sims.embedded_sims) {
+                if (not scenario_valid(embed_sims, sub_id)) continue;
                 const auto delta = objective_fn[pos(sub_id, obj_fn_id)] - mean;
                 squared_deviations += delta * delta;
             }
             // Population standard deviation, centered for both directions.
             // The second pass also avoids E[x*x]-E[x]^2 cancellation.
             const auto std_dev = std::sqrt(
-              squared_deviations / embed_sims.embedded_sims.size());
+              squared_deviations / valid_count);
             const auto div = std_dev < 1e-10 ? 1e-10 : std_dev;
             for (const auto sub_id : embed_sims.embedded_sims) {
+                if (not scenario_valid(embed_sims, sub_id)) continue;
                 const auto idx = pos(sub_id, obj_fn_id);
                 objective_fn[idx] = (is_max ? objective_fn[idx] - mean
                                            : mean - objective_fn[idx]) / div;
@@ -1365,6 +1489,7 @@ static auto compute_weighted_sum_objective(
                               : std::numeric_limits<real>::max();
 
     for (const auto sub_id : embed_sims.embedded_sims) {
+        if (not scenario_valid(embed_sims, sub_id)) continue;
         auto value = 0.0;
         for (const auto obj_fn_id : embed_sims.selections) {
             const auto w = embed_sims.objective.weighted_sum_params
@@ -1435,6 +1560,7 @@ static auto filter(const embedded_simulation& embed_sims,
                       .get<embedded_simulation::simulation_observation>();
 
     for (const auto sub_id : embed_sims.embedded_sims) {
+        if (not scenario_valid(embed_sims, sub_id)) continue;
         auto all_obj_valid = true;
 
         for (const auto obj_fn_id : embed_sims.selections) {
@@ -1557,6 +1683,7 @@ static auto do_simple_optimization(const embedded_simulation& embed_sims,
                                      : std::numeric_limits<real>::max();
 
     for (const auto sub_id : embed_sims.embedded_sims) {
+        if (not scenario_valid(embed_sims, sub_id)) continue;
         const auto idx = pos(sub_id, sel_id);
         const auto val = objective_fn[idx];
 
@@ -1634,6 +1761,8 @@ status simulation_wrapper::finalize(simulation& sim) noexcept
         const auto idx   = get_index(id);
         auto&      sim   = sims[idx];
         auto&      sim_o = sim_obs[idx];
+
+        if (embed_sims->execution.enabled and not scenario_valid(*embed_sims, id)) continue;
 
         // Expired children were finalized by their run routine. Do not run
         // source cleanup or nested finalizers twice when the parent closes.
