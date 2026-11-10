@@ -12,6 +12,28 @@ template<event_kind K>
 status campaign_transition(simulation& sim, event_dynamics<K>& d, event_state& s, sz capacity) noexcept
 {
     if constexpr (K == event_kind::aggregate) {
+        // Explicit streaming cohort: this occurrence declares comparable units,
+        // horizons and regimes across campaigns. Preserve every original key;
+        // reject replay, retain history until reset, and never close a campaign.
+        if (d.integers[1]) {
+            if (not get_message(sim, d.x[1]).empty()) return protocol_error();
+            for (const auto& m : get_message(sim, d.x[0])) {
+                if (not tagged(m)) return protocol_error();
+                if (not std::isfinite(m[0])) { irt_check(emit(s, 1, 0, m[1], m[2])); continue; }
+                for (const auto& r : s.rows) if (r.key == m[1] and r.campaign == m[2]) return protocol_error();
+                auto* r = row(s, m, capacity, 0, 0, 1); if (not r) return capacity_error();
+                r->a = m[0];
+                std::sort(s.rows.begin(), s.rows.end(), [](const auto& a, const auto& b) { return a.campaign < b.campaign or (a.campaign == b.campaign and a.key < b.key); });
+                long double sum = 0; real lo = m[0], hi = m[0];
+                for (const auto& v : s.rows) { sum += v.a; lo = std::min(lo, v.a); hi = std::max(hi, v.a); }
+                const auto n = real(s.rows.size());
+                const real result = d.integers[0] == 0 ? lo : d.integers[0] == 1 ? hi : d.integers[0] == 2 ? real(sum) : d.integers[0] == 3 ? real(sum / n) : n;
+                irt_check(emit(s, std::isfinite(result) ? 0 : 1, std::isfinite(result) ? result : 0, m[1], m[2]));
+                irt_check(emit(s, 2, n, m[1], m[2]));
+                if (std::isfinite(result)) d.value = result;
+            }
+            return success();
+        }
         for (const auto& m : get_message(sim, d.x[0])) {
             if (not tagged(m)) return protocol_error();
             auto* b = cohort(s, m[2], capacity);

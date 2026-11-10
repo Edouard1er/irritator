@@ -231,6 +231,7 @@ struct json_wrappers {
     }
     void budget(const std::vector<occurrence>& list,const native_hierarchy::summary& graph) const {
         double total_scenarios=0,models=graph.atoms,edges=graph.connections,points=0;
+        for(const auto& o:doc["model"]["observations"].GetArray()) if(o.HasMember("eventPorts")) { models+=o["eventPorts"].Size(); edges+=o["eventPorts"].Size(); }
         // project::set copies every descriptor, including unused definitions.
         // Include both descriptor and temporary parent prototype, then private
         // occurrence prototype + scenario copies + conservative collector sinks.
@@ -285,6 +286,9 @@ struct json_wrappers {
         if(!found.insert(id).second) return;
         for(const auto& c:definition(id)["components"].GetArray()) if(str(c["type"])=="coupled") reachable(str(c["definition"]),found);
     }
+    struct model_event { std::string path; double time; std::size_t bag; int port; irt::message value; };
+    std::vector<model_event> model_events;
+    std::vector<std::tuple<std::string,irt::model_id,int>> event_ports;
     void build() {
         try {
             // Separate workspaces avoid unrelated descriptors being copied by
@@ -314,9 +318,23 @@ struct json_wrappers {
             }
             parent->build();
             auto& sim=parent->project->sim;
+            if(doc["model"].HasMember("forecastContracts")) {
+                std::set<std::string> pairs;
+                for(const auto& c:doc["model"]["forecastContracts"].GetArray()) {
+                    const auto path=str(c["pair"]);const auto it=parent->models.find(path);
+                    if(it==parent->models.end()||sim.models.get(it->second).type!=irt::dynamics_type::temporal_pair||!pairs.insert(path).second)
+                        fail("INVALID_MODEL","Forecast contract requires a unique temporal_pair occurrence");
+                }
+            }
             for(const auto& o:occurrences) bindings.push_back(irt_web::bind_wrapper(sim,parent->models.at(o.path),*parent->access,descriptors.at(o.component),o.plan));
             irt_web::release_unreferenced_resources(sim);
-            std::size_t ports=0; for(const auto& o:occurrences) ports+=o.plan.output_count();
+            for(const auto& o:doc["model"]["observations"].GetArray()) if(o.HasMember("eventPorts")) {
+                const auto path=str(o["component"]); const auto id=parent->models.at(path);
+                const auto type=sim.models.get(id).type;
+                (void)type;
+                for(const auto& port:o["eventPorts"].GetArray()) event_ports.emplace_back(path,id,port.GetInt());
+            }
+            std::size_t ports=event_ports.size(); for(const auto& o:occurrences) ports+=o.plan.output_count();
             irt_web::require(sim.grow_models_to(static_cast<int>(sim.models.size()+ports)),"Collector model allocation failed");
             irt_web::require(sim.grow_connections_to(1024),"Collector connection allocation failed");
             // Unconnected native output ports otherwise emit no message at all.
@@ -328,16 +346,35 @@ struct json_wrappers {
                     ++collector_models;
                 }
             }
+            for(const auto& [path,id,port]:event_ports) {
+                irt::dispatch(sim.models.get(id),[&]<typename T>(T& dyn) {
+                    if constexpr(requires { T::kind; } or std::is_same_v<T,irt::zero_order_hold>) {
+                        if(port<0||port>=std::ssize(dyn.y)) fail("OBSERVATION_ERROR","Event port outside component interface");
+                        if(!irt::is_defined(dyn.y[port])) {
+                            auto& sink=irt::get_model(sim.alloc<irt::counter>());
+                            irt_web::checked(sim.connect(sim.models.get(id),port,sink,0),"Connect model event collector"); ++collector_models;
+                        }
+                    } else fail("OBSERVATION_ERROR","Event observation requires an event component");
+                });
+            }
             for(std::size_t i=0;i<bindings.size();++i) irt_web::validate_binding(sim,bindings[i],occurrences[i].plan);
         } catch(const failure&) { throw; }
           catch(const std::exception& error) { fail("NATIVE_CONSTRUCTION_ERROR",error.what()); }
     }
     void collect(std::size_t bag) {
         audit_parameters();
+        auto& sim=parent->project->sim;
+        for(const auto& [path,id,port]:event_ports) irt::dispatch(sim.models.get(id),[&]<typename T>(const T& dyn) {
+            if constexpr(requires { T::kind; } or std::is_same_v<T,irt::zero_order_hold>) if(std::find(sim.active_output_ports.begin(),sim.active_output_ports.end(),dyn.y[port])!=sim.active_output_ports.end()) {
+                const auto m=sim.output_ports.get(dyn.y[port]).msg;
+                for(auto value:m) if(!std::isfinite(value)) fail("EXECUTION_ERROR","Non-finite model event");
+                model_events.push_back({path,sim.current_time(),bag,port,m});
+            }
+        });
         const auto first=events.size();
         try { irt_web::collect_outputs(parent->project->sim,bindings,bag,events); }
         catch(const std::exception& error) { fail("EXECUTION_ERROR",error.what()); }
-        if(events.size()>unsigned(limit(doc,"maxResultEvents",20000))) fail("LIMIT_EXCEEDED","Wrapper result event budget exceeded");
+        if(events.size()+model_events.size()>unsigned(limit(doc,"maxResultEvents",20000))) fail("LIMIT_EXCEEDED","Wrapper result event budget exceeded");
         for(std::size_t i=first;i<events.size();++i) {
             const auto& event=events[i];
             if(!std::isfinite(event.time)||event.time<doc["simulation"]["start"].GetDouble()||event.time>=doc["simulation"]["end"].GetDouble()) fail("EXECUTION_ERROR","Invalid wrapper event time");
@@ -374,6 +411,15 @@ struct json_wrappers {
     }
     void append_result(D& result) const {
         auto& a=result.GetAllocator();
+        if(!event_ports.empty()) {
+            V values(rapidjson::kArrayType);
+            for(const auto& e:model_events) {
+                V item(rapidjson::kObjectType),m(rapidjson::kArrayType); for(auto n:e.value) m.PushBack(n,a);
+                item.AddMember("component",V(e.path.c_str(),a),a).AddMember("time",e.time,a).AddMember("bag",static_cast<unsigned>(e.bag),a).AddMember("port",e.port,a).AddMember("value",m,a);
+                values.PushBack(item,a);
+            }
+            result.AddMember("modelEvents",values,a);
+        }
         V list(rapidjson::kArrayType),layouts(rapidjson::kArrayType);
         for(const auto& event:events) {
             const auto it=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.wrapper==event.wrapper;});

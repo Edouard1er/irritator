@@ -61,7 +61,8 @@ set_property(SOURCE ${private_irritator_sources} APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/error.hpp")
 set_property(SOURCE src/event.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/campaign-event.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/group-event.hpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/group-event.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/temporal-event.hpp")
 add_library(libirritator::libirritator ALIAS libirritator)
 
 target_sources(libirritator

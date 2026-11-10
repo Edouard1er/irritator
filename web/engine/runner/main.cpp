@@ -19,6 +19,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -74,6 +75,8 @@ const std::map<std::string,atomic_type> registry{
  {"campaign_broadcast",atomic<irt::campaign_broadcast>()},
  {"selection_priority",atomic<irt::selection_priority>()},
  {"state_observer",atomic<irt::state_observer>()},
+ {"event_calendar",atomic<irt::event_calendar>()},
+ {"temporal_pair",atomic<irt::temporal_pair>()},
  {"group_aggregate",atomic<irt::group_aggregate>()},
  {"zero_order_hold",atomic<irt::zero_order_hold>()},
     {"constant",atomic<irt::constant>()}, {"qss1_sum_2",atomic<irt::qss1_sum_2>()},
@@ -89,14 +92,16 @@ void set_parameters(irt::parameter& target,const std::string& type,const V& p) {
     if (registry.contains(type)) target.init_from(registry.at(type).dynamics);
     if(type=="event_tag") { target.reals[0]=p["identity"].GetDouble(); target.reals[1]=p["campaign"].GetDouble(); target.integers[0]=p.HasMember("preserveCampaign") ? static_cast<irt::i64>(p["preserveCampaign"].GetDouble()) : 0; }
     else if(type=="group_aggregate") { target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["validation"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); target.reals[0]=p["endCount"].GetDouble(); }
+    else if(type=="temporal_pair") { target.integers[1]=static_cast<irt::i64>(p["requireDuration"].GetDouble()); target.integers[0]=static_cast<irt::i64>(p["requireContext"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="event_calendar") { target.integers[0]=static_cast<irt::i64>(p["relative"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="state_observer") { target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="value_memory") { target.reals[0]=p["initial"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["emitOnWrite"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
-    else if(type=="event_operator") { target.reals[0]=p["left"].GetDouble(); target.reals[1]=p["right"].GetDouble(); target.reals[2]=p["epsilon"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["automatic"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
+    else if(type=="event_operator") { if(p.HasMember("outputIdentity")) target.reals[3]=p["outputIdentity"].GetDouble()+1; target.reals[0]=p["left"].GetDouble(); target.reals[1]=p["right"].GetDouble(); target.reals[2]=p["epsilon"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[2]=static_cast<irt::i64>(p["automatic"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="candidate_filter") { target.reals[0]=p["defaultAction"].GetDouble(); target.reals[1]=p["defaultCondition"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["required"].GetDouble()); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="candidate_select") { target.reals[0]=p["fallback"].GetDouble(); target.integers[0]=static_cast<irt::i64>(p["direction"].GetDouble()); target.integers[1]=static_cast<irt::i64>(p["requireAction"].GetDouble()); if(p.HasMember("emitFallback")) target.integers[2]=static_cast<irt::i64>(p["emitFallback"].GetDouble()); if(p.HasMember("requireSecondary")) target.reals[1]=p["requireSecondary"].GetDouble(); if(p.HasMember("secondaryDirection")) target.reals[2]=p["secondaryDirection"].GetDouble(); target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble()); }
     else if(type=="campaign_aggregate" || type=="campaign_broadcast" || type=="selection_priority") {
         target.integers[3]=static_cast<irt::i64>(p["capacity"].GetDouble());
-        if(type=="campaign_aggregate") target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble());
+        if(type=="campaign_aggregate") { target.integers[0]=static_cast<irt::i64>(p["operation"].GetDouble()); if(p.HasMember("streaming")) target.integers[1]=static_cast<irt::i64>(p["streaming"].GetDouble()); }
         if(type=="selection_priority") { target.reals[0]=p["primaryPriority"].GetDouble(); target.reals[1]=p["secondaryPriority"].GetDouble(); }
     }
     else if(type=="generator") { target.set_generator_ta(p["period"].GetDouble()); target.reals[1]=p["value"].GetDouble(); }

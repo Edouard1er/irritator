@@ -89,7 +89,7 @@
         },
         "dQ": {
           "type": "number",
-          "minimum": 1e-9,
+          "minimum": 1e-09,
           "maximum": 1000000000000
         }
       },
@@ -125,7 +125,7 @@
         },
         "dQ": {
           "type": "number",
-          "minimum": 1e-9,
+          "minimum": 1e-09,
           "maximum": 1000000000000
         }
       },
@@ -161,7 +161,7 @@
         },
         "dQ": {
           "type": "number",
-          "minimum": 1e-9,
+          "minimum": 1e-09,
           "maximum": 1000000000000
         }
       },
@@ -356,7 +356,7 @@
       "parameters": {
         "period": {
           "type": "number",
-          "minimum": 0.000001,
+          "minimum": 1e-06,
           "maximum": 1000000000,
           "default": 1,
           "description": "Période ; première émission après une période."
@@ -596,6 +596,13 @@
           "maximum": 4096,
           "default": 128,
           "description": "Nombre maximal de valeurs identifiées et de campagnes conservées. Reset libère la mémoire."
+        },
+        "outputIdentity": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740991,
+          "default": -1,
+          "description": "Identité de sortie explicite ; -1 conserve l’identité reçue. Permet les payloads de protocole sans atome de réétiquetage supplémentaire."
         }
       },
       "required": [
@@ -892,6 +899,13 @@
           "maximum": 4096,
           "default": 128,
           "description": "Nombre maximal de lignes et de campagnes simultanées. Reset annule les sorties en attente."
+        },
+        "streaming": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "Mode explicite série : conserve les valeurs admissibles de toutes les campagnes de cette instance ; refuse les doublons ; sortie 2=nombre cumulé. end interdit. Une instance par cohorte comparable (modèle, variable, unité, horizon, régime)."
         }
       },
       "required": [
@@ -1295,6 +1309,160 @@
         {
           "port": 9,
           "name": "key"
+        }
+      ]
+    },
+    {
+      "type": "event_calendar",
+      "name": "Calendrier événementiel identifié",
+      "description": "schedule=[date absolue,identité,campagne]. Plusieurs dates simultanées ; FIFO de micro-transitions sans epsilon. Identités closes retenues contre le rejeu. Reset annule toutes les demandes.",
+      "parameters": {
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Borne des identités retenues (y compris closes) et des commandes. Reset ouvre un nouvel espace local."
+        },
+        "relative": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0,
+          "description": "0 date absolue ; 1 durée depuis la réception. scheduled émet la date absolue native à t0."
+        }
+      },
+      "required": [
+        "capacity",
+        "relative"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "schedule"
+        },
+        {
+          "port": 1,
+          "name": "cancel"
+        },
+        {
+          "port": 2,
+          "name": "reset"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "due"
+        },
+        {
+          "port": 1,
+          "name": "cancelled"
+        },
+        {
+          "port": 2,
+          "name": "scheduled"
+        }
+      ]
+    },
+    {
+      "type": "temporal_pair",
+      "name": "Rapprochement temporel identifié",
+      "description": "Une instance déclare explicitement modèle, variable, unité, horizon et contexte. date reçue à t0 ; left doit arriver à t0, right exactement à tv>t0. valid=1 requis. assumption doit correspondre au contexte scalaire sur [t0,tv). seal conclut les absences. status: 1 admissible, 2 invalide numérique/simulation, 3 incomplet, 4 observation absente, 5 temps incompatible, 6 contexte incompatible/contrefactuel, 7 annulé. Aucun score fictif. Historique natif borné conservé jusqu’au reset.",
+      "parameters": {
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 128,
+          "description": "Borne des identités retenues (y compris closes) et des commandes. Reset ouvre un nouvel espace local."
+        },
+        "requireContext": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Exiger une hypothèse de contexte constant et sa trajectoire effective ; désactiver uniquement pour une grandeur explicitement indépendante du contexte."
+        },
+        "requireDuration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Exiger la durée native du résultat gauche ; origine + duration doit être exactement la date de vérification. Évite de confondre des horizons différents."
+        }
+      },
+      "required": [
+        "capacity",
+        "requireContext",
+        "requireDuration"
+      ],
+      "inputs": [
+        {
+          "port": 0,
+          "name": "left"
+        },
+        {
+          "port": 1,
+          "name": "right"
+        },
+        {
+          "port": 2,
+          "name": "date"
+        },
+        {
+          "port": 3,
+          "name": "assumption"
+        },
+        {
+          "port": 4,
+          "name": "context"
+        },
+        {
+          "port": 5,
+          "name": "valid"
+        },
+        {
+          "port": 6,
+          "name": "cancel"
+        },
+        {
+          "port": 7,
+          "name": "seal"
+        },
+        {
+          "port": 8,
+          "name": "reset"
+        },
+        {
+          "port": 9,
+          "name": "duration"
+        }
+      ],
+      "outputs": [
+        {
+          "port": 0,
+          "name": "left"
+        },
+        {
+          "port": 1,
+          "name": "right"
+        },
+        {
+          "port": 2,
+          "name": "status"
+        },
+        {
+          "port": 3,
+          "name": "verifiedCount"
+        },
+        {
+          "port": 4,
+          "name": "pendingCount"
+        },
+        {
+          "port": 5,
+          "name": "invalidCount"
         }
       ]
     }

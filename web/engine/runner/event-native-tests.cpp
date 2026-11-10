@@ -53,6 +53,7 @@ template<class T> std::vector<emission> execute(irt::simulation& sim, T& observe
 #include "campaign-native-tests.hpp"
 #include "feedback-native-tests.hpp"
 #include "group-native-tests.hpp"
+#include "temporal-native-tests.hpp"
 int main(int argc, char** argv)
 {
 #ifdef _MSC_VER
@@ -65,6 +66,7 @@ int main(int argc, char** argv)
 #endif
 #endif
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "temporal") { temporal_native_tests(); return 0; }
         if (argc == 2 && std::string_view(argv[1]) == "group") {
             group_native_tests(); return 0;
         }

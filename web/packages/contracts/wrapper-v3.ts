@@ -189,7 +189,7 @@ export function validateWrapperRequest(r: RunRequest): void {
   }
   for (const e of declared) validate(e);
   function budget(list: WrapperOccurrence[], graph: { atoms: number; connections: number }) {
-    let scenarios = 0, models = graph.atoms, edges = graph.connections, points = 0;
+    let scenarios = 0, models = graph.atoms + r.model.observations.reduce((n, o) => n + (o.eventPorts?.length ?? 0), 0), edges = graph.connections + r.model.observations.reduce((n, o) => n + (o.eventPorts?.length ?? 0), 0), points = 0;
     for (const e of declared) { const g = sizes.get(e.definition)!; models += 2 * g.atoms; edges += 2 * g.connections; }
     for (const o of list) {
       const e = o.experiment; validate(e);
@@ -210,6 +210,18 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
   const r = input as RunResultV2;
   if (r.schemaVersion !== 2 || !Array.isArray(r.resultEvents) || !Array.isArray(r.wrappers)) return bad();
   parseResult({ ...r, schemaVersion: 1 }, request);
+  const eventRequests = request.model.observations.filter(o => o.eventPorts?.length);
+  if (eventRequests.length && !Array.isArray(r.modelEvents)) return bad();
+  let modelBag = 0, modelTime = -Infinity;
+  const modelSeen = new Set<string>();
+  for (const e of r.modelEvents ?? []) {
+    if (!e || !eventRequests.some(o => o.component === e.component && o.eventPorts!.includes(e.port)) ||
+        !Number.isFinite(e.time) || e.time < request.simulation.start || e.time >= request.simulation.end || e.time < modelTime ||
+        !Number.isSafeInteger(e.bag) || e.bag < 1 || e.bag < modelBag || !Array.isArray(e.value) || e.value.length !== 3 || !e.value.every(Number.isFinite)) return bad();
+    const key = JSON.stringify([e.bag, e.component, e.port]); if (modelSeen.has(key)) return bad(); modelSeen.add(key);
+    modelTime = e.time; modelBag = e.bag;
+  }
+  if ((r.modelEvents?.length ?? 0) + r.resultEvents.length > (request.limits?.maxResultEvents ?? wrapperCaps.maxResultEvents)) return bad();
   const expected = wrapperOccurrences(request);
   if (r.wrappers.length !== expected.length) return bad();
   const layouts = new Map<string, number>();

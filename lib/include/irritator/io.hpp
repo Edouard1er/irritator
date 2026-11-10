@@ -207,6 +207,8 @@ static constexpr inline const char* dynamics_type_names[] = {
     "selection_priority",
     "state_observer",
     "group_aggregate",
+    "event_calendar",
+    "temporal_pair",
 
 };
 

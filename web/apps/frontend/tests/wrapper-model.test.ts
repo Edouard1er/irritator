@@ -42,7 +42,7 @@ describe('document v3, ports et identités expérimentales', () => {
     expect(atomicPaths(r)).not.toContain('decision');
     const spec = componentSpec(r.model.components[1]!, catalog)!;
     expect(spec.inputs.map(p => p.name)).toEqual(['init', 'run', 'Debit']); expect(spec.outputs.map(p => p.name)).toEqual(['terminal', 'minimum', 'Debit choisi']);
-    expect(catalog.components).toHaveLength(25); expect(catalog.components.some(c => c.type === 'simulation_wrapper')).toBe(false);
+    expect(catalog.components).toHaveLength(27); expect(catalog.components.some(c => c.type === 'simulation_wrapper')).toBe(false);
   });
   it('calcule les ports par occurrence et les 12 ports de la borne supérieure', () => {
     const r = affine(), e = experiment(r), bigger = structuredClone(e);

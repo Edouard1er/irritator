@@ -24,7 +24,7 @@ describe('palette et inspecteur dédiés', () => {
     const onAdd = vi.fn(); const view = render(<ComponentLibrary catalog={catalog} onAdd={onAdd} onRetry={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Ajouter simulation_wrapper' })).not.toBeInTheDocument();
     view.rerender(<ComponentLibrary catalog={catalog} wrapperAvailable onAdd={onAdd} onRetry={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Ajouter simulation_wrapper' })); expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ type: 'simulation_wrapper' })); expect(catalog.components).toHaveLength(25);
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter simulation_wrapper' })); expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ type: 'simulation_wrapper' })); expect(catalog.components).toHaveLength(27);
   });
   it('affiche nom, prospectif et ports variables dans un nœud sélectionnable', () => {
     const component = affine().model.components[1]!, open = vi.fn();

@@ -71,8 +71,18 @@
               },
               "samplingInterval": {
                 "type": "number",
-                "minimum": 0.000001,
+                "minimum": 1e-06,
                 "maximum": 1000000000
+              },
+              "eventPorts": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 32,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 31
+                }
               }
             }
           }
@@ -131,6 +141,89 @@
                       "$ref": "#/definitions/endpoint"
                     }
                   }
+                }
+              }
+            }
+          }
+        },
+        "forecastContracts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pair",
+              "planId",
+              "planVersion",
+              "quantity",
+              "unit",
+              "cohort",
+              "mode",
+              "stateFactors",
+              "commandFactor",
+              "contextFactors"
+            ],
+            "properties": {
+              "pair": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "planId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "planVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "quantity": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "cohort": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "mode": {
+                "enum": [
+                  "operational",
+                  "diagnostic"
+                ]
+              },
+              "stateFactors": {
+                "type": "array",
+                "maxItems": 10,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "commandFactor": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "contextFactors": {
+                "type": "array",
+                "maxItems": 10,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
                 }
               }
             }

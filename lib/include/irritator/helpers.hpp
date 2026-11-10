@@ -449,6 +449,20 @@ template<> struct event_model_tag<event_kind::priority> {
     static constexpr port_type y_types[] = { qss, qss, qss, qss, qss, qss, qss };
 };
 
+template<> struct event_model_tag<event_kind::calendar> {
+    static constexpr event_kind kind = event_kind::calendar;
+    static constexpr std::string_view x_names[] = { "schedule", "cancel", "reset" };
+    static constexpr port_type x_types[] = { qss, qss, qss };
+    static constexpr std::string_view y_names[] = { "due", "cancelled", "scheduled" };
+    static constexpr port_type y_types[] = { qss, qss, qss };
+};
+template<> struct event_model_tag<event_kind::temporal_pair> {
+    static constexpr event_kind kind = event_kind::temporal_pair;
+    static constexpr std::string_view x_names[] = { "left", "right", "date", "assumption", "context", "valid", "cancel", "seal", "reset", "duration" };
+    static constexpr port_type x_types[] = { qss, qss, qss, qss, qss, qss, qss, qss, qss, qss };
+    static constexpr std::string_view y_names[] = { "left", "right", "status", "verifiedCount", "pendingCount", "invalidCount" };
+    static constexpr port_type y_types[] = { qss, qss, qss, qss, qss, qss };
+};
 template<> struct event_model_tag<event_kind::group> {
     static constexpr event_kind kind = event_kind::group;
     static constexpr std::string_view x_names[] = { "key", "action", "value", "valid", "weight", "end", "seal", "reset" };
@@ -871,6 +885,10 @@ constexpr auto dispatch(const dynamics_type type,
         return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::aggregate>{}, std::forward<Args>(args)...);
     case dynamics_type::campaign_broadcast:
         return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::broadcast>{}, std::forward<Args>(args)...);
+    case dynamics_type::event_calendar:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::calendar>{}, std::forward<Args>(args)...);
+    case dynamics_type::temporal_pair:
+        return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::temporal_pair>{}, std::forward<Args>(args)...);
     case dynamics_type::group_aggregate:
         return std::invoke(std::forward<Function>(f), event_model_tag<event_kind::group>{}, std::forward<Args>(args)...);
     case dynamics_type::state_observer:

@@ -20,7 +20,9 @@
     "campaign_broadcast",
     "selection_priority",
     "state_observer",
-    "group_aggregate"
+    "group_aggregate",
+    "event_calendar",
+    "temporal_pair"
   ],
   "wrapper": {
     "dynamicPlan": "addressed-fixed-domains-horizon-seal-v1",

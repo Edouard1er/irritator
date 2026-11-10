@@ -25,14 +25,16 @@ export const caps = { maxComponents: 128, maxConnections: 512, maxRunCalls: 1000
 export interface Component { id: string; type: string; parameters: Record<string, number>; definition?: string; experiment?: import('./wrapper-v3.js').WrapperExperiment; experimentOverrides?: import('./wrapper-v3.js').ExperimentOverride[] }
 export interface Endpoint { component: string; port: number }
 export interface CoupledDefinition { id: string; name: string; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[]; components: Component[]; connections: { from: Endpoint; to: Endpoint }[] }
+export interface ForecastContract { pair: string; planId: string; planVersion: number; quantity: string; unit: string; cohort: string; mode: 'operational' | 'diagnostic'; stateFactors: string[]; commandFactor: string; contextFactors: string[] }
 export interface RunRequest {
   schemaVersion: 1 | 2 | 3;
-  model: { id: string; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number }[]; definitions?: CoupledDefinition[] };
+  model: { id: string; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number; eventPorts?: number[] }[]; definitions?: CoupledDefinition[]; forecastContracts?: ForecastContract[] };
   simulation: { start: number; end: number };
   limits?: Partial<typeof caps> & { maxDepth?: number; maxInstances?: number } & Partial<typeof import('./wrapper-v3.js').wrapperCaps>;
 }
 export interface RunResult {
   schemaVersion: 1; status: 'completed'; modelId: string;
+  modelEvents?: { component: string; time: number; bag: number; port: number; value: [number, number, number] }[];
   simulation: { start: number; end: number; finalTime: number; runCalls: number };
   observations: { component: string; samplingInterval: number; samples: { time: number; value: number }[] }[];
   diagnostics: { observationPolicy: string; engineVersion: string; adapterVersion: string };
@@ -242,6 +244,21 @@ export function validateHierarchy(r: RunRequest, editing = false): Map<string, {
   instances = 0; atoms = 0; connections = 0;
   expand(r.model, 0);
   sizes.set('$root', { atoms, connections });
+  const declaredPairs = new Set<string>();
+  for (const contract of r.model.forecastContracts ?? []) {
+    let list = r.model.components;
+    const path = contract.pair.split('/');
+    for (let i = 0; i < path.length; ++i) {
+      const component = list.find(c => c.id === path[i]) ?? fail('INVALID_MODEL', 'Unresolved forecast contract pair');
+      if (i === path.length - 1) {
+        if (component.type !== 'temporal_pair' || declaredPairs.has(contract.pair)) fail('INVALID_MODEL', 'Forecast contract requires a unique temporal_pair occurrence');
+      } else {
+        if (component.type !== 'coupled') fail('INVALID_MODEL', 'Forecast contract traverses an atomic model');
+        list = getDefinition(component).components;
+      }
+    }
+    declaredPairs.add(contract.pair);
+  }
   if (!editing && atoms === 0) fail('INVALID_MODEL', 'No executable atomic model');
   let points = 0;
   const observed = new Set<string>();
@@ -250,7 +267,7 @@ export function validateHierarchy(r: RunRequest, editing = false): Map<string, {
     const path = o.component.split('/');
     for (let i = 0; i < path.length; i++) {
       const c = scope.components.find(c => c.id === path[i]) ?? fail('OBSERVATION_ERROR', `Unresolved observation: ${o.component}`);
-      if (i === path.length - 1) { if (c.type === 'coupled' || c.type === 'simulation_wrapper') fail('OBSERVATION_ERROR', 'Observe an atomic descendant with an observation function'); }
+      if (i === path.length - 1) { if (o.eventPorts?.some(p => (!runnerCapabilities.eventComponents.includes(c.type) && c.type !== 'zero_order_hold') || !catalog.components.find(s => s.type === c.type)?.outputs.some(o => o.port === p))) fail('OBSERVATION_ERROR', 'Invalid native event observation port'); if (c.type === 'coupled' || c.type === 'simulation_wrapper') fail('OBSERVATION_ERROR', 'Observe an atomic descendant with an observation function'); }
       else { if (c.type !== 'coupled') fail('OBSERVATION_ERROR', 'Observation traverses an atomic model'); scope = getDefinition(c); }
     }
     if (observed.has(o.component)) fail('OBSERVATION_ERROR', 'Duplicate observation');

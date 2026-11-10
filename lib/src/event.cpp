@@ -68,6 +68,7 @@ real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
 }
 #include "campaign-event.hpp"
 #include "group-event.hpp"
+#include "temporal-event.hpp"
 } // namespace
 
 status validate_structure(const simulation& sim) noexcept
@@ -104,7 +105,8 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
     if (integers[3] < 1 or integers[3] > 4096) return protocol_error();
     if constexpr (K == event_kind::numeric)
         if (integers[0] < 0 or integers[0] > 21 or integers[1] < 0 or integers[1] > 3 or
-            integers[2] < 0 or integers[2] > 1 or reals[2] < 0) return protocol_error();
+            integers[2] < 0 or integers[2] > 1 or reals[2] < 0 or
+            (reals[3] != -1 and (reals[3] < 0 or reals[3] > 9007199254740992.0 or std::floor(reals[3]) != reals[3]))) return protocol_error();
     if constexpr (K == event_kind::filter)
         if (integers[0] < 1 or integers[0] > 15) return protocol_error();
     if constexpr (K == event_kind::select)
@@ -112,7 +114,11 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
             integers[2] < 0 or integers[2] > 1 or
             (reals[1] != 0 and reals[1] != 1) or (reals[2] != 0 and reals[2] != 1)) return protocol_error();
     if constexpr (K == event_kind::aggregate)
-        if (integers[0] < 0 or integers[0] > 4) return protocol_error();
+        if (integers[0] < 0 or integers[0] > 4 or integers[1] < 0 or integers[1] > 1) return protocol_error();
+    if constexpr (K == event_kind::calendar or K == event_kind::temporal_pair)
+        if (integers[0] < 0 or integers[0] > 1) return protocol_error();
+    if constexpr (K == event_kind::temporal_pair)
+        if (integers[1] < 0 or integers[1] > 1) return protocol_error();
     if constexpr (K == event_kind::group)
         if (integers[0] < 0 or integers[0] > 6 or integers[1] < 0 or integers[1] > 1 or
             integers[2] < 0 or integers[2] > 15 or (reals[0] != 0 and reals[0] != 1)) return protocol_error();
@@ -166,9 +172,9 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
     const auto capacity = sz(integers[3]);
     if (emitted) {
         const auto& sent = s.pending.front();
-        if constexpr (K != event_kind::tag and K != event_kind::memory and K != event_kind::state_observer) {
+        if constexpr (K != event_kind::tag and K != event_kind::memory and K != event_kind::state_observer and K != event_kind::calendar and K != event_kind::temporal_pair) {
             const bool closed = sent.port == (K == event_kind::select or K == event_kind::priority ? 6 : 2);
-            if (closed) {
+            if (closed and not (K == event_kind::aggregate and integers[1])) {
                 const auto campaign = sent.value[2];
                 s.rows.erase(std::remove_if(s.rows.begin(), s.rows.end(), [campaign](const auto& r) { return r.campaign == campaign; }), s.rows.end());
                 s.barriers.erase(std::remove_if(s.barriers.begin(), s.barriers.end(), [campaign](const auto& b) { return b.campaign == campaign; }), s.barriers.end());
@@ -179,10 +185,11 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
         s.pending.erase(s.pending.begin()); emitted = false;
     }
     if constexpr (K != event_kind::tag) {
-        constexpr int reset_port = K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
+        constexpr int reset_port = K == event_kind::temporal_pair ? 8 : K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
         if (not get_message(sim, x[reset_port]).empty()) {
             s.rows.clear(); s.barriers.clear(); s.pending.clear(); s.reads.clear();
             s.groups.clear(); s.closed.clear();
+            s.temporal.clear(); s.contexts.clear();
             if constexpr (K == event_kind::state_observer) value = 0;
             if constexpr (K == event_kind::memory) {
                 auto* r = row(s, message{ reals[0], 0, 0 }, capacity, reals[0], 0, 1);
@@ -199,6 +206,10 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
             if (integers[0] and not event_identifier(m[2])) return protocol_error();
             irt_check(emit(s, 0, m[0], reals[0], integers[0] ? m[2] : reals[1])); value = std::isfinite(m[0]) ? m[0] : value;
         }
+    } else if constexpr (K == event_kind::calendar) {
+        irt_check(calendar_transition(sim, *this, s, t, capacity));
+    } else if constexpr (K == event_kind::temporal_pair) {
+        irt_check(temporal_transition(sim, *this, s, t, capacity));
     } else if constexpr (K == event_kind::state_observer) {
         // One internal transition after the read bag: concurrent source
         // transitions from that bag have completed, independent of model order.
@@ -272,7 +283,8 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
                 }
                 const auto result = calculate(integers[0], r.a, r.b, reals[2], reals[0]);
                 r.accepted = std::isfinite(result); r.processed = true; r.dirty = false;
-                irt_check(emit(s, r.accepted ? 0 : 1, r.accepted ? result : 0, r.key, r.campaign));
+                // Historical r3=0 preserves identity; positive values encode ID+1.
+                irt_check(emit(s, r.accepted ? 0 : 1, r.accepted ? result : 0, reals[3] < 1 ? r.key : reals[3] - 1, r.campaign));
                 if (r.accepted) value = result;
             }
         }
@@ -338,6 +350,11 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
         }
     }
     sigma = s.pending.empty() and s.reads.empty() ? time_domain<time>::infinity : zero;
+    if constexpr (K == event_kind::calendar) if (s.pending.empty())
+        for (const auto& record : s.temporal) if (record.mask and not record.status)
+            sigma = std::min(sigma, record.due - t);
+    if constexpr (K == event_kind::calendar or K == event_kind::temporal_pair)
+        if (s.pending.size() > capacity * 16 + 16) return capacity_error();
     return success();
 }
 
@@ -365,4 +382,6 @@ template struct event_dynamics<event_kind::broadcast>;
 template struct event_dynamics<event_kind::priority>;
 template struct event_dynamics<event_kind::state_observer>;
 template struct event_dynamics<event_kind::group>;
+template struct event_dynamics<event_kind::calendar>;
+template struct event_dynamics<event_kind::temporal_pair>;
 } // namespace irt

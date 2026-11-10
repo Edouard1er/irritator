@@ -1,6 +1,19 @@
 // Included by core.hpp inside namespace irt, before simulation_snapshot.
 // Runtime storage is owned by simulation, never by the model's raw byte buffer.
-enum class event_kind : u8 { tag, memory, numeric, filter, select, aggregate, broadcast, priority, state_observer, group };
+enum class event_kind : u8 { tag, memory, numeric, filter, select, aggregate, broadcast, priority, state_observer, group, calendar, temporal_pair };
+
+// Identified temporal records contain no scientific equation or error metric.
+// The occurrence and its explicit wiring declare the variable, units, model
+// provenance and comparison cohort. IDs remain local to one simulation/reset.
+struct temporal_record {
+    real key = 0, campaign = 0, origin = 0, due = 0;
+    real left = 0, right = 0, assumption = 0, validity = 0;
+    real left_time = 0, right_time = 0, duration = 0;
+    unsigned mask = 0;
+    int status = 0;
+    bool announced = false;
+};
+struct event_context { real date = 0, value = 0; };
 
 struct group_row {
     real scenario = 0, campaign = 0, key = 0, action = 0, value = 0, valid = 1, weight = 1;
@@ -28,6 +41,8 @@ struct event_barrier {
     bool waiting_reported = false;
 };
 struct event_state {
+    vector<temporal_record> temporal;
+    vector<event_context> contexts;
     vector<event_row> rows;
     vector<event_emission> pending;
     vector<event_barrier> barriers;
@@ -44,11 +59,11 @@ struct event_state {
 template<event_kind Kind>
 struct event_dynamics {
     static constexpr auto kind = Kind;
-    static constexpr int inputs = Kind == event_kind::group ? 8 : Kind == event_kind::tag ? 3 :
+    static constexpr int inputs = Kind == event_kind::temporal_pair ? 10 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 8 : Kind == event_kind::tag ? 3 :
       Kind == event_kind::memory or Kind == event_kind::aggregate or Kind == event_kind::state_observer ? 3 :
       Kind == event_kind::select ? 5 : Kind == event_kind::filter ? 6 :
       Kind == event_kind::priority ? 9 : 5;
-    static constexpr int outputs = Kind == event_kind::group ? 10 : Kind == event_kind::tag ? 1 :
+    static constexpr int outputs = Kind == event_kind::temporal_pair ? 6 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 10 : Kind == event_kind::tag ? 1 :
       Kind == event_kind::memory or Kind == event_kind::state_observer ? 2 : Kind == event_kind::numeric or Kind == event_kind::aggregate ? 3 :
       Kind == event_kind::select or Kind == event_kind::priority ? 7 : Kind == event_kind::filter ? 5 : 4;
     input_port x[inputs] = {};
@@ -62,7 +77,9 @@ struct event_dynamics {
     event_dynamics() noexcept
     {
         integers[3] = 128; // maximum simultaneous keyed rows / barriers
+        if constexpr (Kind == event_kind::temporal_pair) { integers[0] = 1; integers[1] = 1; }
         if constexpr (Kind == event_kind::numeric) {
+            reals[3] = -1; // preserve input identity unless explicitly overridden
             integers[1] = 1; // require a; b may use its configured constant
             integers[2] = 1; // compute on input
         }
@@ -95,6 +112,8 @@ using campaign_broadcast = event_dynamics<event_kind::broadcast>;
 using selection_priority = event_dynamics<event_kind::priority>;
 using state_observer = event_dynamics<event_kind::state_observer>;
 using group_aggregate = event_dynamics<event_kind::group>;
+using event_calendar = event_dynamics<event_kind::calendar>;
+using temporal_pair = event_dynamics<event_kind::temporal_pair>;
 
 // Allocation-free validation, usable without the web compiler.
 status validate_structure(const simulation& sim) noexcept;

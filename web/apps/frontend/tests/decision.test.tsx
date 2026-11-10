@@ -18,7 +18,7 @@ import feedback8d from '../../../examples/decision-feedback-minimal-v3.json';
 import feedback8e from '../../../examples/decision-feedback-schaefer-v3.json';
 it('exposes generic decision primitives with editable native defaults', () => {
   const onAdd = vi.fn(); render(<ComponentLibrary catalog={catalog} onAdd={onAdd} onRetry={() => {}} />);
-  for (const type of ['generator', 'event_tag', 'value_memory', 'event_operator', 'candidate_filter', 'candidate_select', 'campaign_aggregate', 'campaign_broadcast', 'selection_priority', 'group_aggregate', 'state_observer', 'zero_order_hold']) {
+  for (const type of ['generator', 'event_tag', 'value_memory', 'event_operator', 'candidate_filter', 'candidate_select', 'campaign_aggregate', 'campaign_broadcast', 'selection_priority', 'group_aggregate', 'state_observer', 'zero_order_hold', 'event_calendar', 'temporal_pair']) {
     fireEvent.click(screen.getByRole('button', { name: `Ajouter ${type}` }));
     const spec = catalog.components.find(c => c.type === type)!;
     expect(onAdd).toHaveBeenLastCalledWith(spec);
