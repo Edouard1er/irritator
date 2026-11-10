@@ -12190,6 +12190,17 @@ inline status simulation::connect(model&       src,
                                   const model& dst,
                                   int          port_dst) noexcept
 {
+    const auto valid_source = dispatch(src, [port_src]<typename D>(const D& dyn) {
+        if constexpr (has_output_port<D>) return port_src >= 0 and port_src < length(dyn.y);
+        else return false;
+    });
+    const auto valid_target = dispatch(dst, [port_dst]<typename D>(const D& dyn) {
+        if constexpr (has_input_port<D>) return port_dst >= 0 and port_dst < length(dyn.x);
+        else return false;
+    });
+    if (not valid_source) return make_error(simulation_errc::output_port_error);
+    if (not valid_target) return make_error(simulation_errc::input_port_error);
+
     if (not is_ports_compatible(src, port_src, dst, port_dst))
         return make_error(simulation_errc::connection_incompatible);
 
@@ -12394,6 +12405,7 @@ inline void simulation::disconnect(model& src,
 
 inline status simulation::initialize() noexcept
 {
+    irt_check(validate_structure(*this));
     last_valid_t = limits.begin();
     t            = limits.begin();
 

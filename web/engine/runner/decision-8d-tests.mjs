@@ -15,7 +15,7 @@ if (process.env.DECISION_8D_HTTP === '1') {
   app = buildApp(readConfig()); await app.listen({ host: '127.0.0.1', port: 0 }); test.after(() => app.close());
 }
 async function run(m, name, expected = 0) {
-  validateRequest(m);
+  if(name==='ambiguous-binding') assert.throws(()=>validateRequest(m),{code:'STRUCTURAL_INCOMPATIBILITY'}); else validateRequest(m);
   const p = spawnSync(runner, [], { input: JSON.stringify(m), encoding: 'utf8', windowsHide: true, timeout: 30000 });
   assert.equal(p.status, expected, p.stdout + p.stderr);
   const result = JSON.parse(p.stdout);

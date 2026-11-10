@@ -105,14 +105,14 @@ export class ProcessEngine implements Engine {
     if (effective.schemaVersion === 3) await this.capabilities(signal);
     const { value, exitCode } = await this.invoke([],JSON.stringify(effective),signal);
     if(exitCode!==0) {
-      const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown } } | null;
+      const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown; diagnostics?: import('../../../../packages/contracts/index.js').StructuralDiagnostic[] } } | null;
       if(!failure || failure.schemaVersion!==1 || failure.status!=='failed' || typeof failure.error?.code!=='string' || typeof failure.error.message!=='string') throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner failed without a valid error envelope',502);
-      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR','DEFINITION_NOT_FOUND','INVALID_EXTERNAL_PORT','INVALID_SCOPE','RECURSIVE_DEFINITION','HIERARCHY_DEPTH','EXPANSION_LIMIT','NATIVE_CONSTRUCTION_ERROR','INVALID_EXPERIMENT','UNSUPPORTED_EXPERIMENT','INVALID_FACTOR','INVALID_SELECTION']);
+      const allowed = new Set(['INVALID_JSON','INVALID_MODEL','UNKNOWN_COMPONENT','INVALID_PARAMETER','INVALID_REFERENCE','INVALID_CONNECTION','INVALID_TIME','INITIALIZATION_ERROR','EXECUTION_ERROR','LIMIT_EXCEEDED','OBSERVATION_ERROR','INTERNAL_ERROR','SERIALIZATION_ERROR','DEFINITION_NOT_FOUND','INVALID_EXTERNAL_PORT','INVALID_SCOPE','RECURSIVE_DEFINITION','HIERARCHY_DEPTH','EXPANSION_LIMIT','NATIVE_CONSTRUCTION_ERROR','INVALID_EXPERIMENT','UNSUPPORTED_EXPERIMENT','INVALID_FACTOR','INVALID_SELECTION','STRUCTURAL_INCOMPATIBILITY']);
       const detail = failure.error;
       if(!allowed.has(detail.code as string) || (detail.message as string).length>1024) throw new ApiError('RUNNER_PROTOCOL_ERROR','Unknown runner error',502);
       const status = detail.code==='LIMIT_EXCEEDED' ? 422 : ['INTERNAL_ERROR','SERIALIZATION_ERROR'].includes(detail.code as string) ? 502 : 422;
       const engine = Number.isInteger(detail.engineCategory) && Number.isInteger(detail.engineCode) ? { engineCategory:Number(detail.engineCategory),engineCode:Number(detail.engineCode) } : undefined;
-      throw new ApiError(detail.code as string,detail.message as string,status,engine);
+      throw new ApiError(detail.code as string,detail.message as string,status,engine,detail.diagnostics);
     }
     return effective.schemaVersion === 3 ? parseWrapperResult(value,effective) : parseResult(value,effective);
   }

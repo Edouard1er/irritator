@@ -8,7 +8,7 @@ const rows=[];
 for(const file of files){
   const a=JSON.parse(readFileSync(resolve(release,file))),b=JSON.parse(readFileSync(resolve(debug,file)));
   assert.deepEqual(a.request,b.request,file+' request');
-  if(file==='unsafe-initialization.json') {assert.notEqual(a.exit,0);assert.notEqual(b.exit,0);assert.equal(a.httpStatus,502);assert.equal(b.httpStatus,502);rows.push({file,globalFailure:true});continue;}
+  if(file==='unsafe-initialization.json') {assert.equal(a.exit,2);assert.equal(b.exit,2);assert.equal(a.httpStatus,422);assert.equal(b.httpStatus,422);assert.equal(a.result.error.code,'STRUCTURAL_INCOMPATIBILITY');assert.deepEqual(a.result,b.result);rows.push({file,rejectedBeforeExecution:true});continue;}
   assert.deepEqual(a.result,b.result,file+' result');assert.equal(a.exit,b.exit,file+' exit');assert.equal(a.httpEqualsNative,true,file+' Release HTTP');assert.equal(b.httpEqualsNative,true,file+' Debug HTTP');
   const log=file.replace('.json','-native.log');
   if(readdirSync(release).includes(log)){

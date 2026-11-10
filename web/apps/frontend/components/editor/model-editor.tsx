@@ -5,7 +5,7 @@ import { Activity, ArrowRight, Check, ChevronDown, CircleHelp, FilePlus2, Folder
 import { validateEditorDocument } from '@/lib/modeling/model';
 import { applyScopeView, coupledSpec, definitions, renameObservationPaths, rootScope, scopeCatalog, scopeView } from '@/lib/modeling/hierarchy';
 import { HierarchyTools } from './hierarchy-tools';
-import type { RunRequest } from '@contracts';
+import { inspectStructure, validateRequest, type RunRequest } from '@contracts';
 import { ClientError, getCatalog, getHealth, runSimulation, errorText, type HttpResult } from '@/lib/api/client';
 import { connectionError, defaultParameters, deserializeModel, edgeId, emptyModel, fingerprint, handleId, nodeRowSpacing, removeComponents, renameComponent, serializeModel, toConnection, uniqueId, type Catalog, type ComponentSpec, type EditorState, type FlowConnection } from '@/lib/modeling/model';
 import { downloadFile, loadWorkspace, saveWorkspace, legacyStorageKey, storageKey } from '@/lib/serialization/workspace';
@@ -116,15 +116,21 @@ function Editor() {
     setTimeout(() => { void flow.fitView({ padding: 0.16, maxZoom: 1 }); }, 80);
     return undefined;
   };
+  const structural = useMemo(() => {
+    try { return inspectStructure(document.request); } catch { return []; }
+  }, [document.request]);
+  const localDiagnostics = structural.filter(d => scopeId === rootScope ? d.definition === null || d.path.includes('/@') || d.path.includes('/') : d.definition === scopeId);
+  const nodeDiagnostic = (id: string) => localDiagnostics.find(d => scopeId === rootScope ? d.path.split('/')[0] === id : d.instance === id);
   const nodes: IrritatorNode[] = useMemo(() => state.request.model.components.map(component => ({
     id: component.id, type: 'irritator', position: state.positions[component.id] ?? { x: 0, y: 0 }, selected: selected === component.id, deletable: !component.id.startsWith('$'), measured: nodeDimensions[component.id],
-    data: { component, spec: componentSpec(component, catalog), observed: state.request.model.observations.some(o => o.component === component.id), prospectiveName: definitions(document.request).find(d => d.id === component.experiment?.definition)?.name, onOpen: component.experiment ? () => navigate(component.experiment!.definition, [...(document.scopeTrail ?? []), component.experiment!.definition]) : component.type.startsWith('coupled:') ? () => navigate(component.type.slice(8), [...(document.scopeTrail ?? []), component.type.slice(8)]) : undefined },
-  })), [state.request.model.components, state.request.model.observations, state.positions, selected, catalog, nodeDimensions, document.scopeTrail]);
+    data: { structuralError: nodeDiagnostic(component.id)?.message, component, spec: componentSpec(component, catalog), observed: state.request.model.observations.some(o => o.component === component.id), prospectiveName: definitions(document.request).find(d => d.id === component.experiment?.definition)?.name, onOpen: component.experiment ? () => navigate(component.experiment!.definition, [...(document.scopeTrail ?? []), component.experiment!.definition]) : component.type.startsWith('coupled:') ? () => navigate(component.type.slice(8), [...(document.scopeTrail ?? []), component.type.slice(8)]) : undefined },
+  })), [state.request.model.components, state.request.model.observations, state.positions, selected, catalog, nodeDimensions, document.scopeTrail, structural]);
   const edges: Edge[] = useMemo(() => state.request.model.connections.map(c => ({
     id: edgeId(c), source: c.from.component, target: c.to.component, sourceHandle: handleId('out', c.from.port), targetHandle: handleId('in', c.to.port),
+    style: localDiagnostics.some(d => d.connection && edgeId(d.connection) === edgeId(c)) ? { stroke: '#c83939', strokeWidth: 3 } : undefined,
     type: 'smoothstep', selected: edgeId(c) === selectedEdge, markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15 },
     ariaLabel: `${c.from.component} sortie ${c.from.port} vers ${c.to.component} entrée ${c.to.port}`,
-  })), [state.request.model.connections, selectedEdge]);
+  })), [state.request.model.connections, selectedEdge, structural, scopeId]);
   const editRequest = (update: (r: RunRequest) => RunRequest) => setState(s => ({ ...s, request: update(s.request) }));
   const addComponent = (spec: ComponentSpec, position?: { x: number; y: number }) => {
     if (state.request.model.components.length >= (state.request.limits?.maxComponents ?? 128)) { setError('LIMIT_EXCEEDED · Limite de composants atteinte.'); return; }
@@ -224,13 +230,18 @@ function Editor() {
       <div className="header-right"><button className={`engine-status ${health}`} title={healthError ?? 'Handshake du runner vérifié ; les tests numériques vérifient les calculs.'} onClick={() => void connectBackend()}><span />{health === 'ready' ? 'Moteur connecté' : health === 'checking' ? 'Vérification…' : 'Moteur indisponible'}<RefreshCw size={12} /></button><button className="primary run-header" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Exécution…' : 'Simuler'}</button><button className="icon-button" aria-label="Aide" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button></div>
     </header>
     <input type="file" ref={fileInput} accept=".json,application/json" className="sr-only" aria-label="Ouvrir un modèle JSON" onChange={e => void openFile(e)} />
-    <div className="model-toolbar"><div><span className="active-view"><Network size={14} />Éditeur de modèle</span><span className="toolbar-subtitle">{document.request.schemaVersion >= 2 ? 'Hiérarchie DEVS / QSS' : 'Graphe atomique · DEVS / QSS'}</span></div><div><span>{nodes.length} composants</span><span className="separator">/</span><span>{edges.length} connexions</span><button className="text-button" onClick={() => setShowConnection(v => !v)} aria-expanded={showConnection}><ArrowRight size={14} />Relier des ports</button><button className="icon-button" aria-label="Ajuster la vue" onClick={() => void flow.fitView({ padding: 0.16, maxZoom: 1 })}><Maximize size={15} /></button></div></div>
+    <div className="model-toolbar"><div><span className="active-view"><Network size={14} />Éditeur de modèle</span><span className="toolbar-subtitle">{document.request.schemaVersion >= 2 ? 'Hiérarchie DEVS / QSS' : 'Graphe atomique · DEVS / QSS'}</span></div><div><button onClick={() => { try { validateRequest(document.request); setError(undefined); setNotice('Validation structurelle réussie.'); } catch (e) { setError(errorText(e)); } }}>Valider le modèle</button><span>{nodes.length} composants</span><span className="separator">/</span><span>{edges.length} connexions</span><button className="text-button" onClick={() => setShowConnection(v => !v)} aria-expanded={showConnection}><ArrowRight size={14} />Relier des ports</button><button className="icon-button" aria-label="Ajuster la vue" onClick={() => void flow.fitView({ padding: 0.16, maxZoom: 1 })}><Maximize size={15} /></button></div></div>
     {document.request.schemaVersion >= 2 && <HierarchyTools request={document.request} active={scopeId} trail={document.scopeTrail ?? []} onNavigate={navigate} onRequest={request => setDocument(s => ({ ...s, request }))} onNotice={setNotice} />}
     {showConnection && <form className="connection-form" onSubmit={e => { e.preventDefault(); const [source, sourceHandle] = from.split('|'), [target, targetHandle] = to.split('|'); connect({ source: source ?? null, target: target ?? null, sourceHandle, targetHandle }); }}>
       <label>Sortie<select aria-label="Port de sortie" value={from} onChange={e => setFrom(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => componentSpec(c, catalog)?.outputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('out', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><ArrowRight size={16} /><label>Entrée<select aria-label="Port d’entrée" value={to} onChange={e => setTo(e.target.value)}><option value="">Choisir…</option>{state.request.model.components.flatMap(c => componentSpec(c, catalog)?.inputs.map(p => <option key={`${c.id}-${p.port}`} value={`${c.id}|${handleId('in', p.port)}`}>{c.id} · {p.name} [{p.port}]</option>) ?? [])}</select></label><button type="submit" disabled={!from || !to}>Créer la connexion</button><button type="button" className="icon-button" aria-label="Fermer les connexions" onClick={() => setShowConnection(false)}><X size={16} /></button>
     </form>}
     {notice && <div className="notice" role="status">{notice}<button aria-label="Fermer le message" onClick={() => setNotice(undefined)}><X size={13} /></button></div>}
     {healthError && <div className="error-banner" role="alert">{healthError} · L’édition reste disponible.</div>}
+    {structural.length > 0 && <div className="error-banner" role="alert" data-testid="structural-diagnostics">
+      {structural.map(d => <div key={d.path+d.code}><strong>{d.code}</strong> · {d.path} · Définition : {d.definition ?? 'racine'} · {d.message} · Attendu : {d.expected}
+        <button onClick={() => { if (d.definition) navigate(d.definition, [d.definition]); setSelected(d.instance); setSelectedEdge(undefined); }}>Voir le composant</button>
+      </div>)}
+    </div>}
     <div className="workspace">
       <ComponentLibrary catalog={nativeCatalog} wrapperAvailable={wrapperAvailable} error={catalogError} definitions={definitions(document.request)} onCreate={createDefinition} onOpen={id => navigate(id, [id])} onInstance={id => { const d = definitions(document.request).find(d => d.id === id); if (d) addComponent(coupledSpec(d)); }} onRetry={() => void connectBackend()} onAdd={addComponent} />
       <main className="canvas" aria-label="Éditeur graphique" onDrop={handleDrop} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}>

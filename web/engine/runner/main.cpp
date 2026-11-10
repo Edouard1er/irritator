@@ -4,6 +4,7 @@
 #include <memory>
 #include <rapidjson/document.h>
 #include <rapidjson/schema.h>
+#include <rapidjson/pointer.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 #include "contracts.hpp"
@@ -28,6 +29,7 @@ using V = rapidjson::Value;
 using D = rapidjson::Document;
 struct failure : std::runtime_error {
     std::string code;
+    std::string diagnostics;
     int category = -1, native = -1;
     failure(std::string c, std::string m) : std::runtime_error(m), code(std::move(c)) {}
 };
@@ -135,9 +137,11 @@ void configure_debug_diagnostics() {
     if(!std::freopen(sink,"w",stream)) fail("INITIALIZATION_ERROR","Cannot configure Debug allocation trace sink");
 #endif
 }
+#include "structural.hpp"
 #include "hierarchy.hpp"
 #include "json_wrapper.hpp"
 D execute(const D& doc,const D& catalog) {
+    structural_validator structure(doc,catalog);structure.run();
     const auto& model=doc["model"];
     const auto& components=model["components"];
     const double start=doc["simulation"]["start"].GetDouble(), end=doc["simulation"]["end"].GetDouble();
@@ -192,6 +196,7 @@ D execute(const D& doc,const D& catalog) {
     std::unique_ptr<json_wrappers> wrappers;
     if(v3) wrappers=std::make_unique<json_wrappers>(doc,catalog);
     else if(hierarchical) hierarchy=std::make_unique<native_hierarchy>(doc,catalog);
+    structure.check_bindings();
     configure_debug_diagnostics();
     std::unique_ptr<irt::simulation> flat;
     if(wrappers) wrappers->build();
@@ -221,7 +226,15 @@ D execute(const D& doc,const D& catalog) {
         observers.push_back(m.obs_id);
     }
     if(wrappers) check(sim.srcs.prepare(),"INITIALIZATION_ERROR","simulation.srcs.prepare");
-    check(sim.initialize(),"INITIALIZATION_ERROR","simulation.initialize");
+    const auto initialized=sim.initialize();
+    if(initialized.has_error()&&wrappers&&initialized.error().cat()==irt::category::simulation&&
+       initialized.error().value()==static_cast<int>(irt::simulation_errc::simulation_wrapper_embedded_simulation_initialization_error)) {
+        // Inspect only owned factor parameters after a cleanly returned child
+        // initialization failure. Never advance that partially prepared child.
+        try { wrappers->audit_parameters(); }
+        catch(failure& error) { error.category=static_cast<int>(initialized.error().cat());error.native=initialized.error().value();throw; }
+    }
+    check(initialized,"INITIALIZATION_ERROR","simulation.initialize");
     if(wrappers) wrappers->audit_initialized();
     unsigned calls=0;
     try {
@@ -315,8 +328,29 @@ int main(int argc,char** argv) {
         rapidjson::SchemaDocument compiled(schema);
         rapidjson::SchemaValidator validator(compiled);
         if(!doc.Accept(validator)) {
-            rapidjson::StringBuffer path; validator.GetInvalidDocumentPointer().StringifyUriFragment(path);
-            fail("INVALID_MODEL",std::string("Schema violation at ")+path.GetString()+" ("+validator.GetInvalidSchemaKeyword()+")");
+            rapidjson::StringBuffer pointer;validator.GetInvalidDocumentPointer().Stringify(pointer);
+            std::string path=pointer.GetString(),code="DOCUMENT_SCHEMA",message="Document violates JSON schema",expected=std::string("JSON schema: ")+validator.GetInvalidSchemaKeyword();
+            std::string definition,instance,parameter;
+            const auto* found=rapidjson::Pointer(path.c_str()).Get(doc);
+            if(const auto pos=path.find("/factors/");pos!=path.npos) {
+                const auto end=path.find('/',pos+9);const auto factor_path=path.substr(0,end);
+                const auto* factor=rapidjson::Pointer(factor_path.c_str()).Get(doc);
+                if(factor&&factor->IsObject()&&factor->HasMember("type")&&(*factor)["type"].IsString()&&factor->HasMember("values")&&(*factor)["values"].IsArray()&&(*factor)["values"].Empty()) {
+                    const auto type=str((*factor)["type"]);
+                    if(type=="fixed"||type=="fixed-add"||type=="fixed-mult") {path=factor_path+"/values";found=&(*factor)["values"];code="FACTOR_DOMAIN";message="Factor domain must be nonempty";expected="nonempty numeric domain";
+                        parameter="factors."+(factor->HasMember("id")&&(*factor)["id"].IsString()?str((*factor)["id"]):factor_path.substr(pos+9))+".values";
+                        const auto owner_end=factor_path.rfind("/experiment/factors/");
+                        if(owner_end!=factor_path.npos)if(const auto* owner=rapidjson::Pointer(factor_path.substr(0,owner_end).c_str()).Get(doc);owner&&owner->IsObject()) {
+                            if(owner->HasMember("id")&&(*owner)["id"].IsString())instance=str((*owner)["id"]);
+                            if(owner->HasMember("experiment")&&(*owner)["experiment"].IsObject()&&(*owner)["experiment"].HasMember("definition")&&(*owner)["experiment"]["definition"].IsString())definition=str((*owner)["experiment"]["definition"]);
+                        }
+                    }
+                }
+            }
+            failure error("INVALID_MODEL","Schema violation at "+path+" ("+validator.GetInvalidSchemaKeyword()+")");
+            D details(rapidjson::kArrayType);auto& a=details.GetAllocator();V item(rapidjson::kObjectType);
+            item.AddMember("code",V(code.c_str(),a),a).AddMember("severity","error",a).AddMember("path",V(path.c_str(),a),a).AddMember("definition",definition.empty()?V():V(definition.c_str(),a),a).AddMember("instance",V(instance.c_str(),a),a).AddMember("connection",V(),a).AddMember("parameter",parameter.empty()?V():V(parameter.c_str(),a),a).AddMember("found",found?V(*found,a):V(),a).AddMember("expected",V(expected.c_str(),a),a).AddMember("message",V(message.c_str(),a),a);
+            details.PushBack(item,a);rapidjson::StringBuffer encoded;rapidjson::Writer<rapidjson::StringBuffer> writer(encoded);details.Accept(writer);error.diagnostics=encoded.GetString();throw error;
         }
         emit(execute(doc,catalog));
         return 0;
@@ -324,6 +358,7 @@ int main(int argc,char** argv) {
         D result(rapidjson::kObjectType); auto& a=result.GetAllocator();
         V error(rapidjson::kObjectType);
         error.AddMember("code",V(f.code.c_str(),a),a).AddMember("message",V(f.what(),a),a);
+        if(!f.diagnostics.empty()) { D details; details.Parse(f.diagnostics.c_str()); error.AddMember("diagnostics",V(details,a),a); }
         if(f.category>=0) { error.AddMember("engineCategory",f.category,a); error.AddMember("engineCode",f.native,a); }
         result.AddMember("schemaVersion",1,a).AddMember("status","failed",a).AddMember("error",error,a);
         emit(result); std::cerr << f.code << ": " << f.what() << '\n'; return 2;

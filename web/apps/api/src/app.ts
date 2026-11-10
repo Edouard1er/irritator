@@ -8,7 +8,7 @@ export function buildApp(config: Config = readConfig(), engine: Engine = new Pro
   const app=Fastify({logger:false,bodyLimit:config.bodyLimit,requestTimeout:config.timeoutMs+5000,
     ajv:{customOptions:{coerceTypes:false,removeAdditional:false,useDefaults:false,strictNumbers:true}}});
   app.setErrorHandler((error,request,reply)=>{
-    if(error instanceof ApiError) return reply.code(error.httpStatus).send({schemaVersion:1,status:'failed',error:{code:error.code,message:error.message,...error.engine},requestId:request.id});
+    if(error instanceof ApiError) return reply.code(error.httpStatus).send({schemaVersion:1,status:'failed',error:{code:error.code,message:error.message,...error.engine,...(error.diagnostics ? {diagnostics:error.diagnostics} : {})},requestId:request.id});
     const err = error as FastifyError;
     const code = err.validation ? 'INVALID_MODEL' : err.code==='FST_ERR_CTP_BODY_TOO_LARGE' ? 'BODY_TOO_LARGE' : err.statusCode===400 ? 'INVALID_JSON' : 'INTERNAL_ERROR';
     const status = err.validation ? 400 : err.statusCode ?? 500;

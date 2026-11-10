@@ -139,6 +139,7 @@ enum class simulation_errc : std::int16_t {
     event_capacity_error,
     event_protocol_error,
     simulation_wrapper_child_budget_error,
+    state_observer_source_error,
 };
 
 enum class project_errc : std::int16_t {
@@ -986,46 +987,60 @@ public:
     template<typename Fn, typename... Args>
     [[nodiscard]] constexpr auto and_then(Fn&& f, Args&&... args) & noexcept
     {
-        if (has_value()) {
+        using invoked = std::invoke_result_t<Fn, Args...>;
+        using result = std::conditional_t<std::is_void_v<invoked>, this_type, invoked>;
+        if (has_error()) return result(storage);
+        if constexpr (std::is_void_v<invoked>) {
             std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
-            return expected<void>();
+            return result();
         } else {
-            return expected<void>(storage);
+            // Never turn a failed preparation into a successful simulation.
+            return std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
         }
     }
 
     template<typename Fn, typename... Args>
-    [[nodiscard]] constexpr auto and_then(Fn&& f,
-                                          Args&&... args) const& noexcept
+    [[nodiscard]] constexpr auto and_then(Fn&& f, Args&&... args) const& noexcept
     {
-        if (has_value()) {
+        using invoked = std::invoke_result_t<Fn, Args...>;
+        using result = std::conditional_t<std::is_void_v<invoked>, this_type, invoked>;
+        if (has_error()) return result(storage);
+        if constexpr (std::is_void_v<invoked>) {
             std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
-            return expected<void>();
+            return result();
         } else {
-            return expected<void>(storage);
+            // Never turn a failed preparation into a successful simulation.
+            return std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
         }
     }
 
     template<typename Fn, typename... Args>
     [[nodiscard]] constexpr auto and_then(Fn&& f, Args&&... args) && noexcept
     {
-        if (has_value()) {
+        using invoked = std::invoke_result_t<Fn, Args...>;
+        using result = std::conditional_t<std::is_void_v<invoked>, this_type, invoked>;
+        if (has_error()) return result(storage);
+        if constexpr (std::is_void_v<invoked>) {
             std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
-            return expected<void>();
+            return result();
         } else {
-            return expected<void>(std::move(storage));
+            // Never turn a failed preparation into a successful simulation.
+            return std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
         }
     }
 
     template<typename Fn, typename... Args>
-    [[nodiscard]] constexpr auto and_then(Fn&& f,
-                                          Args&&... args) const&& noexcept
+    [[nodiscard]] constexpr auto and_then(Fn&& f, Args&&... args) const&& noexcept
     {
-        if (has_value()) {
+        using invoked = std::invoke_result_t<Fn, Args...>;
+        using result = std::conditional_t<std::is_void_v<invoked>, this_type, invoked>;
+        if (has_error()) return result(storage);
+        if constexpr (std::is_void_v<invoked>) {
             std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
-            return expected<void>();
+            return result();
         } else {
-            return expected<void>(std::move(storage));
+            // Never turn a failed preparation into a successful simulation.
+            return std::invoke(std::forward<Fn>(f), std::forward<Args>(args)...);
         }
     }
 

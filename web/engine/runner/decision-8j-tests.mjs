@@ -151,12 +151,13 @@ test('8J structural child errors remain globally fatal in isolation mode',async(
   const m=faultMinimal();const d=m.model.definitions[0];d.components.push(atom('badEnd','event_operator'));d.connections.push(edge('u',0,'badEnd',3));
   const r=await run(m,'structural-child',true);assert.equal(r.error.engineCode,70);
 });
-test('8J a pre-existing unsafe initialization category remains a global process failure, never an isolated result',async()=>{
-  const m=faultMinimal(),d=m.model.definitions[0];d.components.push(atom('badRead','state_observer'));d.connections.push(edge('u',0,'badRead',0));validateRequest(m);
+test('8J unsafe initialization is rejected structurally by 8K, never isolated or run',async()=>{
+  const m=faultMinimal(),d=m.model.definitions[0];d.components.push(atom('badRead','state_observer'));d.connections.push(edge('u',0,'badRead',0));
+  assert.throws(()=>validateRequest(m),{code:'STRUCTURAL_INCOMPATIBILITY'});
   const p=spawnSync(runner,[],{input:JSON.stringify(m),encoding:'utf8',windowsHide:true,timeout:10000});
-  assert.notEqual(p.status,0);assert.equal(p.stdout,'');
-  const proof={request:m,exit:p.status,stdout:p.stdout,stderr:p.stderr};
-  if(app){const res=await fetch(`${app.listeningOrigin}/api/v1/simulations/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(m)});proof.httpStatus=res.status;proof.httpResult=await res.json();assert.equal(res.status,502);assert.equal(proof.httpResult.error.code,'RUNNER_PROTOCOL_ERROR');}
+  assert.equal(p.status,2);const result=JSON.parse(p.stdout);assert.equal(result.error.code,'STRUCTURAL_INCOMPATIBILITY');assert.equal(result.error.diagnostics[0].path,'forecast/@Prospect/badRead');assert.equal(result.resultEvents,undefined);
+  const proof={request:m,result,exit:p.status,stdout:p.stdout,stderr:p.stderr};
+  if(app){const res=await fetch(`${app.listeningOrigin}/api/v1/simulations/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(m)});proof.httpStatus=res.status;const {requestId,...httpResult}=await res.json();proof.httpResult=httpResult;proof.httpEqualsNative=true;assert.equal(res.status,422);assert.deepEqual(httpResult,result);}
   if(dir)writeFileSync(resolve(dir,'unsafe-initialization.json'),JSON.stringify(proof,null,2));
 });
 test('8J parser rejects forged outcomes, missing identity fields, invented interrupted criteria and wrong counts',async()=>{

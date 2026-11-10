@@ -5,16 +5,16 @@ import { Activity, Box, Eye, Sigma, TriangleAlert } from 'lucide-react';
 import type { Component } from '@contracts';
 import { handleId, parameterError, type ComponentSpec } from '@/lib/modeling/model';
 
-export type IrritatorNode = Node<{ component: Component; spec?: ComponentSpec; observed: boolean; onOpen?: () => void; prospectiveName?: string }, 'irritator'>;
+export type IrritatorNode = Node<{ component: Component; spec?: ComponentSpec; observed: boolean; onOpen?: () => void; prospectiveName?: string; structuralError?: string }, 'irritator'>;
 export function IrritatorNodeView({ data, selected }: NodeProps<IrritatorNode>) {
   const { component: c, spec, observed } = data;
   const updateNodeInternals = useUpdateNodeInternals();
   // A restored document may render before the HTTP catalogue. Handle geometry
   // must be measured again even when the node's outer dimensions stay equal.
   useEffect(() => { if (spec) updateNodeInternals(c.id); }, [c.id, spec, updateNodeInternals]);
-  const invalid = !spec || Object.entries(spec.parameters).some(([key, bounds]) => parameterError(c.parameters[key] ?? (spec.required.includes(key) ? NaN : bounds.default ?? NaN), bounds));
+  const invalid = !!data.structuralError || !spec || Object.entries(spec.parameters).some(([key, bounds]) => parameterError(c.parameters[key] ?? (spec.required.includes(key) ? NaN : bounds.default ?? NaN), bounds));
   const rows = Math.max(spec?.inputs.length ?? 0, spec?.outputs.length ?? 0, 1);
-  return <div className={`model-node ${c.experiment ? 'wrapper-node' : ''} ${selected ? 'is-selected' : ''} ${invalid ? 'has-error' : ''}`} data-testid={`node-${c.id}`}>
+  return <div className={`model-node ${c.experiment ? 'wrapper-node' : ''} ${selected ? 'is-selected' : ''} ${invalid ? 'has-error' : ''}`} data-testid={`node-${c.id}`} title={data.structuralError}>
     <div className={`node-header ${spec?.inputs.length === 0 ? 'source' : c.type.includes('sum') ? 'operator' : 'integrator'}`}>
       <span className="node-symbol">{spec?.inputs.length === 0 ? <Box size={15} /> : c.type.includes('sum') ? <Sigma size={17} /> : <Activity size={15} />}</span>
       <strong>{c.id}</strong>{observed && <Eye size={13} aria-label="Observé" />}{invalid && <TriangleAlert size={14} aria-label="Configuration invalide" />}

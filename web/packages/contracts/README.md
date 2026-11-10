@@ -604,3 +604,40 @@ l'autre entrée n'ont aucun jeton et ne passent pas la barrière. Les agrégateu
 stricts gardent l'identité des membres invalides via les facteurs ; validation=1
 reste une réduction explicitement partielle. Les primitives et leurs timings
 historiques restent inchangés.
+
+## Validation structurelle (8K)
+
+`catalog.json` est la source de vérité des types exposés, ports, paramètres
+requis/domaines et `sourceContracts`. Le compilateur C++ consomme ce même
+catalogue embarqué ; TypeScript fournit le retour immédiat dans l'éditeur et
+l'API. La bibliothèque native impose séparément les invariants de ressources.
+Une connexion `state_observer.source` admet zéro ou une source ; si elle existe,
+elle est un qss1_integrator, qss2_integrator ou qss3_integrator. Zéro source
+conserve le protocole historique missing. Les constantes restent autorisées
+sur read/reset et sur les autres entrées qui les acceptent.
+
+Les erreurs préalables ajoutent `error.diagnostics`, une liste ordonnée de :
+`code`, `severity` (error/warning), `path`, `definition`, `instance`,
+`connection`, `parameter`, `found`, `expected`, `message`. Un champ sans objet
+vaut null. Le chemin d'un prospectif est par exemple
+`forecast/@Prospect/deep/inner/readState` ; @ désigne une définition prospective,
+et les autres segments désignent ses occurrences couplées. Une définition
+inutilisée porte `@Definition/...`. Les erreurs sont déterministes ; la première
+incompatibilité est rendue, puis la validation peut être relancée après édition.
+Aucun correctif automatique ne change les équations ou connexions.
+
+Le document qui ne respecte pas le schéma JSON reste HTTP 400/INVALID_MODEL.
+Les contrats de compilation historiques conservent HTTP 400 lors de la
+validation API et HTTP 422 s'ils proviennent du compilateur natif. Une liaison
+native incompatible détectée préalablement vaut HTTP 422/
+STRUCTURAL_INCOMPATIBILITY. Un échec scientifique reste EXECUTION_ERROR/422 ;
+une sortie de processus sans enveloppe reste RUNNER_PROTOCOL_ERROR/502 ; les
+timeouts restent 504. Les catégories ne sont pas fusionnées. Le nouveau code
+natif state_observer_source_error (catégorie simulation=3, code=72) bloque
+initialize avant les mutations et les copies de scénarios. L'erreur reste
+fatale à la préparation, indépendamment de failurePolicy=isolate.
+
+Une boucle de connexions DEVS n'est pas une récursion de définitions. Les
+valeurs dynamiques et trames dynamicPlan restent validées transactionnellement
+pendant l'exécution. La validité structurelle ne garantit ni un résultat fini
+ni la terminaison scientifique : qss3_power(n=2000) reste admis.

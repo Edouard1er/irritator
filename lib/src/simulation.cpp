@@ -250,6 +250,8 @@ static status run_during(embedded_simulation& embed_sims,
 static status embedded_sims_alloc(embedded_simulation& embed_sims,
                                   const sz             nb_sims) noexcept
 {
+    // Reject invalid prototypes before any child copy or initialization.
+    irt_check(validate_structure(embed_sims.sim));
     debug::ensure(nb_sims >= 1);
 
     embed_sims.embedded_sims.clear();

@@ -45,7 +45,13 @@ export function validateEditorDocument(input: unknown): asserts input is RunRequ
   const version = (input as RunRequest | null)?.schemaVersion;
   const check = version === 3 ? checkEditorV3 : version === 2 ? checkEditorV2 : checkEditor;
   if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON : ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
-  if (input.schemaVersion >= 2) { validateHierarchy(input, true); if (input.schemaVersion === 3) validateDependencies(input, true); } else validateGraph(input);
+  if (input.schemaVersion >= 2) { validateHierarchy(input, true); if (input.schemaVersion === 3) validateDependencies(input, true); }
+  else {
+    try { validateGraph(input); } catch (e) {
+      // Source-binding errors remain visible and editable in atomic drafts too.
+      if (!(e instanceof ApiError) || e.code !== 'STRUCTURAL_INCOMPATIBILITY') throw e;
+    }
+  }
 }
 
 export function serializeModel(state: EditorState): RunRequest {
@@ -76,7 +82,12 @@ export function nodeRowSpacing(c: Component, request: RunRequest): number {
 }
 export function deserializeModel(input: unknown, draft = false): EditorState {
   validateEditorDocument(input);
-  if (input.schemaVersion === 3 && !draft) validateRequest(input);
+  if (input.schemaVersion === 3 && !draft) {
+    try { validateRequest(input); } catch (e) {
+      // Keep a schema-valid incompatible graph editable; run/export stay strict.
+      if (!(e instanceof ApiError) || e.code !== 'STRUCTURAL_INCOMPATIBILITY') throw e;
+    }
+  }
   const request = structuredClone(input);
   const positions: Record<string, Position> = {};
   // Deterministic layout, including cyclic graphs: each branch is visited only once.

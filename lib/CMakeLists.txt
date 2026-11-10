@@ -57,7 +57,8 @@ add_library(libirritator STATIC ${public_irritator_header} ${private_irritator_s
 # different definitions after extending its owned tables or dynamics types.
 set_property(SOURCE ${private_irritator_sources} APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/core.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/event.hpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/event.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/error.hpp")
 set_property(SOURCE src/event.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/campaign-event.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/group-event.hpp")

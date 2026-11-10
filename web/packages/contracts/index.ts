@@ -4,11 +4,13 @@ import schemaData from './request.schema.json' with { type: 'json' };
 import schemaV2Data from './request-v2.schema.json' with { type: 'json' };
 import schemaV3Data from './request-v3.schema.json' with { type: 'json' };
 import capabilitiesData from './runner-capabilities.json' with { type: 'json' };
+import { validateStructure, type StructuralDiagnostic } from './structural.js';
+export * from './structural.js';
 import { validateWrapperRequest } from './wrapper-v3.js';
 export * from './wrapper-v3.js';
 
 export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
-export interface ComponentSpec { type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
+export interface ComponentSpec { sourceContracts?: { port: number; types: string[]; maximum: number }[]; type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
 export interface Catalog { schemaVersion: number; adapterVersion: string; engineVersion: string; components: ComponentSpec[] }
 export const catalog = catalogData as unknown as Catalog;
 export const runnerCapabilities = capabilitiesData;
@@ -37,7 +39,7 @@ export interface RunResult {
 }
 export class ApiError extends Error {
   constructor(public readonly code: string, message: string, public readonly httpStatus = 400,
-    public readonly engine?: { engineCategory: number; engineCode: number }) { super(message); }
+    public readonly engine?: { engineCategory: number; engineCode: number }, public readonly diagnostics?: StructuralDiagnostic[]) { super(message); }
 }
 const validate = new Ajv({ strict: true, coerceTypes: false, removeAdditional: false, useDefaults: false }).compile<RunRequest>(requestSchema);
 const validateV2 = new Ajv({ strict: false, coerceTypes: false, removeAdditional: false, useDefaults: false }).compile<RunRequest>(requestV2Schema);
@@ -45,12 +47,30 @@ const validateV3 = new Ajv({ strict: false, strictNumbers: true, coerceTypes: fa
 export function validateRequest(input: unknown): asserts input is RunRequest {
   const version = (input as { schemaVersion?: unknown } | null)?.schemaVersion;
   const check = version === 3 ? validateV3 : version === 2 ? validateV2 : validate;
-  if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON schema: ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
+  if (!check(input)) {
+    const error = check.errors?.[0]; let path = error?.instancePath ?? '';
+    const at = (pointer: string): unknown => pointer.split('/').slice(1).reduce<unknown>((value,part) => value && typeof value === 'object' ? (value as Record<string, unknown>)[part.replace(/~1/g, '/').replace(/~0/g, '~')] : null, input);
+    let definition: string | null = null, instance = '', parameter: string | null = null;
+    let found = at(path), code = 'DOCUMENT_SCHEMA', message = 'Document violates JSON schema', expected = 'JSON schema: '+(error?.keyword ?? '');
+    const factorPath = path.match(/^(.*\/factors\/\d+)/)?.[1], factor = factorPath ? at(factorPath) : undefined;
+    if (factor && typeof factor === 'object' && 'type' in factor && ['fixed','fixed-add','fixed-mult'].includes(String(factor.type)) && 'values' in factor && Array.isArray(factor.values) && factor.values.length === 0) {
+      path = factorPath+'/values'; found = []; code = 'FACTOR_DOMAIN'; message = 'Factor domain must be nonempty'; expected = 'nonempty numeric domain';
+      parameter = 'factors.'+('id' in factor ? String(factor.id) : factorPath?.split('/').at(-1))+'.values';
+      const owner = at(factorPath!.split('/experiment/factors/')[0]!);
+      if (owner && typeof owner === 'object' && 'type' in owner && (owner.type === 'simulation_wrapper' || owner.type === 'coupled')) {
+        if ('id' in owner && typeof owner.id === 'string') instance = owner.id;
+        if ('experiment' in owner && owner.experiment && typeof owner.experiment === 'object' && 'definition' in owner.experiment && typeof owner.experiment.definition === 'string') definition = owner.experiment.definition;
+      }
+    }
+    const diagnostic: StructuralDiagnostic = {code,severity:'error',path,definition,instance,connection:null,parameter,found:found ?? null,expected,message};
+    throw new ApiError('INVALID_MODEL', `JSON schema: ${path} ${code === 'DOCUMENT_SCHEMA' ? error?.message ?? '' : message}`,400,undefined,[diagnostic]);
+  }
   validateGraph(input);
 }
 export function validateGraph(request: RunRequest): void {
-  if (request.schemaVersion === 3) { validateWrapperRequest(request); return; }
-  if (request.schemaVersion === 2) { validateHierarchy(request); return; }
+  validateStructure(request, false);
+  if (request.schemaVersion === 3) { validateWrapperRequest(request); validateStructure(request); return; }
+  if (request.schemaVersion === 2) { validateHierarchy(request); validateStructure(request); return; }
   const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
   const { model, simulation: { start, end } } = request;
   if (!(end > start) || !Number.isFinite(end-start) || end-start > 1e9) fail('INVALID_TIME', 'Expected start < end and horizon <= 1e9');
@@ -88,6 +108,7 @@ export function validateGraph(request: RunRequest): void {
     estimated += Math.ceil((end-start)/o.samplingInterval)+2;
     if (estimated > limits.maxPoints) fail('LIMIT_EXCEEDED','Potential sampling grid exceeds maxPoints (including terminal margin)');
   }
+  validateStructure(request);
 }
 const object = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 export function parseResult(input: unknown, request: RunRequest): RunResult {

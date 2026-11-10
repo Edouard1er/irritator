@@ -95,3 +95,6 @@ using campaign_broadcast = event_dynamics<event_kind::broadcast>;
 using selection_priority = event_dynamics<event_kind::priority>;
 using state_observer = event_dynamics<event_kind::state_observer>;
 using group_aggregate = event_dynamics<event_kind::group>;
+
+// Allocation-free validation, usable without the web compiler.
+status validate_structure(const simulation& sim) noexcept;

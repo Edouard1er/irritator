@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "decision-structural-validation-valid",
+    "definitions": [
+      {
+        "id": "Prospect",
+        "name": "dX/dt = u X",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "X",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 7,
+              "dQ": 0.00001
+            }
+          },
+          {
+            "id": "u",
+            "type": "constant",
+            "parameters": {
+              "value": 0,
+              "offset": 0
+            }
+          },
+          {
+            "id": "criterion",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "readState",
+            "type": "state_observer",
+            "parameters": {
+              "capacity": 128
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "X",
+              "port": 0
+            },
+            "to": {
+              "component": "criterion",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "u",
+              "port": 0
+            },
+            "to": {
+              "component": "criterion",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "criterion",
+              "port": 0
+            },
+            "to": {
+              "component": "X",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "X",
+              "port": 0
+            },
+            "to": {
+              "component": "readState",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "u",
+              "port": 0
+            },
+            "to": {
+              "component": "readState",
+              "port": 1
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "forecast",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Prospect",
+          "simulation": {
+            "start": 0,
+            "end": 2
+          },
+          "run": "complete",
+          "scenarioResults": true,
+          "execution": {
+            "failurePolicy": "isolate",
+            "maxChildRunCalls": 10000,
+            "maxCampaignRunCalls": 100000
+          },
+          "factors": [
+            {
+              "id": "initial",
+              "type": "single",
+              "value": 7,
+              "target": "X",
+              "parameter": "X"
+            },
+            {
+              "id": "control",
+              "type": "fixed",
+              "values": [
+                0,
+                -1
+              ],
+              "target": "u",
+              "parameter": "value"
+            }
+          ],
+          "selections": [
+            {
+              "id": "terminal",
+              "target": "X",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "terminal"
+          }
+        }
+      },
+      {
+        "id": "run1",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "run2",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 3
+        }
+      },
+      {
+        "id": "choose",
+        "type": "candidate_select",
+        "parameters": {
+          "direction": 0,
+          "fallback": 0,
+          "requireAction": 1,
+          "emitFallback": 0,
+          "capacity": 128,
+          "requireSecondary": 0,
+          "secondaryDirection": 0
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run1",
+          "port": 0
+        },
+        "to": {
+          "component": "forecast",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "run2",
+          "port": 0
+        },
+        "to": {
+          "component": "forecast",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 6
+        },
+        "to": {
+          "component": "choose",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 5
+        },
+        "to": {
+          "component": "choose",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "forecast",
+          "port": 7
+        },
+        "to": {
+          "component": "choose",
+          "port": 2
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "choose",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 5
+  }
+}

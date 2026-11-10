@@ -70,6 +70,33 @@ real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
 #include "group-event.hpp"
 } // namespace
 
+status validate_structure(const simulation& sim) noexcept
+{
+    // Use const traversal: validation must not mutate or repair connections.
+    for (const auto& observer : sim.models) {
+        if (observer.type != dynamics_type::state_observer) continue;
+        const auto self = sim.models.get_id(observer);
+        sz bindings = 0;
+        bool supported = true;
+        for (const auto& candidate : sim.models) {
+            dispatch(candidate, [&]<typename D>(const D& dyn) {
+                if constexpr (has_output_port<D>) for (auto port : dyn.y)
+                    sim.for_each(port, [&](const model& dst, int input) {
+                        if (sim.models.get_id(dst) == self and input == 0) {
+                            ++bindings;
+                            supported = supported and (candidate.type == dynamics_type::qss1_integrator or
+                              candidate.type == dynamics_type::qss2_integrator or candidate.type == dynamics_type::qss3_integrator);
+                        }
+                    });
+            });
+        }
+        if (bindings > 1 or not supported)
+            return make_error(simulation_errc::state_observer_source_error);
+    }
+    for (const auto& resource : sim.sims) irt_check(validate_structure(resource.sim));
+    return success();
+}
+
 template<event_kind K>
 status event_dynamics<K>::initialize(simulation& sim) noexcept
 {

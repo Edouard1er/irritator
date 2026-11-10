@@ -1,8 +1,8 @@
-import { catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2 } from '@contracts';
+import { catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2, type StructuralDiagnostic } from '@contracts';
 import type { Catalog } from '@/lib/modeling/model';
 
 export class ClientError extends Error {
-  constructor(public code: string, message: string, public httpStatus = 0, public engine?: { engineCategory?: number; engineCode?: number }) { super(message); }
+  constructor(public code: string, message: string, public httpStatus = 0, public engine?: { engineCategory?: number; engineCode?: number }, public diagnostics?: StructuralDiagnostic[]) { super(message); }
 }
 export type HttpResult = (RunResult | RunResultV2) & { runId: string };
 function canonicalJson(value: unknown): string {
@@ -21,8 +21,8 @@ export async function apiJson(path: string, init?: RequestInit, fetcher: typeof 
   try { body = await response.json(); }
   catch { throw new ClientError(response.ok ? 'RUNNER_PROTOCOL_ERROR' : 'ENGINE_UNAVAILABLE', `Réponse HTTP ${response.status} sans document JSON valide.`, response.status); }
   if (!response.ok) {
-    const error = (body as { error?: { code?: string; message?: string; engineCategory?: number; engineCode?: number } } | null)?.error;
-    throw new ClientError(error?.code ?? 'HTTP_ERROR', error?.message ?? `Erreur HTTP ${response.status}.`, response.status, error);
+    const error = (body as { error?: { code?: string; message?: string; engineCategory?: number; engineCode?: number; diagnostics?: StructuralDiagnostic[] } } | null)?.error;
+    throw new ClientError(error?.code ?? 'HTTP_ERROR', error?.message ?? `Erreur HTTP ${response.status}.`, response.status, error, error?.diagnostics);
   }
   return body;
 }

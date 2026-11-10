@@ -423,7 +423,10 @@
           "maximum": 1,
           "default": 0,
           "description": "Conserver la campagne du message entrant en changeant son identité.",
-          "choices": ["Campagne configurée", "Campagne entrante"]
+          "choices": [
+            "Campagne configurée",
+            "Campagne entrante"
+          ]
         }
       },
       "required": [
@@ -1120,6 +1123,17 @@
         {
           "port": 1,
           "name": "missing"
+        }
+      ],
+      "sourceContracts": [
+        {
+          "port": 0,
+          "types": [
+            "qss1_integrator",
+            "qss2_integrator",
+            "qss3_integrator"
+          ],
+          "maximum": 1
         }
       ]
     },
