@@ -13,7 +13,7 @@
     "test:runner": "node --test engine/runner/tests.mjs",
     "test:integration": "npm run build && node --test dist/apps/api/tests/integration.test.js",
     "test:wrapper-http": "npm run build && node --test dist/apps/api/tests/wrapper-http.test.js",
-    "test:all": "npm run build && node --test engine/runner/tests.mjs engine/runner/wrapper-v3-tests.mjs engine/runner/wrapper-7f-tests.mjs engine/runner/wrapper-7g-tests.mjs engine/runner/decision-tests.mjs engine/runner/decision-8b-tests.mjs engine/runner/decision-8c-tests.mjs engine/runner/decision-8d-tests.mjs engine/runner/decision-8e-tests.mjs engine/runner/decision-8f-tests.mjs engine/runner/decision-8g-tests.mjs engine/runner/decision-8h-tests.mjs engine/runner/decision-8i-tests.mjs engine/runner/decision-8j-tests.mjs engine/runner/structural-tests.mjs engine/runner/decision-8l-tests.mjs engine/runner/decision-8m-tests.mjs dist/apps/api/tests/*.test.js",
+    "test:all": "npm run build && node --test engine/runner/tests.mjs engine/runner/wrapper-v3-tests.mjs engine/runner/wrapper-7f-tests.mjs engine/runner/wrapper-7g-tests.mjs engine/runner/decision-tests.mjs engine/runner/decision-8b-tests.mjs engine/runner/decision-8c-tests.mjs engine/runner/decision-8d-tests.mjs engine/runner/decision-8e-tests.mjs engine/runner/decision-8f-tests.mjs engine/runner/decision-8g-tests.mjs engine/runner/decision-8h-tests.mjs engine/runner/decision-8i-tests.mjs engine/runner/decision-8j-tests.mjs engine/runner/structural-tests.mjs engine/runner/decision-8l-tests.mjs engine/runner/decision-8m-tests.mjs engine/runner/decision-8n-tests.mjs dist/apps/api/tests/*.test.js",
     "test:wrapper-7g": "npm run build && node --test engine/runner/wrapper-7g-tests.mjs",
     "test:wrapper-7f": "npm run build && node --test engine/runner/wrapper-7f-tests.mjs",
     "test:decision": "npm run build && node --test engine/runner/decision-tests.mjs dist/apps/api/tests/decision-http.test.js",
@@ -28,7 +28,8 @@
     "test:decision-8j": "npm run build && node --test engine/runner/decision-8j-tests.mjs",
     "test:structural": "npm run build && node --test engine/runner/structural-tests.mjs",
     "test:decision-8l": "npm run build && node --test engine/runner/decision-8l-tests.mjs",
-    "test:decision-8m": "npm run build && node --test engine/runner/decision-8m-tests.mjs"
+    "test:decision-8m": "npm run build && node --test engine/runner/decision-8m-tests.mjs",
+    "test:decision-8n": "npm run build && node --test engine/runner/decision-8n-tests.mjs"
   },
   "dependencies": {
     "ajv": "8.17.1",
