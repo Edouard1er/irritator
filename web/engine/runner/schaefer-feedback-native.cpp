@@ -65,7 +65,9 @@ int main(int argc, char** argv) {
                         if(path=="decide/deltaC" && p==0) deltas.push_back({m[0],m[1],m[2]});
                         if(path=="synchronize/initValue" && p==0) init_sent[m[2]]=bag;
                         if(path=="plant/modelHalieutique" && t==1) changed_derivative=m[0];
-                        if (path == "plant/observeN" || path == "plant/observeC") {
+                        // The extended request port is transport. Keep the
+                        // existing value/missing scientific assertions intact.
+                        if ((path == "plant/observeN" || path == "plant/observeC") && p < 2) {
                             const auto field = path == "plant/observeN" ? 0 : 1;
                             observed[m[2]][field] = m[0]; read_bags[m[2]][field] = bag;
                             const auto& source = s.models.get(ids.at(field == 0 ? "plant/N" : "plant/C"));

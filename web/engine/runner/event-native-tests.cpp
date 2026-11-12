@@ -30,8 +30,12 @@ auto& tag(irt::simulation& sim, double value, double key, double campaign, doubl
 }
 template<class T> std::vector<emission> execute(irt::simulation& sim, T& observed, int observed_ports = -1)
 {
-    if (observed_ports < 0) observed_ports = static_cast<int>(std::size(observed.y));
-    for (int p = 0; p < std::ssize(observed.y); ++p) {
+    // Preserve the historical value/missing observation interface. The new
+    // observer request port is wired by native preparation, not to a test sink.
+    constexpr bool observer = std::is_same_v<T, irt::state_observer>;
+    const auto sink_ports = observer ? 2 : static_cast<int>(std::size(observed.y));
+    if (observed_ports < 0) observed_ports = sink_ports;
+    for (int p = 0; p < sink_ports; ++p) {
         auto& sink = add<irt::counter>(sim);
         checked(wire(sim, observed, p, sink, 0), "event sink");
     }

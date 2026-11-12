@@ -6,6 +6,7 @@ set(public_irritator_header
     include/irritator/container.hpp
     include/irritator/core.hpp
     include/irritator/event.hpp
+    include/irritator/qss-probe.hpp
     include/irritator/dot-parser.hpp
     include/irritator/error.hpp
     include/irritator/ext.hpp
@@ -58,11 +59,15 @@ add_library(libirritator STATIC ${public_irritator_header} ${private_irritator_s
 set_property(SOURCE ${private_irritator_sources} APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/core.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/event.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/qss-probe.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/irritator/error.hpp")
 set_property(SOURCE src/event.cpp APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/campaign-event.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/group-event.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/temporal-event.hpp")
+set_property(SOURCE src/event.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/observer-couplings.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/state-observer-protocol.hpp")
 add_library(libirritator::libirritator ALIAS libirritator)
 
 target_sources(libirritator

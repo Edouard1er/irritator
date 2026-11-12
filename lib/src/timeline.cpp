@@ -9,6 +9,10 @@ namespace irt {
 
 simulation_snapshot::simulation_snapshot(const simulation& sim) noexcept
   : models{ sim.models }
+  , message_buffer{ sim.message_buffer }
+  , immediate_models{ sim.immediate_models }
+  , active_output_ports{ sim.active_output_ports }
+  , sims{ sim.sims }
   , observers{ sim.observers }
   , nodes{ sim.nodes }
   , output_ports{ sim.output_ports }
@@ -16,12 +20,17 @@ simulation_snapshot::simulation_snapshot(const simulation& sim) noexcept
   , event_states{ sim.event_states }
   , sched{ sim.sched }
   , t{ sim.current_time() }
+  , last_valid_t{ sim.last_time() }
 {}
 
 simulation_snapshot& simulation_snapshot::operator=(
   const simulation& sim) noexcept
 {
     models         = sim.models;
+    message_buffer = sim.message_buffer;
+    immediate_models = sim.immediate_models;
+    active_output_ports = sim.active_output_ports;
+    sims = sim.sims;
     observers      = sim.observers;
     nodes          = sim.nodes;
     output_ports   = sim.output_ports;
@@ -29,6 +38,7 @@ simulation_snapshot& simulation_snapshot::operator=(
     event_states = sim.event_states;
     sched          = sim.sched;
     t              = sim.current_time();
+    last_valid_t   = sim.last_time();
 
     return *this;
 }

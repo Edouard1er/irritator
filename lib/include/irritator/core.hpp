@@ -1911,6 +1911,8 @@ using observers_type = id_data_array<observer,
 /// identifiants.
 #include <irritator/event.hpp>
 
+struct embedded_simulation;
+
 struct simulation_snapshot {
 
     simulation_snapshot() noexcept = default;
@@ -1921,6 +1923,10 @@ struct simulation_snapshot {
     simulation_snapshot& operator=(const simulation& sim) noexcept;
 
     data_array<model, model_id>                              models;
+    vector<message>                                          message_buffer;
+    vector<model_id> immediate_models;
+    vector<output_port_id> active_output_ports;
+    data_array<embedded_simulation, embedded_simulation_id> sims;
     observers_type                                           observers;
     data_array<block_node, block_node_id>                    nodes;
     data_array<output_port, output_port_id>                  output_ports;
@@ -1928,6 +1934,7 @@ struct simulation_snapshot {
     table<model_id, event_state> event_states;
     scheduller<allocator<new_delete_memory_resource>>        sched;
     time                                                     t{};
+    time last_valid_t{};
 };
 
 enum class criteria_type {
@@ -2734,21 +2741,39 @@ inline status send_message(simulation&    sim,
  *
  ****************************************************************************/
 
+template<class Qss>
+status qss_probe_transition(simulation&, Qss&, time, time, time) noexcept;
+template<class Qss>
+status qss_probe_lambda(simulation&, const Qss&) noexcept;
+
 template<std::size_t QssLevel>
 struct abstract_integrator;
 
 template<>
 struct abstract_integrator<1> {
-    input_port     x[2] = {};
-    output_port_id y[1] = {};
+    input_port     x[3] = {};
+    output_port_id y[2] = {};
 
     real dQ;
     real X;
     real q;
     real u;
     time sigma;
+    sz reply_count = 0;
+    time physical_origin = 0;
+    time physical_deadline = time_domain<time>::infinity;
 
-    enum port_name : u8 { port_x_dot, port_reset };
+    time next_event_time(time t) const noexcept { return reply_count ? t : physical_deadline; }
+
+    void physical_schedule(time t) noexcept
+    {
+        physical_origin = t;
+        physical_deadline = t + sigma;
+        if (sigma != 0 and physical_deadline == t)
+            physical_deadline = std::nextafter(t, t + one);
+    }
+
+    enum port_name : u8 { port_x_dot, port_reset, port_probe };
 
     abstract_integrator() = default;
 
@@ -2758,10 +2783,13 @@ struct abstract_integrator<1> {
       , q(other.q)
       , u(other.u)
       , sigma(other.sigma)
+      , reply_count(other.reply_count)
+      , physical_origin(other.physical_origin)
+      , physical_deadline(other.physical_deadline)
     {}
 
     /** @c X and @c dQ are initialized from @c parameters. */
-    status initialize(simulation& /*sim*/) noexcept
+    status initialize(simulation& sim) noexcept
     {
         if (!std::isfinite(X))
             return make_error(simulation_errc::abstract_integrator_x_error);
@@ -2774,6 +2802,8 @@ struct abstract_integrator<1> {
 
         sigma = time_domain<time>::zero;
 
+        reply_count = 0;
+        physical_schedule(sim.current_time());
         return success();
     }
 
@@ -2813,8 +2843,8 @@ struct abstract_integrator<1> {
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
+    status physical_transition(simulation& sim,
+                      time t,
                       time                  e,
                       [[maybe_unused]] time r) noexcept
     {
@@ -2824,27 +2854,49 @@ struct abstract_integrator<1> {
         const auto have_reset_msg = not lst_reset.empty();
         const auto have_msg       = have_x_dot_msg or have_reset_msg;
 
-        if (not have_msg)
-            return internal();
+        // Control transitions never advance the physical polynomial.
+        // Physical transitions keep the exact historical arithmetic.
+        e = t - physical_origin;
+        if (not have_msg) {
+            irt_check(internal());
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_reset_msg)
-            return reset(get_qss_message<1>(lst_reset));
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<1>(lst_reset)));
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_x_dot_msg)
-            return external(e, get_qss_message<1>(lst_x_dot));
+        if (have_x_dot_msg) {
+            irt_check(external(e, get_qss_message<1>(lst_x_dot)));
+            physical_schedule(t);
+            return success();
+        }
 
         return success();
     }
 
+    status transition(simulation& sim, time t, time e, time r) noexcept
+    {
+        return qss_probe_transition(sim, *this, t, e, r);
+    }
+
     status lambda(simulation& sim) noexcept
+    {
+        return qss_probe_lambda(sim, *this);
+    }
+
+    status physical_output(simulation& sim) const noexcept
     {
         return send_message(sim, y[0],
                             is_zero(u) ? q : q + dQ * u / std::abs(u));
     }
 
-    raw_sample observation(time t, time e) const noexcept
+    raw_sample observation(time t, time /*e*/) const noexcept
     {
-        return qss_observation(X, u, t, e);
+        return qss_observation(X, u, t, t - physical_origin);
     }
 };
 
@@ -2856,8 +2908,8 @@ struct abstract_integrator<1> {
 
 template<>
 struct abstract_integrator<2> {
-    input_port     x[2] = {};
-    output_port_id y[1] = {};
+    input_port     x[3] = {};
+    output_port_id y[2] = {};
 
     real dQ;
     real X;
@@ -2866,8 +2918,21 @@ struct abstract_integrator<2> {
     real q;
     real mq;
     time sigma;
+    sz reply_count = 0;
+    time physical_origin = 0;
+    time physical_deadline = time_domain<time>::infinity;
 
-    enum port_name : u8 { port_x_dot, port_reset };
+    time next_event_time(time t) const noexcept { return reply_count ? t : physical_deadline; }
+
+    void physical_schedule(time t) noexcept
+    {
+        physical_origin = t;
+        physical_deadline = t + sigma;
+        if (sigma != 0 and physical_deadline == t)
+            physical_deadline = std::nextafter(t, t + one);
+    }
+
+    enum port_name : u8 { port_x_dot, port_reset, port_probe };
 
     abstract_integrator() = default;
 
@@ -2879,10 +2944,13 @@ struct abstract_integrator<2> {
       , q(other.q)
       , mq(other.mq)
       , sigma(other.sigma)
+      , reply_count(other.reply_count)
+      , physical_origin(other.physical_origin)
+      , physical_deadline(other.physical_deadline)
     {}
 
     /** @c X and @c dQ are initialized from @c parameters. */
-    status initialize(simulation& /*sim*/) noexcept
+    status initialize(simulation& sim) noexcept
     {
         if (!std::isfinite(X))
             return make_error(simulation_errc::abstract_integrator_x_error);
@@ -2897,6 +2965,8 @@ struct abstract_integrator<2> {
 
         sigma = time_domain<time>::zero;
 
+        reply_count = 0;
+        physical_schedule(sim.current_time());
         return success();
     }
 
@@ -2980,8 +3050,8 @@ struct abstract_integrator<2> {
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
+    status physical_transition(simulation& sim,
+                      time t,
                       time                  e,
                       [[maybe_unused]] time r) noexcept
     {
@@ -2991,34 +3061,56 @@ struct abstract_integrator<2> {
         const auto have_reset_msg = not lst_reset.empty();
         const auto have_msg       = have_x_dot_msg or have_reset_msg;
 
-        if (not have_msg)
-            return internal();
+        // Control transitions never advance the physical polynomial.
+        // Physical transitions keep the exact historical arithmetic.
+        e = t - physical_origin;
+        if (not have_msg) {
+            irt_check(internal());
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_reset_msg)
-            return reset(get_qss_message<2>(lst_reset));
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<2>(lst_reset)));
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_x_dot_msg)
-            return external(e, get_qss_message<2>(lst_x_dot));
+        if (have_x_dot_msg) {
+            irt_check(external(e, get_qss_message<2>(lst_x_dot)));
+            physical_schedule(t);
+            return success();
+        }
 
         return success();
     }
 
+    status transition(simulation& sim, time t, time e, time r) noexcept
+    {
+        return qss_probe_transition(sim, *this, t, e, r);
+    }
+
     status lambda(simulation& sim) noexcept
+    {
+        return qss_probe_lambda(sim, *this);
+    }
+
+    status physical_output(simulation& sim) const noexcept
     {
         return send_message(sim, y[0], X + u * sigma + mu * sigma * sigma / two,
                             u + mu * sigma);
     }
 
-    raw_sample observation(time t, time e) const noexcept
+    raw_sample observation(time t, time /*e*/) const noexcept
     {
-        return qss_observation(X, u, mu, t, e);
+        return qss_observation(X, u, mu, t, t - physical_origin);
     }
 };
 
 template<>
 struct abstract_integrator<3> {
-    input_port     x[2] = {};
-    output_port_id y[1] = {};
+    input_port     x[3] = {};
+    output_port_id y[2] = {};
 
     real dQ;
     real X;
@@ -3029,8 +3121,21 @@ struct abstract_integrator<3> {
     real mq;
     real pq;
     time sigma;
+    sz reply_count = 0;
+    time physical_origin = 0;
+    time physical_deadline = time_domain<time>::infinity;
 
-    enum port_name : u8 { port_x_dot, port_reset };
+    time next_event_time(time t) const noexcept { return reply_count ? t : physical_deadline; }
+
+    void physical_schedule(time t) noexcept
+    {
+        physical_origin = t;
+        physical_deadline = t + sigma;
+        if (sigma != 0 and physical_deadline == t)
+            physical_deadline = std::nextafter(t, t + one);
+    }
+
+    enum port_name : u8 { port_x_dot, port_reset, port_probe };
 
     abstract_integrator() = default;
 
@@ -3044,10 +3149,13 @@ struct abstract_integrator<3> {
       , mq(other.mq)
       , pq(other.pq)
       , sigma(other.sigma)
+      , reply_count(other.reply_count)
+      , physical_origin(other.physical_origin)
+      , physical_deadline(other.physical_deadline)
     {}
 
     /** @c X and @c dQ are initialized from @c parameters. */
-    status initialize(simulation& /*sim*/) noexcept
+    status initialize(simulation& sim) noexcept
     {
         if (!std::isfinite(X))
             return make_error(simulation_errc::abstract_integrator_x_error);
@@ -3063,6 +3171,8 @@ struct abstract_integrator<3> {
         pq    = zero;
         sigma = time_domain<time>::zero;
 
+        reply_count = 0;
+        physical_schedule(sim.current_time());
         return success();
     }
 
@@ -3313,8 +3423,8 @@ struct abstract_integrator<3> {
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
+    status physical_transition(simulation& sim,
+                      time t,
                       time                  e,
                       [[maybe_unused]] time r) noexcept
     {
@@ -3324,18 +3434,40 @@ struct abstract_integrator<3> {
         const auto have_reset_msg = not lst_reset.empty();
         const auto have_msg       = have_x_dot_msg or have_reset_msg;
 
-        if (not have_msg)
-            return internal();
+        // Control transitions never advance the physical polynomial.
+        // Physical transitions keep the exact historical arithmetic.
+        e = t - physical_origin;
+        if (not have_msg) {
+            irt_check(internal());
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_reset_msg)
-            return reset(get_qss_message<3>(lst_reset));
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<3>(lst_reset)));
+            physical_schedule(t);
+            return success();
+        }
 
-        if (have_x_dot_msg)
-            return external(e, get_qss_message<3>(lst_x_dot));
+        if (have_x_dot_msg) {
+            irt_check(external(e, get_qss_message<3>(lst_x_dot)));
+            physical_schedule(t);
+            return success();
+        }
         return success();
     }
 
+    status transition(simulation& sim, time t, time e, time r) noexcept
+    {
+        return qss_probe_transition(sim, *this, t, e, r);
+    }
+
     status lambda(simulation& sim) noexcept
+    {
+        return qss_probe_lambda(sim, *this);
+    }
+
+    status physical_output(simulation& sim) const noexcept
     {
         const auto sigma_2 = sigma * sigma;
         const auto sigma_3 = sigma_2 * sigma;
@@ -3346,9 +3478,9 @@ struct abstract_integrator<3> {
           u + mu * sigma + pu * sigma_2, mu / two + pu * sigma);
     }
 
-    raw_sample observation(time t, time e) const noexcept
+    raw_sample observation(time t, time /*e*/) const noexcept
     {
-        return qss_observation(X, u, mu, pu, t, e);
+        return qss_observation(X, u, mu, pu, t, t - physical_origin);
     }
 };
 
@@ -8945,6 +9077,10 @@ concept dynamics = std::is_same_v<Dynamics, event_calendar> or
 struct model {
     real          tl     = zero;
     real          tn     = time_domain<time>::infinity;
+    // NaN opts out: ordinary dynamics retain the historical t + sigma rule.
+    // Opted-in dynamics publish an owned absolute deadline. Control-only
+    // transitions can retain it without a lossy deadline - t round trip.
+    time absolute_tn = std::numeric_limits<time>::quiet_NaN();
     observer_id   obs_id = observer_id{ 0 };
     u32           handle = invalid_heap_handle;
     dynamics_type type   = dynamics_type::constant;
@@ -11798,6 +11934,7 @@ inline simulation::simulation(const simulation& other) noexcept
   , srcs(other.srcs)
   , limits(other.limits)
   , t(other.t.load(std::memory_order_acquire))
+  , last_valid_t(other.last_valid_t)
 {}
 
 inline simulation& simulation::operator=(const simulation& other) noexcept
@@ -11822,6 +11959,7 @@ inline simulation& simulation::operator=(const simulation& other) noexcept
     srcs                = other.srcs;
     limits              = other.limits;
     t                   = other.t.load(std::memory_order_acquire);
+    last_valid_t        = other.last_valid_t;
 
     return *this;
 }
@@ -11830,6 +11968,10 @@ inline simulation& simulation::operator=(
   const simulation_snapshot& snap) noexcept
 {
     models         = snap.models;
+    message_buffer = snap.message_buffer;
+    immediate_models = snap.immediate_models;
+    active_output_ports = snap.active_output_ports;
+    sims = snap.sims;
     observers      = snap.observers;
     nodes          = snap.nodes;
     output_ports   = snap.output_ports;
@@ -11837,6 +11979,7 @@ inline simulation& simulation::operator=(
     event_states = snap.event_states;
     sched          = snap.sched;
     t              = snap.t;
+    last_valid_t   = snap.last_valid_t;
 
     return *this;
 }
@@ -12186,7 +12329,7 @@ inline void simulation::deallocate(model_id id) noexcept
 template<typename Dynamics>
 void simulation::do_deallocate(Dynamics& dyn) noexcept
 {
-    if constexpr (requires { Dynamics::kind; })
+    if constexpr (requires { Dynamics::kind; } or requires { dyn.reply_count; })
         event_states.erase(get_id(dyn));
     if constexpr (has_output_port<Dynamics>) {
         for (const auto y_id : dyn.y) {
@@ -12441,7 +12584,7 @@ inline void simulation::disconnect(model& src,
 
 inline status simulation::initialize() noexcept
 {
-    irt_check(validate_structure(*this));
+    irt_check(materialize_observer_couplings(*this));
     last_valid_t = limits.begin();
     t            = limits.begin();
 
@@ -12489,6 +12632,11 @@ status simulation::make_initialize(model& mdl, Dynamics& dyn, time t) noexcept
 
     mdl.tl     = t;
     mdl.tn     = t + dyn.sigma;
+    mdl.absolute_tn = std::numeric_limits<time>::quiet_NaN();
+    if constexpr (requires { dyn.next_event_time(t); }) {
+        mdl.absolute_tn = dyn.next_event_time(t);
+        mdl.tn = mdl.absolute_tn;
+    }
     mdl.handle = invalid_heap_handle;
 
     sched.alloc(mdl, models.get_id(mdl), mdl.tn);
@@ -12551,9 +12699,15 @@ status simulation::make_transition(model& mdl, Dynamics& dyn, time t) noexcept
     debug::ensure(mdl.tn >= t);
 
     mdl.tl = t;
-    mdl.tn = t + dyn.sigma;
-    if (dyn.sigma != 0 && mdl.tn == t)
-        mdl.tn = std::nextafter(t, t + irt::one);
+    if constexpr (requires { dyn.next_event_time(t); })
+        mdl.absolute_tn = dyn.next_event_time(t);
+    if (not std::isnan(mdl.absolute_tn)) {
+        mdl.tn = mdl.absolute_tn;
+    } else {
+        mdl.tn = t + dyn.sigma;
+        if (dyn.sigma != 0 && mdl.tn == t)
+            mdl.tn = std::nextafter(t, t + irt::one);
+    }
 
     debug::ensure(not sched.is_in_tree(mdl.handle));
     sched.reintegrate(mdl, mdl.tn);
@@ -13014,6 +13168,48 @@ inline model& simulation::clone(const model& mdl) noexcept
         if constexpr (has_output_port<Dynamics>)
             for (int i = 0, e = length(dyn.y); i != e; ++i)
                 dyn.y[i] = undefined<output_port_id>();
+
+        if constexpr (requires { dyn.reply_count; } or
+                      std::is_same_v<Dynamics, state_observer>) {
+            new_mdl.tl = mdl.tl;
+            new_mdl.tn = mdl.tn;
+            new_mdl.absolute_tn = mdl.absolute_tn;
+            // A clone is detached/unscheduled as before, but must own the
+            // runtime command state it will resume after graph preparation.
+            // Copy transport into a separate range before run() can reuse it.
+            sz count = 0;
+            for (const auto& port : src_dyn.x) count += port.size;
+            fatal::ensure(message_buffer.reserve(message_buffer.size() + count));
+            for (int i = 0; i < length(dyn.x); ++i) {
+                const auto old = src_dyn.x[i];
+                dyn.x[i] = old;
+                dyn.x[i].position = static_cast<u32>(message_buffer.size());
+                for (u32 j = 0; j < old.size; ++j) {
+                    const auto msg = message_buffer[old.position + j];
+                    message_buffer.push_back(msg);
+                }
+            }
+            if (const auto* stored = event_states.get(models.get_id(mdl))) {
+                auto owned = *stored;
+                if constexpr (std::is_same_v<Dynamics, state_observer>) {
+                    // Outstanding requests sent by the original owner cannot
+                    // answer the new one. Reissue once using its fresh ID.
+                    owned.pending.erase(std::remove_if(owned.pending.begin(), owned.pending.end(),
+                        [](const auto& p) { return p.port == 2; }), owned.pending.end());
+                    const auto owner = static_cast<real>(models.get_id(new_mdl));
+                    for (const auto& read : owned.observer_reads) if (not read.ready) {
+                        fatal::ensure(owned.pending.reserve(owned.pending.size() + 1));
+                        owned.pending.push_back(event_emission{2, message{read.ticket, owner, 0}});
+                    }
+                    if (not owned.pending.empty()) {
+                        dyn.sigma = zero;
+                        new_mdl.tn = current_time();
+                    }
+                }
+                fatal::ensure(event_states.data.reserve(event_states.size() + 1));
+                event_states.set(models.get_id(new_mdl), owned);
+            }
+        }
     });
 
     return new_mdl;
@@ -13492,6 +13688,8 @@ void output_port::for_each(data_array<model, model_id>&           models,
         }
     }
 }
+
+#include <irritator/qss-probe.hpp>
 
 } // namespace irt
 

@@ -69,34 +69,10 @@ real calculate(i64 op, real a, real b, real epsilon, real lower) noexcept
 #include "campaign-event.hpp"
 #include "group-event.hpp"
 #include "temporal-event.hpp"
+#include "state-observer-protocol.hpp"
 } // namespace
 
-status validate_structure(const simulation& sim) noexcept
-{
-    // Use const traversal: validation must not mutate or repair connections.
-    for (const auto& observer : sim.models) {
-        if (observer.type != dynamics_type::state_observer) continue;
-        const auto self = sim.models.get_id(observer);
-        sz bindings = 0;
-        bool supported = true;
-        for (const auto& candidate : sim.models) {
-            dispatch(candidate, [&]<typename D>(const D& dyn) {
-                if constexpr (has_output_port<D>) for (auto port : dyn.y)
-                    sim.for_each(port, [&](const model& dst, int input) {
-                        if (sim.models.get_id(dst) == self and input == 0) {
-                            ++bindings;
-                            supported = supported and (candidate.type == dynamics_type::qss1_integrator or
-                              candidate.type == dynamics_type::qss2_integrator or candidate.type == dynamics_type::qss3_integrator);
-                        }
-                    });
-            });
-        }
-        if (bindings > 1 or not supported)
-            return make_error(simulation_errc::state_observer_source_error);
-    }
-    for (const auto& resource : sim.sims) irt_check(validate_structure(resource.sim));
-    return success();
-}
+#include "observer-couplings.hpp"
 
 template<event_kind K>
 status event_dynamics<K>::initialize(simulation& sim) noexcept
@@ -127,31 +103,8 @@ status event_dynamics<K>::initialize(simulation& sim) noexcept
     if (not sim.event_states.data.reserve(sim.event_states.size() + 1)) return capacity_error();
     sim.event_states.set(sim.get_id(*this), event_state{});
     auto& s = *sim.event_states.get(sim.get_id(*this));
-    if constexpr (K == event_kind::state_observer) {
-        // The ordinary graph edge into source binds exactly one integrator.
-        // Notifications on this port are ignored: they are quantized outputs,
-        // not an observation of its current continuous state.
-        const auto self = sim.get_id(*this);
-        sz bindings = 0;
-        bool supported = true;
-        for (auto& candidate : sim.models) {
-            dispatch(candidate, [&]<typename D>(D& dyn) {
-                if constexpr (has_output_port<D>) {
-                    for (auto port : dyn.y) if (auto* y = sim.output_ports.try_to_get(port)) {
-                        sim.for_each(*y, [&](const model& dst, int input) {
-                            if (sim.models.get_id(dst) == self and input == 0) {
-                                ++bindings;
-                                s.source = sim.models.get_id(candidate);
-                                supported = supported and (candidate.type == dynamics_type::qss1_integrator or
-                                  candidate.type == dynamics_type::qss2_integrator or candidate.type == dynamics_type::qss3_integrator);
-                            }
-                        });
-                    }
-                }
-            });
-        }
-        if (bindings > 1 or not supported) return protocol_error();
-    }
+    if constexpr (K == event_kind::state_observer)
+        s.source = observer_binding_of(sim, sim.get_id(*this)).source;
     if constexpr (K == event_kind::memory) {
         auto* r = row(s, message{ reals[0], 0, 0 }, sz(integers[3]), reals[0], 0, 1);
         if (not r) return capacity_error();
@@ -170,7 +123,7 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
     if (not storage) return protocol_error();
     auto& s = *storage;
     const auto capacity = sz(integers[3]);
-    if (emitted) {
+    if (emitted or (K == event_kind::state_observer and get_model(*this).tn == t and not s.pending.empty())) {
         const auto& sent = s.pending.front();
         if constexpr (K != event_kind::tag and K != event_kind::memory and K != event_kind::state_observer and K != event_kind::calendar and K != event_kind::temporal_pair) {
             const bool closed = sent.port == (K == event_kind::select or K == event_kind::priority ? 6 : 2);
@@ -185,11 +138,12 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
         s.pending.erase(s.pending.begin()); emitted = false;
     }
     if constexpr (K != event_kind::tag) {
-        constexpr int reset_port = K == event_kind::temporal_pair ? 8 : K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
+        constexpr int reset_port = K == event_kind::state_observer ? 2 : K == event_kind::temporal_pair ? 8 : K == event_kind::select ? 3 : K == event_kind::filter ? 4 : inputs - 1;
         if (not get_message(sim, x[reset_port]).empty()) {
             s.rows.clear(); s.barriers.clear(); s.pending.clear(); s.reads.clear();
             s.groups.clear(); s.closed.clear();
             s.temporal.clear(); s.contexts.clear();
+            s.observer_reads.clear(); // next_ticket deliberately survives reset
             if constexpr (K == event_kind::state_observer) value = 0;
             if constexpr (K == event_kind::memory) {
                 auto* r = row(s, message{ reals[0], 0, 0 }, capacity, reals[0], 0, 1);
@@ -211,27 +165,7 @@ status event_dynamics<K>::transition(simulation& sim, time t, time, time) noexce
     } else if constexpr (K == event_kind::temporal_pair) {
         irt_check(temporal_transition(sim, *this, s, t, capacity));
     } else if constexpr (K == event_kind::state_observer) {
-        // One internal transition after the read bag: concurrent source
-        // transitions from that bag have completed, independent of model order.
-        real current = std::numeric_limits<real>::quiet_NaN();
-        if (not s.reads.empty()) if (const auto* source = sim.models.try_to_get(s.source)) {
-            current = dispatch(*source, [t, source]<typename D>(const D& dyn) -> real {
-                if constexpr (std::is_same_v<D, qss1_integrator> or std::is_same_v<D, qss2_integrator> or std::is_same_v<D, qss3_integrator>)
-                    return dyn.observation(t, t - source->tl).value;
-                else return std::numeric_limits<real>::quiet_NaN();
-            });
-        }
-        for (const auto& read : s.reads) {
-            const bool valid = std::isfinite(current);
-            irt_check(emit(s, valid ? 0 : 1, valid ? current : 0, read[1], read[2]));
-            if (valid) value = current;
-        }
-        s.reads.clear();
-        for (const auto& read : get_message(sim, x[1])) {
-            if (not tagged(read)) return protocol_error();
-            if (s.reads.size() + s.pending.size() >= capacity or not s.reads.reserve(s.reads.size() + 1)) return capacity_error();
-            s.reads.push_back(read);
-        }
+        irt_check(observer_transition(sim, *this, s, capacity));
     } else if constexpr (K == event_kind::memory) {
         // Reset, writes, then reads. Confluent reads see the new value.
         for (const auto& m : get_message(sim, x[0])) {
@@ -368,7 +302,7 @@ status event_dynamics<K>::lambda(simulation& sim) noexcept
     if (not s->pending.empty()) {
         const auto& item = s->pending.front();
         irt_check(send_message(sim, y[item.port], item.value[0], item.value[1], item.value[2]));
-        emitted = true;
+        if constexpr (K != event_kind::state_observer) emitted = true;
     }
     return success();
 }

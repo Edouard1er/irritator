@@ -29,6 +29,12 @@ struct event_row {
     real secondary = 0, identity = 0;
 };
 struct event_emission { int port; message value; };
+struct observer_read {
+    message identity;
+    real ticket = 0;
+    real value = std::numeric_limits<real>::quiet_NaN();
+    bool ready = false;
+};
 struct event_barrier {
     real campaign = 0;
     sz expected = 0;
@@ -46,10 +52,13 @@ struct event_state {
     vector<event_row> rows;
     vector<event_emission> pending;
     vector<event_barrier> barriers;
-    // Observation bindings use model IDs, so simulation copies and snapshots
-    // remain local to their own model storage. No pointers to live dynamics.
+    // Structural binding metadata only. Atomic transitions never dereference
+    // this ID to evaluate another atom's state.
     model_id source = undefined<model_id>();
     vector<message> reads;
+    vector<observer_read> observer_reads;
+    real next_ticket = 0; // monotone across reset; initialization clears transport
+    vector<message> probe_replies;
     vector<group_row> groups;
     // Compact replay protection: consecutive campaigns coalesce. Sparse
     // closed ranges are bounded by the same explicit capacity as live rows.
@@ -59,12 +68,12 @@ struct event_state {
 template<event_kind Kind>
 struct event_dynamics {
     static constexpr auto kind = Kind;
-    static constexpr int inputs = Kind == event_kind::temporal_pair ? 10 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 8 : Kind == event_kind::tag ? 3 :
-      Kind == event_kind::memory or Kind == event_kind::aggregate or Kind == event_kind::state_observer ? 3 :
+    static constexpr int inputs = Kind == event_kind::state_observer ? 4 : Kind == event_kind::temporal_pair ? 10 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 8 : Kind == event_kind::tag ? 3 :
+      Kind == event_kind::memory or Kind == event_kind::aggregate ? 3 :
       Kind == event_kind::select ? 5 : Kind == event_kind::filter ? 6 :
       Kind == event_kind::priority ? 9 : 5;
-    static constexpr int outputs = Kind == event_kind::temporal_pair ? 6 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 10 : Kind == event_kind::tag ? 1 :
-      Kind == event_kind::memory or Kind == event_kind::state_observer ? 2 : Kind == event_kind::numeric or Kind == event_kind::aggregate ? 3 :
+    static constexpr int outputs = Kind == event_kind::state_observer ? 3 : Kind == event_kind::temporal_pair ? 6 : Kind == event_kind::calendar ? 3 : Kind == event_kind::group ? 10 : Kind == event_kind::tag ? 1 :
+      Kind == event_kind::memory ? 2 : Kind == event_kind::numeric or Kind == event_kind::aggregate ? 3 :
       Kind == event_kind::select or Kind == event_kind::priority ? 7 : Kind == event_kind::filter ? 5 : 4;
     input_port x[inputs] = {};
     output_port_id y[outputs] = {};
@@ -117,3 +126,4 @@ using temporal_pair = event_dynamics<event_kind::temporal_pair>;
 
 // Allocation-free validation, usable without the web compiler.
 status validate_structure(const simulation& sim) noexcept;
+status materialize_observer_couplings(simulation& sim) noexcept;
