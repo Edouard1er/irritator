@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { ApiError, catalog, validateRequest, type RunRequest } from '../../../../packages/contracts/index.js';
+import { ApiError, catalog, runnerCapabilities, validateRequest, type RunRequest } from '../../../../packages/contracts/index.js';
 import type { Engine } from '../services/engine.js';
 
 export function routes(app: FastifyInstance, engine: Engine): void {
@@ -24,7 +24,10 @@ export function routes(app: FastifyInstance, engine: Engine): void {
     request.raw.once('aborted',abort); reply.raw.once('close',close);
     try {
       const result = await engine.run(request.body,controller.signal);
-      return { ...result,runId:randomUUID() };
+      const response = { ...result,runId:randomUUID() };
+      if (result.schemaVersion === 2 && result.scenarioTrajectories && Buffer.byteLength(JSON.stringify(response), 'utf8') > runnerCapabilities.wrapper.trajectoryObservations.maxResponseBytes)
+        throw new ApiError('LIMIT_EXCEEDED','HTTP trajectory response exceeds 4 MiB including runId',422);
+      return response;
     } finally {
       request.raw.removeListener('aborted',abort); reply.raw.removeListener('close',close);
     }

@@ -75,7 +75,7 @@ export class ProcessEngine implements Engine {
       await this.describe(signal);
       const { value, exitCode } = await this.invoke(['--capabilities'],'',signal);
       if (exitCode !== 0 || !isDeepStrictEqual(value,runnerCapabilities)) {
-        throw new ApiError('RUNNER_INCOMPATIBLE','Runner lacks the matching JSON v3/result v2 capabilities; rebuild the Test 7F runner with the API',502);
+        throw new ApiError('RUNNER_INCOMPATIBLE','Runner lacks the matching JSON v3/result v2 capabilities; rebuild the Test 8O runner with the API',502);
       }
       return runnerCapabilities;
     } catch (error) {

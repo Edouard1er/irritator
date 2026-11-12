@@ -21,6 +21,8 @@ struct selection_spec {
     irt::criteria_type criterion = irt::criteria_type::max_last;
 };
 struct experiment_spec {
+    std::vector<std::string> trajectory_targets;
+    std::size_t max_trajectory_points = 20000;
     std::vector<factor_spec> factors;
     std::vector<selection_spec> selections;
     std::string primary;

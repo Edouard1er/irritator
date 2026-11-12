@@ -492,3 +492,31 @@ pour la chronologie, les campagnes chevauchantes et les limites.
 Tests : `npm run test:decision-8d` avec `IRRITATOR_RUNNER` configuré ;
 `engine/runner/tests-wrapper/run-8d.ps1 -Configuration Release` ou `Debug`
 reconstruit les bibliothèques et leurs clients avant les non-régressions.
+
+## Test 8O
+
+Après compilation, démarrer l'API avec le runner 8O de même configuration et
+reconstruire le frontend pour négocier les nouvelles capacités. Importer
+`web/examples/test-8o-schaefer-six-trajectories-v3.json`, sélectionner le wrapper
+`prospectives`, puis les composants dans « Observations prospectives ». Exécuter :
+la vue « Trajectoires prospectives » affiche N pour les six scénarios sur le temps
+enfant [0,20]. Cocher C et relancer donne douze séries / 2412 points. Les filtres
+wrapper/campagne/variable/scénario et le CSV de cette vue sont indépendants des
+trajectoires du parent. Pas fixé à 0,1 ; mode complete requis. Voir le contrat
+`packages/contracts/README.md` pour les statuts et les plafonds.
+
+Reproduction Windows (Node 24 et MSVC configurables via les scripts existants) :
+
+```powershell
+./web/engine/runner/tests-wrapper/run-8o.ps1 -Configuration Release
+./web/engine/runner/tests-wrapper/run-8o.ps1 -Configuration Debug
+# depuis web, IRRITATOR_RUNNER pointant vers le binaire voulu :
+npm run test:trajectory-8o
+# depuis web/apps/frontend, serveurs réels déjà lancés :
+npm run typecheck
+npm test
+npm run test:e2e -- trajectory-8o.spec.ts
+```
+
+Les captures et mesures de cette campagne sont sous `build-web-test8o/` ; le
+rapport détaillé est `reports/bstar-generic-components-test-8O.md`.

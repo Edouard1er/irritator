@@ -286,6 +286,12 @@ static status embedded_sims_alloc(embedded_simulation& embed_sims,
               mdl_id, embedded_simulation::embedded_model_observation{});
         }
 
+        for (const auto mdl_id : embed_sims.trajectory_models)
+            if (std::none_of(sim_obs[idx].data.begin(), sim_obs[idx].data.end(),
+                  [&](const auto& entry) { return entry.id == mdl_id; }))
+                sim_obs[idx].data.emplace_back(
+                  mdl_id, embedded_simulation::embedded_model_observation{});
+
         sim_obs[idx].sort();
     }
 
@@ -501,6 +507,13 @@ static status embedded_sims_init(embedded_simulation& embed_sims) noexcept
                   simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
         }
 
+        for (const auto mdl_id : embed_sims.trajectory_models) {
+            auto& mdl = sims[idx].models.get(mdl_id);
+            if (not sims[idx].observers.exists(mdl.obs_id) and
+                sims[idx].observe(mdl, 0.1).has_error())
+                return make_error(simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+        }
+
         if (sims[idx].srcs.prepare().has_error())
             return make_error(
               simulation_errc::
@@ -564,6 +577,19 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     if (not embed_sims)
         return make_error(simulation_errc::simulation_wrapper_source_error);
 
+    if (not embed_sims->trajectory_models.empty()) {
+        if (run != run_type::complete or embed_sims->trajectory_models.size() > 32 or
+            embed_sims->max_trajectory_points < 1 or embed_sims->max_trajectory_points > 20000)
+            return make_error(simulation_errc::simulation_wrapper_parameter_error);
+        for (int i = 0; i < embed_sims->trajectory_models.size(); ++i) {
+            const auto id = embed_sims->trajectory_models[i];
+            if (not embed_sims->sim.models.exists(id) or
+                not dispatch(embed_sims->sim.models.get(id), []<class T>(const T&) { return has_observation_function<T>; }) or
+                std::find(embed_sims->trajectory_models.begin(), embed_sims->trajectory_models.begin() + i, id) != embed_sims->trajectory_models.begin() + i)
+                return make_error(simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+        }
+    }
+
     if (x.size() <= 2)
         return make_error(simulation_errc::simulation_wrapper_input_error);
 
@@ -580,6 +606,9 @@ status simulation_wrapper::initialize(simulation& sim) noexcept
     embed_sims->input_frames.clear();
     embed_sims->dynamic_frames.clear();
     embed_sims->campaign_run_calls = 0;
+    embed_sims->trajectory_snapshots.clear();
+    embed_sims->trajectory_points = 0;
+    embed_sims->trajectory_records = 0;
     if (execution_status != embed_sims->execution.enabled or
         (execution_status and (run != run_type::complete or not scenario_results)) or
         (not execution_status and (embed_sims->execution.isolate or
@@ -739,6 +768,85 @@ static status scenario_response(const embedded_simulation& resource,
         output.emplace_back(event_emission{extra + 4, message{real(count), zero, campaign}});
     }
     output.emplace_back(event_emission{ int(2 * base + 1), message{ real(valid_count), real(count), campaign } });
+    return success();
+}
+
+// Capture at the execution request, before init/reallocation can discard the
+// children. No additional run, finalize or decision event occurs. Failed
+// children may still hold raw samples: drain them at the actual clock without
+// sealing the open endpoint or extending the simulation.
+static status capture_trajectories(embedded_simulation& r, real campaign) noexcept
+{
+    if (r.trajectory_models.empty()) return success();
+    if (r.embedded_sims.size() > 2048 - r.trajectory_records)
+        return make_error(simulation_errc::simulation_wrapper_trajectory_limit_error);
+    r.trajectory_records += r.embedded_sims.size();
+    if (not r.trajectory_snapshots.reserve(r.trajectory_snapshots.size() + r.embedded_sims.size()))
+        return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+    sz index = 0;
+    for (const auto id : r.embedded_sims) {
+        auto& child = r.embedded_sims.get<simulation>(id);
+        const auto& history = r.embedded_sims.get<embedded_simulation::simulation_observation>(id);
+        embedded_simulation::trajectory_snapshot snapshot;
+        snapshot.campaign = campaign;
+        snapshot.scenario = index++;
+        snapshot.outcome = r.embedded_sims.get<embedded_simulation::execution_result>(id).outcome;
+        if (snapshot.outcome == embedded_simulation::scenario_outcome::success)
+            for (const auto selection : r.selections) {
+                const auto* data = history.get(r.selections.get<model_id>(selection));
+                if (not data or data->values.empty())
+                    snapshot.outcome = embedded_simulation::scenario_outcome::unavailable;
+                else if (not std::isfinite(data->compute_result(r.selections.get<criteria_type>(selection))))
+                    snapshot.outcome = embedded_simulation::scenario_outcome::numerical_invalid;
+            }
+        snapshot.start = child.limits.begin();
+        snapshot.end = child.limits.end();
+        snapshot.reached = child.current_time();
+        if (snapshot.outcome != embedded_simulation::scenario_outcome::success)
+            child.tick_resamplers();
+        if (not snapshot.factors.reserve(r.factors.size()) or
+            not snapshot.observations.reserve(r.trajectory_models.size()))
+            return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+        for (const auto factor : r.factors)
+            snapshot.factors.push_back(child.parameters[r.factors.get<model_id>(factor)].reals[0]);
+        for (const auto model : r.trajectory_models) {
+            embedded_simulation::trajectory_series series;
+            series.model = model;
+            bool capacity = true, memory = true, nonfinite = false;
+            const auto copy = [&](const auto& samples) noexcept {
+                if (samples.size() > r.max_trajectory_points - r.trajectory_points) { capacity = false; return; }
+                if (not series.samples.reserve(samples.size())) { memory = false; return; }
+                // A failed numerical scenario may have an invalid suffix. Keep
+                // its finite native prefix and preserve the failure status.
+                for (const auto& sample : samples) {
+                    if (not std::isfinite(sample.t) or not std::isfinite(sample.value)) {
+                        nonfinite = true;
+                        break;
+                    }
+                    series.samples.push_back(sample);
+                }
+                r.trajectory_points += series.samples.size();
+            };
+            if (snapshot.outcome == embedded_simulation::scenario_outcome::success) {
+                if (const auto* data = history.get(model)) copy(data->values);
+            } else {
+                // Budget-isolated children have no criterion history. Read
+                // only the native prefix confirmed at their actual clock.
+                const auto obs_id = child.models.get(model).obs_id;
+                if (const auto* observer = child.observers.try_to_get(obs_id))
+                    observer->read_history([&](const auto& samples, const auto) noexcept { copy(samples); });
+            }
+            if (not capacity) return make_error(simulation_errc::simulation_wrapper_trajectory_limit_error);
+            if (not memory) return make_error(simulation_errc::simulation_wrapper_not_enough_memory);
+            // Additional observations must not reclassify a decision scenario.
+            // Keep an existing isolated outcome; otherwise fail the export
+            // explicitly rather than contradict its successful decision frame.
+            if (nonfinite and snapshot.outcome == embedded_simulation::scenario_outcome::success)
+                return make_error(simulation_errc::simulation_wrapper_embedded_simulation_observation_error);
+            snapshot.observations.push_back(std::move(series));
+        }
+        r.trajectory_snapshots.push_back(std::move(snapshot));
+    }
     return success();
 }
 
@@ -921,6 +1029,7 @@ static status transition_dynamic_plan(simulation_wrapper& wrapper,
         wrapper.state = simulation_wrapper::run_state::finish;
         embedded_simulation::response result{due, {}};
         irt_check(establish_results(resource));
+        irt_check(capture_trajectories(resource, command[2]));
         irt_check(scenario_response(resource, command[2], result.scenarios));
         if (not resource.execution.collect_only) irt_check(compute_response(resource, result.values));
         irt_check(enqueue(std::move(result)));
@@ -1101,10 +1210,12 @@ status simulation_wrapper::transition(simulation& sim,
 
         embedded_simulation::response result{ due, {} };
         irt_check(establish_results(*embed_sims));
-        if (scenario_results) {
+        if (scenario_results or not embed_sims->trajectory_models.empty()) {
             if (campaign >= 9007199254740991ULL)
                 return make_error(simulation_errc::simulation_wrapper_parameter_error);
-            irt_check(scenario_response(*embed_sims, required_inputs ? requested_campaign : real(++campaign), result.scenarios));
+            const auto key = required_inputs ? requested_campaign : real(++campaign);
+            irt_check(capture_trajectories(*embed_sims, key));
+            if (scenario_results) irt_check(scenario_response(*embed_sims, key, result.scenarios));
         }
         if (not embed_sims->execution.collect_only) irt_check(compute_response(*embed_sims, result.values));
         if (not pending_responses.reserve(pending_responses.size() + 1))

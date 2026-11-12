@@ -2435,6 +2435,26 @@ struct embedded_simulation {
     };
     u64 campaign_run_calls = 0;
 
+    // Optional visualization channel. No DEVS ports/events are added. The
+    // adapter drains owned snapshots after each parent bag, before reuse.
+    vector<model_id> trajectory_models;
+    sz max_trajectory_points = 20000;
+    sz trajectory_points = 0;
+    sz trajectory_records = 0;
+    struct trajectory_series {
+        model_id model;
+        vector<resampled_sample> samples;
+    };
+    struct trajectory_snapshot {
+        real campaign = 0;
+        sz scenario = 0;
+        scenario_outcome outcome = scenario_outcome::success;
+        time start = 0, end = 0, reached = 0;
+        vector<real> factors;
+        vector<trajectory_series> observations;
+    };
+    vector<trajectory_snapshot> trajectory_snapshots;
+
     using embedded_simulation_type = id_data_array<
       void,
       sub_id,

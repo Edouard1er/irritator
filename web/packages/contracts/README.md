@@ -641,3 +641,69 @@ Une boucle de connexions DEVS n'est pas une récursion de définitions. Les
 valeurs dynamiques et trames dynamicPlan restent validées transactionnellement
 pendant l'exécution. La validité structurelle ne garantit ni un résultat fini
 ni la terminaison scientifique : qss3_power(n=2000) reste admis.
+
+## Test 8O : trajectoires prospectives natives
+
+`experiment.trajectoryObservations` est un tableau optionnel d'au plus 32
+objets `{ "target": "chemin/atome", "samplingInterval": 0.1 }`. Absence ou
+`[]` conserve l'enveloppe historique. La v1 accepte uniquement le mode
+`complete` et le pas natif 0.1 : le wrapper initialise ses observateurs de
+critères avec ce pas, avec un seul observateur par modèle. Le moteur général
+possède d'autres pas, mais le wrapper n'expose pas de second observateur ni
+de pas indépendant pour un critère et sa trajectoire. Aucun rééchantillonnage
+n'est ajouté au navigateur. Les facteurs single, fixed et random restent
+indépendants de cette option ; `scenarioResults` n'est pas requis.
+
+Le résultat v2 ajoute `scenarioTrajectories` uniquement si une observation
+prospective est demandée. Chaque ligne contient :
+
+- `wrapperId` : chemin d'occurrence complet ; `campaignId` et `scenarioId`
+  identiques aux résultats individuels (candidat natif dense commençant à 0).
+- `status` : `completed`, `numerical-invalid`, `budget-exceeded`, `canceled`
+  ou `unavailable`. Un échec isolé ne devient jamais un succès.
+- `factors` : objet dont les clés sont les identifiants des facteurs, avec les
+  paramètres effectivement appliqués à cet enfant, y compris les plans dynamiques.
+- `start` : origine de l'horloge enfant ; `horizonRequested` : durée du plan
+  effectivement demandé, éventuellement dynamique ; `horizonApplied` : durée
+  réellement atteinte (`child.current_time() - child.limits.begin()`). Ce champ
+  se distingue de l'ancien port 8J `scenario-horizon`, qui annonce la durée
+  configurée. Les échantillons utilisent directement l'horloge enfant, donc
+  `[start, start+horizonApplied]`, indépendamment du temps de publication parent.
+- `observations` : dans l'ordre configuré, objets `component`,
+  `samplingInterval` et `samples:[{time,value}]`. Les points sont ceux des
+  observateurs natifs, avec la fermeture gauche native en H. Les plateaux
+  peuvent être dédupliqués par le moteur : aucune promesse de grille dense
+  pour toute dynamique. Schaefer produit bien une grille de 201 points.
+
+La capture est effectuée lors de la demande d'exécution, avant réutilisation,
+init ou remplacement du plan. Elle possède ses données et n'ajoute aucun
+événement décisionnel. Une demande complete réutilisant les enfants terminés
+possède sa propre identité de campagne et une copie identique des observations.
+Un init peut annuler une publication DEVS différée ; la trajectoire d'un calcul
+qui a effectivement eu lieu reste dans la réponse avec son statut d'exécution.
+Un plan annulé avant exécution ne crée pas de fausse ligne. Un enfant arrêté
+par budget n'est jamais réexécuté pour compléter son historique ; son tampon brut natif est drainé au temps réellement atteint, sans fermeture
+anticipée du point courant ni exécution supplémentaire. Seul le préfixe
+confirmé par le rééchantillonneur natif est publié.
+Un historique numérique invalide conserve son préfixe fini et son statut.
+
+Bornes : `limits.maxTrajectoryPoints` (défaut/plafond 20000), 2048 lignes par
+réponse, 4194304 octets UTF-8 pour l'enveloppe comportant des trajectoires.
+Les estimations de grille conservent une marge terminale de deux points.
+Les critères et trajectoires partagés ne comptent qu'une fois dans les 200000
+points internes ; les 20000 événements de résultats restent un budget distinct.
+La ressource native et le collecteur global contrôlent aussi les captures
+successives. Tout dépassement échoue avec `LIMIT_EXCEEDED` ; aucune troncature
+n'est livrée comme complète. Le serveur peut appliquer des bornes plus basses.
+Les capacités décrivent ces limites et restent négociées exactement.
+
+Le CSV long de l'interface contient
+`wrapperId,campaignId,scenarioId,status,factors,component,time,value` ; `factors`
+est un objet JSON cité selon CSV, ce qui conserve des facteurs arbitraires.
+Les filtres de la vue limitent les séries exportées. Les résultats JSON gardent
+aussi les scénarios sans point, qui ne créent naturellement aucune ligne CSV.
+
+La validation de `start + horizonApplied` utilise une marge limitée à huit
+unités d’arrondi à l’échelle de l’horloge, pour les origines fractionnaires ;
+les temps restent strictement croissants et les valeurs ne sont pas corrigées.
+La borne HTTP de 4 Mio inclut également le `runId` ajouté par Fastify.

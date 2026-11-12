@@ -140,6 +140,7 @@ enum class simulation_errc : std::int16_t {
     event_protocol_error,
     simulation_wrapper_child_budget_error,
     state_observer_source_error,
+    simulation_wrapper_trajectory_limit_error,
 };
 
 enum class project_errc : std::int16_t {

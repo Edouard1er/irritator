@@ -50,6 +50,11 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
         <p className="small">Budgets d’appels natifs des enfants, distincts du parent ; 0 = sans limite supplémentaire. Validité reste 0/1. Cause : 1 succès, 2 numérique invalide, 3 budget dépassé, 4 annulé avant exécution, 5 valeur indisponible. Les ports exposent aussi appels et horizon. Une erreur structurelle reste globale. Sans scénario valide, aucune sortie historique n’est émise ; le mode individuel n’émet aucune sélection interne.</p>
       </>}
     </section>
+    <section className="inspector-section"><h3>Observations prospectives</h3>
+      <p className="small">Trajectoires natives de chaque scénario, en temps enfant. Pas 0,1 · mode complete. Ces observations sont indépendantes des résultats individuels transmis au parent.</p>
+      {atoms.map(a => <label className="checkbox" key={a.path}><input type="checkbox" aria-label={`Observer prospectif ${a.path}`} checked={!!e.trajectoryObservations?.some(o => o.target === a.path)} onChange={event => edit({ ...e, run: 'complete', trajectoryObservations: event.target.checked ? [...(e.trajectoryObservations ?? []), { target: a.path, samplingInterval: .1 }] : e.trajectoryObservations?.filter(o => o.target !== a.path) })} /><span>{a.path} · {a.component.type}</span></label>)}
+      {!atoms.length && <p className="small muted">Choisissez une définition prospective observable.</p>}
+    </section>
     <section className="inspector-section"><h3>Modèle prospectif</h3>
       <label className="field"><span>Définition prospective</span><select aria-label="Définition prospective" value={definition ? e.definition : ''} onChange={event => edit({ ...e, definition: event.target.value })}><option value="">Choisir une définition du document…</option>{request.model.definitions?.map(d => <option key={d.id} value={d.id}>{d.name} ({d.id})</option>)}</select></label>
       <p className="small">{definition?.name ?? `Définition absente : ${e.definition}`}</p><button disabled={!definition} onClick={() => onOpen(e.definition)}>Ouvrir le prospectif</button>

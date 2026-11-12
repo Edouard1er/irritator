@@ -49,7 +49,7 @@ test('real TCP HTTP -> Fastify -> C++ -> libirritator scientific campaign',{time
     const exceeded=await fetch(`${url}/api/v1/simulations/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(budget)});assert.equal(exceeded.status,422);assert.equal((await exceeded.json() as {error:{code:string}}).error.code,'LIMIT_EXCEEDED');
     const invalid=reference();invalid.model.components[0]!.type='unknown';
     const rejected=await fetch(`${url}/api/v1/simulations/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(invalid)});assert.equal(rejected.status,400);
-    const logdir=resolve('../build-web-test4/logs');mkdirSync(logdir,{recursive:true});writeFileSync(resolve(logdir,'http-results.json'),JSON.stringify(evidence,null,2));
+    const logdir=resolve(process.env.IRRITATOR_HTTP_EVIDENCE ? resolve(process.env.IRRITATOR_HTTP_EVIDENCE,'integration') : '../build-web-test4/logs');mkdirSync(logdir,{recursive:true});writeFileSync(resolve(logdir,'http-results.json'),JSON.stringify(evidence,null,2));
   } finally {await app.close();}
 });
 test('real native deadline kills runner',{timeout:10000},async()=>{

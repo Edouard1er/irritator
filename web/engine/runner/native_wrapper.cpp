@@ -127,6 +127,18 @@ std::size_t validate_experiment(const irt::project& pj, const target_table& targ
                                 const experiment_spec& spec)
 {
     const auto f = spec.factors.size(), s = spec.selections.size();
+    require(spec.trajectory_targets.empty() || spec.mode == irt::simulation_wrapper::run_type::complete,
+            "Trajectory observations require complete mode");
+    require(spec.trajectory_targets.size() <= 32 && spec.max_trajectory_points >= 1 && spec.max_trajectory_points <= 20000,
+            "Trajectory configuration exceeds native bounds");
+    std::set<std::string> trajectories;
+    for (const auto& path : spec.trajectory_targets) {
+        require(trajectories.insert(path).second, "Duplicate trajectory target");
+        const auto model = resolve(pj, targets, path).model;
+        require(irt::dispatch(pj.sim.models.get(model), []<class T>(const T&) {
+            return irt::has_observation_function<T>;
+        }), "Trajectory target has no native observation function");
+    }
     require(!spec.execution.enabled || (spec.mode == irt::simulation_wrapper::run_type::complete && spec.scenario_results),
             "Execution control requires complete mode and scenarioResults");
     require(f >= 1 && f <= 10 && s >= 1 && f + s >= 3 && f + s <= 12,
@@ -313,6 +325,10 @@ wrapper_binding bind_wrapper(irt::simulation& parent, irt::model_id model,
                 resource.sim.limits.end() == source.pj.sim.limits.end(), "copy_to changed prototype horizon");
         configure(resource.factors, resource.selections, resource.objective, source.pj, desc.targets, occurrence);
         resource.execution = occurrence.execution;
+        require(resource.trajectory_models.reserve(static_cast<int>(occurrence.trajectory_targets.size())), "Trajectory allocation failed");
+        for (const auto& path : occurrence.trajectory_targets)
+            resource.trajectory_models.push_back(resolve(source.pj, desc.targets, path).model);
+        resource.max_trajectory_points = occurrence.max_trajectory_points;
         if (occurrence.dynamic_plan) {
             resource.dynamic_capacity = std::min(count, occurrence.max_scenarios);
             resource.dynamic_max_horizon = source.pj.sim.limits.end() - source.pj.sim.limits.begin();
@@ -369,6 +385,8 @@ void validate_binding(const irt::simulation& parent, const wrapper_binding& bind
             "Bound port dimensions changed");
     require(resource.factors.size() == spec.factors.size() && resource.selections.size() == spec.selections.size(),
             "Incomplete runtime factors/selections");
+    require(resource.trajectory_models.size() == spec.trajectory_targets.size() && resource.max_trajectory_points == spec.max_trajectory_points,
+            "Runtime trajectory manifest/budget differs from the experiment");
     if (spec.dynamic_plan) require(resource.dynamic_capacity == std::min(binding.scenarios, spec.max_scenarios) &&
             resource.dynamic_capacity > 0 && resource.dynamic_capacity <= 128 &&
             resource.dynamic_max_horizon == resource.sim.limits.end() - resource.sim.limits.begin(),

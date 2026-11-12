@@ -61,13 +61,13 @@ test('synchronous launch failure is an unavailable engine', async () => {
 test('v3 forwards the complete document with all effective limits and leaves input intact', async () => {
   const config=readConfig();
   const { engine, outputs }=fixture('capture-v3', { timeoutMs:5000, engineLimits:{ ...config.engineLimits, maxRunCalls:100 }, maxDepth:4, maxInstances:256,
-    wrapperLimits:{ maxWrappers:6, maxScenarios:16, maxTotalScenarios:50, maxTotalModels:4000, maxTotalConnections:16000, maxInternalPoints:100000, maxResultEvents:100 } });
+    wrapperLimits:{ maxWrappers:6, maxScenarios:16, maxTotalScenarios:50, maxTotalModels:4000, maxTotalConnections:16000, maxInternalPoints:100000, maxResultEvents:100, maxTrajectoryPoints:20000 } });
   const m=wrapperAffine();m.limits={ maxRunCalls:50, maxDepth:3, maxInstances:128, maxWrappers:4, maxScenarios:8, maxTotalScenarios:60, maxTotalModels:3000, maxTotalConnections:32000, maxInternalPoints:80000, maxResultEvents:40 };
   const before=structuredClone(m);
   try {
     await assert.rejects(engine.run(m),errorCode('RUNNER_PROTOCOL_ERROR'));
     const forwarded=JSON.parse(outputs.at(-1)!);
-    assert.deepEqual(forwarded, { ...m, limits:{ ...config.engineLimits, maxRunCalls:50, maxDepth:3, maxInstances:128, maxWrappers:4, maxScenarios:8, maxTotalScenarios:50, maxTotalModels:3000, maxTotalConnections:16000, maxInternalPoints:80000, maxResultEvents:40 } });
+    assert.deepEqual(forwarded, { ...m, limits:{ ...config.engineLimits, maxRunCalls:50, maxDepth:3, maxInstances:128, maxWrappers:4, maxScenarios:8, maxTotalScenarios:50, maxTotalModels:3000, maxTotalConnections:16000, maxInternalPoints:80000, maxResultEvents:40, maxTrajectoryPoints:20000 } });
     assert.deepEqual(m,before);
   } finally { await engine.close(); }
 });

@@ -1,0 +1,1781 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "test-8o-schaefer-six-trajectories",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.0033333333333333335,
+              "offset": 0
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 260,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ]
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        }
+      },
+      {
+        "id": "prospectives",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Schaefer",
+          "simulation": {
+            "start": 0,
+            "end": 20
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "effort",
+              "name": "Effort de pêche E",
+              "target": "E",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                80,
+                150,
+                260
+              ]
+            },
+            {
+              "id": "capturabilite",
+              "name": "Capturabilité q",
+              "target": "q",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                0.0008,
+                0.001
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "Nmin",
+              "name": "Biomasse minimale sur H=20",
+              "target": "N",
+              "criteria": "min"
+            },
+            {
+              "id": "NH",
+              "name": "Biomasse finale N(H)",
+              "target": "N",
+              "criteria": "max-last"
+            },
+            {
+              "id": "CH",
+              "name": "Capture cumulée finale C(H)",
+              "target": "C",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "CH"
+          },
+          "scenarioResults": true,
+          "trajectoryObservations": [
+            {
+              "target": "N",
+              "samplingInterval": 0.1
+            }
+          ]
+        }
+      },
+      {
+        "id": "zeroSelectors",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 0
+        }
+      },
+      {
+        "id": "key_e1",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 0,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "key_e2",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 1,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "key_e3",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 2,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "key_e4",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 3,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "key_e5",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 4,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "key_e6",
+        "type": "event_tag",
+        "parameters": {
+          "identity": 5,
+          "campaign": 1
+        }
+      },
+      {
+        "id": "join_e1_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e1_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e1_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e1_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e1_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e1_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e1_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e1_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e2_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e2_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e2_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e2_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e2_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e2_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e2_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e2_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e3_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e3_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e3_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e3_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e3_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e3_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e3_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e3_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e4_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e4_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e4_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e4_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e4_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e4_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e4_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e4_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e5_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e5_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e5_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e5_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e5_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e5_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e5_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e5_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e6_Nmin",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e6_Nmin",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e6_NH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e6_NH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e6_CH",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e6_CH",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "join_e6_validite",
+        "type": "event_operator",
+        "parameters": {
+          "operation": 0,
+          "left": 0,
+          "right": 0,
+          "epsilon": 0,
+          "required": 3,
+          "automatic": 1,
+          "capacity": 128
+        }
+      },
+      {
+        "id": "e6_validite",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      },
+      {
+        "id": "scenario_cloture",
+        "type": "qss1_sum_2",
+        "parameters": {}
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "prospectives",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e1",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e2",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e3",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e4",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e5",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "zeroSelectors",
+          "port": 0
+        },
+        "to": {
+          "component": "key_e6",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e1_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e1",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e1_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e1_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e1_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e1_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e1",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e1_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e1_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e1_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e1_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e1",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e1_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e1_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e1_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e1_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e1",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e1_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e1_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e1_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e2_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e2",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e2_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e2_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e2_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e2_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e2",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e2_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e2_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e2_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e2_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e2",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e2_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e2_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e2_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e2_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e2",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e2_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e2_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e2_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e3_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e3",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e3_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e3_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e3_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e3_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e3",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e3_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e3_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e3_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e3_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e3",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e3_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e3_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e3_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e3_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e3",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e3_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e3_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e3_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e4_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e4",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e4_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e4_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e4_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e4_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e4",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e4_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e4_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e4_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e4_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e4",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e4_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e4_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e4_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e4_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e4",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e4_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e4_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e4_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e5_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e5",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e5_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e5_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e5_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e5_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e5",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e5_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e5_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e5_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e5_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e5",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e5_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e5_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e5_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e5_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e5",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e5_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e5_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e5_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 8
+        },
+        "to": {
+          "component": "join_e6_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e6",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e6_Nmin",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e6_Nmin",
+          "port": 0
+        },
+        "to": {
+          "component": "e6_Nmin",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 9
+        },
+        "to": {
+          "component": "join_e6_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e6",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e6_NH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e6_NH",
+          "port": 0
+        },
+        "to": {
+          "component": "e6_NH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 10
+        },
+        "to": {
+          "component": "join_e6_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e6",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e6_CH",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e6_CH",
+          "port": 0
+        },
+        "to": {
+          "component": "e6_CH",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 5
+        },
+        "to": {
+          "component": "join_e6_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "key_e6",
+          "port": 0
+        },
+        "to": {
+          "component": "join_e6_validite",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "join_e6_validite",
+          "port": 0
+        },
+        "to": {
+          "component": "e6_validite",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "prospectives",
+          "port": 11
+        },
+        "to": {
+          "component": "scenario_cloture",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "e1_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e1_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e1_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e1_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e2_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e2_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e2_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e2_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e3_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e3_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e3_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e3_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e4_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e4_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e4_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e4_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e5_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e5_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e5_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e5_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e6_Nmin",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e6_NH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e6_CH",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "e6_validite",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "scenario_cloture",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

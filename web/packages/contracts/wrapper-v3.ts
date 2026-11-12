@@ -1,6 +1,6 @@
 import { ApiError, catalog, parseResult, validateHierarchy, type Component, type CoupledDefinition, type RunRequest, type RunResult } from './index.js';
 
-export const wrapperCaps = { maxWrappers: 8, maxScenarios: 128, maxTotalScenarios: 256, maxTotalModels: 8192, maxTotalConnections: 32768, maxInternalPoints: 200000, maxResultEvents: 20000 };
+export const wrapperCaps = { maxWrappers: 8, maxScenarios: 128, maxTotalScenarios: 256, maxTotalModels: 8192, maxTotalConnections: 32768, maxInternalPoints: 200000, maxResultEvents: 20000, maxTrajectoryPoints: 20000 };
 export const randomDistributions = ['uniform-int','uniform-real','bernoulli','binomial','negative-binomial','geometric','poisson','exponential','gamma','weibull','extreme-value','normal','lognormal','chi-squared','cauchy','fisher-f','student-t'] as const;
 export type RandomDistribution = typeof randomDistributions[number];
 export type RandomPlan = { type: 'random' | 'random-add' | 'random-mult'; count: number; distribution: RandomDistribution; reals: [number, number]; ints: [number, number] };
@@ -46,6 +46,7 @@ export type WrapperObjective = { type: OptimizationType } & (
   { method: 'weighted-sum'; primary?: string; weights: number[]; types: OptimizationType[]; norm: 'min-max' | 'z-score' } |
   { method: 'epsilon-constrained'; primary: string; epsilons: number[]; operations: ConstraintOperation[] });
 export interface WrapperExperiment {
+  trajectoryObservations?: { target: string; samplingInterval: number }[];
   execution?: { failurePolicy?: 'fail-fast' | 'isolate'; resultMode?: 'optimize' | 'collect'; maxChildRunCalls?: number; maxCampaignRunCalls?: number };
   dynamicPlan?: boolean;
   scenarioResults?: boolean;
@@ -67,7 +68,74 @@ export function wrapperOutputs(e: WrapperExperiment): WrapperLayout['outputs'] {
   if (e.execution) out.push(...(['scenario-outcome', 'scenario-run-calls', 'scenario-horizon', 'campaign-run-calls', 'campaign-end-total'] as const).map(kind => ({ kind, id: kind })));
   return out.map((p, port) => ({ port, ...p }));
 }
-export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[] }
+export interface ScenarioTrajectory {
+  wrapperId: string; campaignId: number; scenarioId: number;
+  status: 'completed' | 'numerical-invalid' | 'budget-exceeded' | 'canceled' | 'unavailable';
+  factors: Record<string, number>; start: number; horizonRequested: number; horizonApplied: number;
+  observations: RunResult['observations'];
+}
+export interface RunResultV2 extends Omit<RunResult, 'schemaVersion'> { schemaVersion: 2; resultEvents: WrapperEvent[]; wrappers: WrapperLayout[]; scenarioTrajectories?: ScenarioTrajectory[] }
+
+function validateScenarioTrajectories(r: RunResultV2, request: RunRequest, bad: () => never): void {
+  const expected = wrapperOccurrences(request);
+  const enabled = expected.filter(o => o.experiment.trajectoryObservations?.length);
+  if (r.scenarioTrajectories === undefined) { if (enabled.length) bad(); return; }
+  if (!enabled.length || !Array.isArray(r.scenarioTrajectories) || r.scenarioTrajectories.length > 2048 || new TextEncoder().encode(JSON.stringify(r)).length > 4194304) return bad();
+  const identities = new Set<string>(), groups = new Map<string, number[]>();
+  let points = 0;
+  for (const row of r.scenarioTrajectories) {
+    if (!row || typeof row !== 'object') return bad();
+    const occurrence = enabled.find(o => o.component === row.wrapperId);
+    if (!occurrence) return bad();
+    const e = occurrence.experiment;
+    // Reconstructing an endpoint from origin + duration can differ by a few
+    // ulps (e.g. -.1 + (.3 - -.1)). Never relax ordering or sample values.
+    const clockTolerance = 8 * Number.EPSILON * Math.max(1, Math.abs(e.simulation.start), Math.abs(e.simulation.end));
+    const key = JSON.stringify([row.wrapperId, row.campaignId, row.scenarioId]);
+    const group = JSON.stringify([row.wrapperId, row.campaignId]);
+    if (identities.has(key) || !Number.isSafeInteger(row.campaignId) || row.campaignId < 1 || !Number.isSafeInteger(row.scenarioId) || row.scenarioId < 0 || row.scenarioId >= cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios)) return bad();
+    identities.add(key); groups.set(group, [...(groups.get(group) ?? []), row.scenarioId]);
+    if (!['completed','numerical-invalid','budget-exceeded','canceled','unavailable'].includes(row.status) || (!e.execution && ['budget-exceeded','canceled'].includes(row.status))) return bad();
+    if (row.start !== e.simulation.start || !Number.isFinite(row.horizonRequested) || row.horizonRequested <= 0 || row.horizonRequested > e.simulation.end - e.simulation.start + clockTolerance || (!e.dynamicPlan && row.horizonRequested !== e.simulation.end - e.simulation.start) || !Number.isFinite(row.horizonApplied) || row.horizonApplied < 0 || row.horizonApplied > row.horizonRequested || (row.status === 'completed' && row.horizonApplied !== row.horizonRequested)) return bad();
+    if (!row.factors || typeof row.factors !== 'object' || Array.isArray(row.factors) || Object.keys(row.factors).length !== e.factors.length || e.factors.some(f => !Object.hasOwn(row.factors, f.id) || !Number.isFinite(row.factors[f.id]) || Math.abs(row.factors[f.id]!) > 1e12)) return bad();
+    const observations = e.trajectoryObservations!;
+    if (!Array.isArray(row.observations) || row.observations.length !== observations.length) return bad();
+    for (let i = 0; i < observations.length; i++) {
+      const series = row.observations[i], configuration = observations[i]!;
+      if (!series || series.component !== configuration.target || series.samplingInterval !== .1 || !Array.isArray(series.samples) || (row.status === 'completed' && !series.samples.length)) return bad();
+      let previous = -Infinity;
+      for (const sample of series.samples) {
+        if (++points > (request.limits?.maxTrajectoryPoints ?? wrapperCaps.maxTrajectoryPoints) || !sample || !Number.isFinite(sample.time) || !Number.isFinite(sample.value) || sample.time <= previous || sample.time < row.start || sample.time > row.start + row.horizonApplied + clockTolerance) return bad();
+        previous = sample.time;
+      }
+      if (row.status === 'completed' && (series.samples[0]!.time !== row.start || Math.abs(series.samples.at(-1)!.time - (row.start + row.horizonApplied)) > clockTolerance)) return bad();
+    }
+    // Compare with every individual field that was actually published. A
+    // delayed/canceled DEVS response need not have emitted those fields yet.
+    const layout = r.wrappers.find(w => w.component === row.wrapperId)!;
+    for (const event of r.resultEvents.filter(v => v.component === row.wrapperId && v.value[2] === row.campaignId && v.value[1] === row.scenarioId)) {
+      const port = layout.outputs[event.port]!;
+      if (port.kind === 'scenario-factor' && row.factors[port.id] !== event.value[0]) return bad();
+      if (port.kind === 'scenario-status' && event.value[0] !== Number(row.status === 'completed')) return bad();
+      if (port.kind === 'scenario-outcome' && ['','completed','numerical-invalid','budget-exceeded','canceled','unavailable'][event.value[0]] !== row.status) return bad();
+    }
+  }
+  for (const [key, ids] of groups) {
+    const [wrapper, campaign] = JSON.parse(key) as [string, number];
+    ids.sort((a,b) => a-b);
+    if (ids.some((id, i) => id !== i)) return bad();
+    const e = enabled.find(o => o.component === wrapper)!.experiment;
+    const layout = r.wrappers.find(w => w.component === wrapper)!;
+    const close = r.resultEvents.find(v => v.component === wrapper && v.value[2] === campaign && layout.outputs[v.port]?.kind === 'campaign-end');
+    const ready = r.resultEvents.find(v => v.component === wrapper && v.value[2] === campaign && layout.outputs[v.port]?.kind === 'plan-ready');
+    if (ids.length !== (close?.value[1] ?? ready?.value[0] ?? (e.dynamicPlan ? ids.length : cardinality(e, request.limits?.maxScenarios ?? wrapperCaps.maxScenarios)))) return bad();
+  }
+  for (const o of enabled) {
+    const layout = r.wrappers.find(w => w.component === o.component)!;
+    for (const event of r.resultEvents.filter(v => v.component === o.component && layout.outputs[v.port]?.kind === 'campaign-end'))
+      if (!groups.has(JSON.stringify([o.component, event.value[2]]))) return bad();
+  }
+}
 const fail = (code: string, message: string): never => { throw new ApiError(code, message); };
 type Scope = Pick<CoupledDefinition, 'components' | 'connections'>;
 function context(r: RunRequest) {
@@ -169,6 +237,13 @@ export function validateWrapperRequest(r: RunRequest): void {
     const { start, end } = e.simulation;
     if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start) || end - start > 1e9 || !(start + .1 > start) || !(end + .1 > end)) fail('INVALID_TIME', 'Invalid prospective horizon');
     const scope = definition(e.definition), f = e.factors.length, s = e.selections.length;
+    const trajectories = e.trajectoryObservations ?? [];
+    if (trajectories.length && e.run !== 'complete') fail('INVALID_EXPERIMENT', 'Trajectory observations require complete mode');
+    if (new Set(trajectories.map(o => o.target)).size !== trajectories.length) fail('OBSERVATION_ERROR', 'Duplicate trajectory target');
+    for (const o of trajectories) {
+      const atom = target(scope, o.target, 'OBSERVATION_ERROR');
+      if (o.samplingInterval !== .1 || !catalog.components.some(c => c.type === atom.type)) fail('OBSERVATION_ERROR', 'Expected an observable atom and native sampling interval 0.1');
+    }
     if (f < 1 || f > 10 || s < 1 || f + s < 3 || f + s > 12) fail('INVALID_EXPERIMENT', 'Require 1<=F<=10, S>=1, 3<=F+S<=12');
     if (hasWrapper(scope)) fail('UNSUPPORTED_EXPERIMENT', 'Prospective wrappers are outside the validated single-level domain');
     if (new Set(e.factors.map(f => f.id)).size !== f || new Set(e.factors.map(f => f.target)).size !== f) fail('INVALID_FACTOR', 'Duplicate factor id or target');
@@ -195,7 +270,9 @@ export function validateWrapperRequest(r: RunRequest): void {
       const e = o.experiment; validate(e);
       const n = cardinality(e, limits.maxScenarios), g = sizes.get(e.definition)!, ports = (e.dynamicPlan || e.execution) ? wrapperOutputs(e).length : e.factors.length + e.selections.length;
       scenarios += n; models += (n + 1) * g.atoms + ports; edges += (n + 1) * g.connections + ports;
-      points += n * new Set(e.selections.map(s => s.target)).size * (Math.ceil((e.simulation.end - e.simulation.start) / .1) + 2);
+      const grid = Math.ceil((e.simulation.end - e.simulation.start) / .1) + 2;
+      points += n * new Set([...e.selections.map(s => s.target), ...(e.trajectoryObservations ?? []).map(o => o.target)]).size * grid;
+      if (n * (e.trajectoryObservations?.length ?? 0) * grid > limits.maxTrajectoryPoints) fail('LIMIT_EXCEEDED', 'Potential trajectory grid exceeds maxTrajectoryPoints (including terminal margin)');
     }
     if (scenarios > limits.maxTotalScenarios || models > limits.maxTotalModels || edges > limits.maxTotalConnections || points > limits.maxInternalPoints) fail('LIMIT_EXCEEDED', 'Cumulative prospective/scenario resource budget exceeded');
   }
@@ -299,5 +376,6 @@ export function parseWrapperResult(input: unknown, request: RunRequest): RunResu
       }
     }
   }
+  validateScenarioTrajectories(r, request, bad);
   return r;
 }

@@ -79,7 +79,8 @@ test('real TCP HTTP: thirteen types, all six QSS3 operators, v1/v2, parameters a
       evidence.push({ request: r, httpStatus: response.status, result: error });
     }
     assert.deepEqual((await run(example(2))).observations, nested.observations);
-    mkdirSync(resolve('../build-web-test6-1/logs'), { recursive: true });
-    writeFileSync(resolve('../build-web-test6-1/logs/qss3-http.json'), JSON.stringify(evidence, null, 2));
+    const logdir=resolve(process.env.IRRITATOR_HTTP_EVIDENCE ? resolve(process.env.IRRITATOR_HTTP_EVIDENCE,'qss-catalog') : '../build-web-test6-1/logs');
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(resolve(logdir,'qss3-http.json'), JSON.stringify(evidence, null, 2));
   } finally { await app.close(); }
 });

@@ -67,7 +67,8 @@ test('real TCP HTTP v2 scientific oracles, round trips and new atomic types', { 
     assert.deepEqual((await run(product)).observations[0]!.samples, [{ time: 0, value: 6 }]);
     const feedback = example('hierarchy-sum'); feedback.model.connections.push({ from: { component: 'sumB', port: 0 }, to: { component: 'sumA', port: 0 } }); feedback.limits = { maxRunCalls: 20 };
     const failed = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: feedback }); assert.equal(failed.statusCode, 422); assert.equal(failed.json().error.code, 'LIMIT_EXCEEDED');
-    mkdirSync(resolve('../build-web-test6/logs'), { recursive: true }); writeFileSync(resolve('../build-web-test6/logs/hierarchy-http.json'), JSON.stringify(evidence, null, 2));
+    const logdir=resolve(process.env.IRRITATOR_HTTP_EVIDENCE ? resolve(process.env.IRRITATOR_HTTP_EVIDENCE,'hierarchy') : '../build-web-test6/logs');
+    mkdirSync(logdir, { recursive: true }); writeFileSync(resolve(logdir,'hierarchy-http.json'), JSON.stringify(evidence, null, 2));
   } finally { await app.close(); }
 });
 test('HTTP v2 process timeout retains existing error envelope', async () => {

@@ -37,6 +37,8 @@ struct failure : std::runtime_error {
 [[noreturn]] void fail(const char* code, const std::string& message) { throw failure(code,message); }
 void check(irt::status status, const char* code, const char* operation) {
     if (status.has_error()) {
+        if(status.error().cat()==irt::category::simulation && status.error().value()==static_cast<int>(irt::simulation_errc::simulation_wrapper_trajectory_limit_error))
+            fail("LIMIT_EXCEEDED","Native trajectory point/record serialization budget exceeded");
         failure f(code,operation);
         f.category = static_cast<int>(status.error().cat());
         f.native = status.error().value();
@@ -48,6 +50,8 @@ void emit(const V& value) {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     if (!value.Accept(writer)) fail("SERIALIZATION_ERROR","Cannot serialize finite JSON result");
+    if(value.IsObject()&&value.HasMember("scenarioTrajectories")&&buffer.GetSize()+1>4194304)
+        fail("LIMIT_EXCEEDED","Trajectory response exceeds 4 MiB");
     std::cout << buffer.GetString() << '\n';
 }
 void unique_keys(const V& v, unsigned depth=0) {

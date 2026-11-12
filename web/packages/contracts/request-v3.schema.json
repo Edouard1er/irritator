@@ -71,7 +71,7 @@
               },
               "samplingInterval": {
                 "type": "number",
-                "minimum": 1e-06,
+                "minimum": 0.000001,
                 "maximum": 1000000000
               },
               "eventPorts": {
@@ -316,6 +316,11 @@
           "maximum": 200000
         },
         "maxResultEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "maxTrajectoryPoints": {
           "type": "integer",
           "minimum": 1,
           "maximum": 20000
@@ -1111,6 +1116,28 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 1000000000
+            }
+          }
+        },
+        "trajectoryObservations": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "target",
+              "samplingInterval"
+            ],
+            "properties": {
+              "target": {
+                "$ref": "#/definitions/path"
+              },
+              "samplingInterval": {
+                "enum": [
+                  0.1
+                ]
+              }
             }
           }
         }

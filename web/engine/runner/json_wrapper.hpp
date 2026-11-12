@@ -17,6 +17,8 @@ struct json_wrappers {
     std::vector<occurrence> occurrences;
     std::vector<irt_web::wrapper_binding> bindings;
     std::vector<irt_web::output_event> events;
+    std::vector<std::pair<std::size_t,irt::embedded_simulation::trajectory_snapshot>> trajectories;
+    std::size_t trajectory_points = 0;
     unsigned collector_models=0;
 
     const V& definition(const std::string& id) const {
@@ -107,6 +109,19 @@ struct json_wrappers {
             spec.seed=seed;
         }
         const auto& scope=definition(str(e["definition"]));
+        spec.max_trajectory_points=limit(doc,"maxTrajectoryPoints",20000);
+        if(e.HasMember("trajectoryObservations")) {
+            std::set<std::string> seen;
+            for(const auto& o:e["trajectoryObservations"].GetArray()) {
+                const auto path=str(o["target"]);
+                if(!seen.insert(path).second) fail("OBSERVATION_ERROR","Duplicate trajectory target");
+                const auto& atom=target(scope,path,"OBSERVATION_ERROR");
+                if(!registry.contains(str(atom["type"]))) fail("OBSERVATION_ERROR","Trajectory must target an observable atom");
+                if(o["samplingInterval"].GetDouble()!=.1) fail("OBSERVATION_ERROR","Trajectory sampling interval must be 0.1");
+                spec.trajectory_targets.push_back(path);
+            }
+            if(!spec.trajectory_targets.empty()&&spec.mode!=R::complete) fail("INVALID_EXPERIMENT","Trajectory observations require complete mode");
+        }
         const auto f=e["factors"].Size(),s=e["selections"].Size();
         if(f<1||f>10||s<1||f+s<3||f+s>12) fail("INVALID_EXPERIMENT","Require 1<=F<=10, S>=1, 3<=F+S<=12");
         std::set<std::string> names,targets;
@@ -247,9 +262,12 @@ struct json_wrappers {
             total_scenarios+=n; models+=(n+1)*g.atoms+ports; edges+=(n+1)*g.connections+ports;
             std::set<std::string> selected;
             for(const auto& s:o.plan.selections) selected.insert(s.target);
+            for(const auto& path:o.plan.trajectory_targets) selected.insert(path);
             const auto start=e["simulation"]["start"].GetDouble(),end=e["simulation"]["end"].GetDouble();
             if(!(start+.1>start)||!(end+.1>end)) fail("INVALID_TIME","Internal sampling interval cannot advance time");
             points+=n*selected.size()*(std::ceil((end-start)/.1)+2);
+            if(n*o.plan.trajectory_targets.size()*(std::ceil((end-start)/.1)+2)>o.plan.max_trajectory_points)
+                fail("LIMIT_EXCEEDED","Potential trajectory grid exceeds maxTrajectoryPoints (including terminal margin)");
         }
         if(total_scenarios>limit(doc,"maxTotalScenarios",256)||models>limit(doc,"maxTotalModels",8192)||
            edges>limit(doc,"maxTotalConnections",32768)||points>limit(doc,"maxInternalPoints",200000))
@@ -364,6 +382,16 @@ struct json_wrappers {
     void collect(std::size_t bag) {
         audit_parameters();
         auto& sim=parent->project->sim;
+        for(std::size_t i=0;i<bindings.size();++i) {
+            auto& resource=sim.sims.get(bindings[i].resource);
+            for(auto& snapshot:resource.trajectory_snapshots) {
+                if(trajectories.size()>=2048) fail("LIMIT_EXCEEDED","Trajectory record budget exceeded");
+                for(const auto& series:snapshot.observations) trajectory_points+=series.samples.size();
+                if(trajectory_points>unsigned(limit(doc,"maxTrajectoryPoints",20000))) fail("LIMIT_EXCEEDED","Trajectory point budget exceeded");
+                trajectories.emplace_back(i,std::move(snapshot));
+            }
+            resource.trajectory_snapshots.clear();
+        }
         for(const auto& [path,id,port]:event_ports) irt::dispatch(sim.models.get(id),[&]<typename T>(const T& dyn) {
             if constexpr(requires { T::kind; } or std::is_same_v<T,irt::zero_order_hold>) if(std::find(sim.active_output_ports.begin(),sim.active_output_ports.end(),dyn.y[port])!=sim.active_output_ports.end()) {
                 const auto m=sim.output_ports.get(dyn.y[port]).msg;
@@ -411,6 +439,35 @@ struct json_wrappers {
     }
     void append_result(D& result) const {
         auto& a=result.GetAllocator();
+        if(std::any_of(occurrences.begin(),occurrences.end(),[](const auto& o){return !o.plan.trajectory_targets.empty();})) {
+            V rows(rapidjson::kArrayType);
+            const char* statuses[]={"unavailable","completed","numerical-invalid","budget-exceeded","canceled","unavailable"};
+            for(const auto& [index,s]:trajectories) {
+                const auto& o=occurrences.at(index);
+                V row(rapidjson::kObjectType),factors(rapidjson::kObjectType),observations(rapidjson::kArrayType);
+                for(std::size_t j=0;j<o.plan.factors.size();++j) {
+                    V name(o.plan.factors[j].id.c_str(),a); factors.AddMember(name,s.factors[j],a);
+                }
+                for(std::size_t j=0;j<o.plan.trajectory_targets.size();++j) {
+                    V series(rapidjson::kObjectType),samples(rapidjson::kArrayType);
+                    double previous=-std::numeric_limits<double>::infinity();
+                    for(const auto& p:s.observations[j].samples) {
+                        if(!std::isfinite(p.t)||!std::isfinite(p.value)||p.t<s.start||p.t>s.reached||p.t<=previous)
+                            fail("OBSERVATION_ERROR","Invalid native trajectory history");
+                        previous=p.t;
+                        V point(rapidjson::kObjectType);point.AddMember("time",p.t,a).AddMember("value",p.value,a);samples.PushBack(point,a);
+                    }
+                    series.AddMember("component",V(o.plan.trajectory_targets[j].c_str(),a),a).AddMember("samplingInterval",.1,a).AddMember("samples",samples,a);
+                    observations.PushBack(series,a);
+                }
+                row.AddMember("wrapperId",V(o.path.c_str(),a),a).AddMember("campaignId",s.campaign,a).AddMember("scenarioId",static_cast<unsigned>(s.scenario),a)
+                    .AddMember("status",V(statuses[irt::ordinal(s.outcome)],a),a).AddMember("factors",factors,a)
+                    .AddMember("start",s.start,a).AddMember("horizonRequested",s.end-s.start,a).AddMember("horizonApplied",s.reached-s.start,a)
+                    .AddMember("observations",observations,a);
+                rows.PushBack(row,a);
+            }
+            result.AddMember("scenarioTrajectories",rows,a);
+        }
         if(!event_ports.empty()) {
             V values(rapidjson::kArrayType);
             for(const auto& e:model_events) {

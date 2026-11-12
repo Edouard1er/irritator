@@ -140,7 +140,7 @@ export function renameExperimentPaths(before: RunRequest, after: RunRequest, sco
   for (const s of scopes(result)) for (const c of s.components) {
     if (c.experiment) {
       const e = c.experiment;
-      for (const f of [...e.factors, ...e.selections]) f.target = remapPath(before, e.definition, f.target, scope, previous, next);
+      for (const f of [...e.factors, ...e.selections, ...(e.trajectoryObservations ?? [])]) f.target = remapPath(before, e.definition, f.target, scope, previous, next);
     }
     for (const o of c.experimentOverrides ?? []) o.target = remapPath(before, c.definition!, o.target, scope, previous, next);
   }
@@ -152,7 +152,7 @@ export function assertCanRemove(r: RunRequest, scope: string, ids: Set<string>):
     if (s.id === scope && ids.has(c.id)) continue;
     for (const id of ids) {
       const e = c.experiment;
-      if (e && [...e.factors, ...e.selections].some(f => remapPath(r, e.definition, f.target, scope, id, '__removed__') !== f.target))
+      if (e && [...e.factors, ...e.selections, ...(e.trajectoryObservations ?? [])].some(f => remapPath(r, e.definition, f.target, scope, id, '__removed__') !== f.target))
         throw new Error(`${id} est ciblé par l’expérience de ${c.id}. Corrigez ses facteurs/sélections avant la suppression.`);
       if (c.experimentOverrides?.some(o => remapPath(r, c.definition!, o.target, scope, id, '__removed__') !== o.target))
         throw new Error(`${id} est référencé par un plan d’occurrence de ${c.id}. Retirez ce plan avant la suppression.`);

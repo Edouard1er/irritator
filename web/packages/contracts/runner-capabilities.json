@@ -81,8 +81,18 @@
       "maxTotalModels": 8192,
       "maxTotalConnections": 32768,
       "maxInternalPoints": 200000,
-      "maxResultEvents": 20000
+      "maxResultEvents": 20000,
+      "maxTrajectoryPoints": 20000
     },
-    "execution": "native-bag-budgets-completed-criterion-isolation-v1"
+    "execution": "native-bag-budgets-completed-criterion-isolation-v1",
+    "trajectoryObservations": {
+      "samplingInterval": 0.1,
+      "runModes": [
+        "complete"
+      ],
+      "clock": "child-local",
+      "maxRecords": 2048,
+      "maxResponseBytes": 4194304
+    }
   }
 }
