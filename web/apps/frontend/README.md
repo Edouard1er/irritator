@@ -288,3 +288,7 @@ méthodes, les trois familles et les cinq modes. FRONTEND_URL et IRRITATOR_RUNNE
 permettent de choisir les serveurs et le binaire testés ; les preuves sont dans
 build-web-test7f/logs/browser. Pour isoler une campagne des serveurs existants,
 IRRITATOR_API_URL doit être défini avant le build ou le démarrage dev de Next.js.
+
+## Atelier participatif — niveau 1
+
+Voir [l’intégration, le mapping scientifique et la recette](./ATELIER_NIVEAU1.md).

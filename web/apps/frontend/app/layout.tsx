@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import '@xyflow/react/dist/style.css';
 import './globals.css';
+import './workshop.css';
 
 export const metadata: Metadata = {
   title: 'Irritator Web · Atelier de modélisation',

@@ -12,11 +12,11 @@ import { downloadFile, loadWorkspace, saveWorkspace, legacyStorageKey, storageKe
 import { ComponentLibrary } from '@/components/panels/component-library';
 import { Inspector } from '@/components/panels/inspector';
 import { NumberField } from '@/components/panels/number-field';
-import { ResultsPanel } from '@/components/panels/results-panel';
 import { IrritatorNodeView, type IrritatorNode } from '@/components/nodes/irritator-node';
 import { assertCanRemove, componentSpec, newWrapperExperiment, promoteToV3, renameExperimentPaths, updateExperiment, validateDependencies, wrapperPaletteSpec } from '@/lib/modeling/wrapper';
 import { WrapperInspector } from '@/components/panels/wrapper-inspector';
 import { ExperimentOverridesEditor } from '@/components/panels/experiment-overrides';
+import { SimulationWorkspace } from '@/components/simulation/simulation-workspace';
 
 const nodeTypes = { irritator: IrritatorNodeView };
 type Status = 'Prêt' | 'Validation' | 'Exécution' | 'Terminé' | 'Échec';
@@ -32,6 +32,7 @@ function Editor() {
     return applyScopeView(previous, id, typeof update === 'function' ? update(view) : update);
   }), []);
   const [loaded, setLoaded] = useState(false);
+  const [workspace, setWorkspace] = useState<'modeling' | 'simulation'>('modeling');
   const [nativeCatalog, setCatalog] = useState<Catalog>();
   const [wrapperAvailable, setWrapperAvailable] = useState(false);
   const [catalogError, setCatalogError] = useState<string>();
@@ -189,6 +190,7 @@ function Editor() {
   const confirmReplace = () => !dirty || window.confirm('Ce modèle contient des modifications non exportées. Remplacer le modèle courant ?');
   const newModel = () => {
     if (!confirmReplace()) return;
+    setWorkspace('modeling');
     restorationFailed.current = false;
     const next = emptyModel(); setDocument(next); setExported(fingerprint(next.request)); setSelected(undefined); setSelectedEdge(undefined); setResult(undefined); setError(undefined); setStatus('Prêt'); setNotice(undefined); void flow.setViewport(next.viewport);
   };
@@ -198,6 +200,7 @@ function Editor() {
     try {
       if (file.size > 1048576) throw new Error('Fichier trop volumineux (maximum 1 Mio).');
       const next = deserializeModel(JSON.parse(await file.text()));
+      setWorkspace('modeling');
       restorationFailed.current = false;
       setDocument(next); setExported(fingerprint(next.request)); setSelected(undefined); setSelectedEdge(undefined); setResult(undefined); setError(undefined); setStatus('Prêt'); setNotice(`Modèle « ${next.request.model.id} » importé.`); void flow.setViewport(next.viewport);
       setTimeout(() => { void flow.fitView({ padding: 0.16, maxZoom: 1 }); }, 100);
@@ -215,6 +218,7 @@ function Editor() {
       if (request.schemaVersion === 3 && !wrapperAvailable) throw new ClientError('RUNNER_INCOMPATIBLE', 'Reconnectez le moteur pour confirmer les capacités v3.');
       if (!request.model.observations.length) setNotice('Aucune observation sélectionnée : cette exécution ne produira pas de trajectoire.');
       setStatus('Exécution');
+      setWorkspace('simulation');
       const data = await runSimulation(request);
       setResult({ data, fingerprint: fingerprint(request), request }); setStatus('Terminé'); setHealth('ready');
     } catch (e) {
@@ -224,12 +228,14 @@ function Editor() {
     finally { running.current = false; }
   };
 
-  return <div className="workbench">
+  return <div className={`workbench ${workspace}-active`}>
     <header className="app-header"><a className="brand" href="/" onClick={e => e.preventDefault()} aria-label="Irritator Web"><span className="brand-mark"><Network size={21} /></span><strong>Irritator<span>Web</span></strong></a><span className="header-divider" /><label className="model-name"><span className="sr-only">Nom du modèle</span><input value={state.request.model.id} maxLength={64} onChange={e => { const id = e.target.value; setDocument(s => ({ ...s, request: { ...s.request, model: { ...s.request.model, id } } })); }} /><span className={`unsaved-dot ${dirty ? 'visible' : ''}`} title="Modifications non exportées" /></label>
       <nav className="file-actions" aria-label="Fichier"><button onClick={newModel} disabled={busy}><FilePlus2 size={15} />Nouveau</button><button onClick={() => fileInput.current?.click()} disabled={busy}><FolderOpen size={15} />Ouvrir</button><button onClick={exportModel}><Save size={15} />Enregistrer</button></nav>
       <div className="header-right"><button className={`engine-status ${health}`} title={healthError ?? 'Handshake du runner vérifié ; les tests numériques vérifient les calculs.'} onClick={() => void connectBackend()}><span />{health === 'ready' ? 'Moteur connecté' : health === 'checking' ? 'Vérification…' : 'Moteur indisponible'}<RefreshCw size={12} /></button><button className="primary run-header" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Exécution…' : 'Simuler'}</button><button className="icon-button" aria-label="Aide" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button></div>
     </header>
+    <nav className="workspace-navigation" aria-label="Espaces de travail"><button aria-current={workspace === 'modeling' ? 'page' : undefined} aria-controls="modeling-workspace" onClick={() => setWorkspace('modeling')}><Network size={17} />Modélisation</button><button aria-current={workspace === 'simulation' ? 'page' : undefined} aria-controls="simulation-workspace" onClick={() => setWorkspace('simulation')}><Activity size={17} />Simulation</button><span>Construire le modèle · explorer ses résultats</span></nav>
     <input type="file" ref={fileInput} accept=".json,application/json" className="sr-only" aria-label="Ouvrir un modèle JSON" onChange={e => void openFile(e)} />
+    <div id="modeling-workspace" className="modeling-workspace" hidden={workspace !== 'modeling'}>
     <div className="model-toolbar"><div><span className="active-view"><Network size={14} />Éditeur de modèle</span><span className="toolbar-subtitle">{document.request.schemaVersion >= 2 ? 'Hiérarchie DEVS / QSS' : 'Graphe atomique · DEVS / QSS'}</span></div><div><button onClick={() => { try { validateRequest(document.request); setError(undefined); setNotice('Validation structurelle réussie.'); } catch (e) { setError(errorText(e)); } }}>Valider le modèle</button><span>{nodes.length} composants</span><span className="separator">/</span><span>{edges.length} connexions</span><button className="text-button" onClick={() => setShowConnection(v => !v)} aria-expanded={showConnection}><ArrowRight size={14} />Relier des ports</button><button className="icon-button" aria-label="Ajuster la vue" onClick={() => void flow.fitView({ padding: 0.16, maxZoom: 1 })}><Maximize size={15} /></button></div></div>
     {document.request.schemaVersion >= 2 && <HierarchyTools request={document.request} active={scopeId} trail={document.scopeTrail ?? []} onNavigate={navigate} onRequest={request => setDocument(s => ({ ...s, request }))} onNotice={setNotice} />}
     {showConnection && <form className="connection-form" onSubmit={e => { e.preventDefault(); const [source, sourceHandle] = from.split('|'), [target, targetHandle] = to.split('|'); connect({ source: source ?? null, target: target ?? null, sourceHandle, targetHandle }); }}>
@@ -271,7 +277,8 @@ function Editor() {
         extra={selectedComponent?.type.startsWith('coupled:') && document.request.schemaVersion === 3 ? <ExperimentOverridesEditor component={selectedComponent} request={document.request} onChange={experimentOverrides => editRequest(r => ({ ...r, model: { ...r.model, components: r.model.components.map(c => { if (c.id !== selected) return c; const { experimentOverrides: old, ...rest } = c; return experimentOverrides.length ? { ...rest, experimentOverrides } : rest; }) } }))} /> : undefined} />}
     </div>
     <div className="simulation-bar"><div className="simulation-label"><Settings2 size={16} /><strong>Simulation</strong><span className="muted small">Temps simulé</span></div><NumberField label="Début" value={state.request.simulation.start} minimum={-1e9} maximum={1e9} onChange={start => setDocument(s => ({ ...s, request: { ...s.request, simulation: { ...s.request.simulation, start } } }))} /><ArrowRight size={14} className="muted" /><NumberField label="Fin" value={state.request.simulation.end} minimum={-1e9} maximum={1e9} onChange={end => setDocument(s => ({ ...s, request: { ...s.request, simulation: { ...s.request.simulation, end } } }))} /><span className="simulation-observations"><Activity size={14} />{document.request.model.observations.length} observé{document.request.model.observations.length > 1 ? 's' : ''}</span><div className={`simulation-status ${status === 'Échec' ? 'failed' : ''}`} role="status">{status === 'Terminé' && <Check size={14} />}{status}</div><button className="primary" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Calcul en cours…' : 'Exécuter la simulation'}</button></div>
-    <ResultsPanel request={result?.request} result={result?.data} stale={!!result && result.fingerprint !== currentFingerprint} status={status} error={error} />
+    </div>
+    <div id="simulation-workspace" className="simulation-container" hidden={workspace !== 'simulation'}><SimulationWorkspace request={result?.request} result={result?.data} stale={!!result && result.fingerprint !== currentFingerprint} status={status} error={error} active={workspace === 'simulation'} /></div>
     <footer className="app-footer"><span><span className="footer-dot" />{saveStatus}</span><span>libirritator {catalog?.engineVersion ?? '—'}<span className="separator">·</span>Calcul natif C++<span className="separator">·</span>Contrat JSON v{document.request.schemaVersion}</span></footer>
     {showHelp && <div className="modal-backdrop" onClick={() => setShowHelp(false)}><div className="help-dialog" role="dialog" aria-modal="true" aria-label="Utiliser l’atelier" onClick={e => e.stopPropagation()}><button autoFocus className="icon-button modal-close" aria-label="Fermer l’aide" onClick={() => setShowHelp(false)}><X size={18} /></button><h2>Construire. Relier. Simuler.</h2><ol><li>Ajoutez un composant depuis la bibliothèque.</li><li>Sélectionnez-le pour régler ses paramètres et activer son observation.</li><li>Cliquez une sortie puis une entrée, ou utilisez « Relier des ports ».</li><li>Réglez les bornes temporelles puis exécutez.</li><li>Explorez les trajectoires, les points exacts et les détails du calcul.</li></ol><p>Suppr / Retour arrière supprime la sélection. Déplacez les nœuds et utilisez la molette pour zoomer. Les boutons du canevas ajustent la vue.</p><p>Enregistrer exporte le JSON scientifique v1, v2 ou v3 selon le modèle. La disposition est conservée séparément dans ce navigateur. Ouvrir accepte notamment <code>web/examples/sum3.json</code>.</p><p className="muted small">Les événements à la borne finale sont exclus. Le moteur peut publier un état terminal lors de la fermeture des observations.</p><button onClick={() => setShowHelp(false)}>Fermer l’aide</button></div></div>}
   </div>;

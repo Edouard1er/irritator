@@ -4,7 +4,7 @@ import type { RunResult } from '@contracts';
 import type * as Plotly from 'plotly.js';
 
 let plotlyPromise: Promise<typeof Plotly> | undefined;
-function loadPlotly(): Promise<typeof Plotly> {
+export function loadPlotly(): Promise<typeof Plotly> {
   if (plotlyPromise) return plotlyPromise;
   plotlyPromise = new Promise((resolve, reject) => {
     const script = document.createElement('script');
