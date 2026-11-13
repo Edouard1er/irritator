@@ -1,0 +1,480 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "atelier-schaefer-month",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            },
+            "units": {
+              "output": "t",
+              "parameters": {
+                "X": "t",
+                "dQ": "t"
+              }
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/month",
+              "parameters": {
+                "value": "1/month",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.0033333333333333335,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/t",
+              "parameters": {
+                "value": "1/t",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/(effort*month)",
+              "parameters": {
+                "value": "1/(effort*month)",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 260,
+              "offset": 0
+            },
+            "units": {
+              "output": "effort",
+              "parameters": {
+                "value": "effort",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {},
+            "units": {
+              "output": "t/month",
+              "parameters": {}
+            }
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            },
+            "units": {
+              "output": "ratio",
+              "parameters": {
+                "value": "ratio",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            },
+            "units": {
+              "output": "t",
+              "parameters": {
+                "X": "t",
+                "dQ": "t"
+              }
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ],
+        "units": {
+          "time": "month",
+          "biomass": "t",
+          "cumulativeCatch": "t",
+          "catchRate": "t/month",
+          "growthRate": "1/month",
+          "accessibility": "ratio",
+          "effort": "effort",
+          "catchability": "1/(effort*month)",
+          "provenance": {
+            "basis": "workshop-convention",
+            "note": "Nouvelle convention pédagogique : N0=150 t, K=300 t, r=0.35/mois, q=0.0008 ou 0.001/(unité effort.mois). Le fichier source ne documente aucune échelle physique. Aucun taux annuel historique ni calibration du lac ne sont revendiqués. Valeurs numériques conservées pour cette nouvelle hypothèse mensuelle, pas conversion de trajectoires antérieures."
+          }
+        }
+      }
+    ],
+    "components": [
+      {
+        "id": "run",
+        "type": "constant",
+        "parameters": {
+          "value": 0,
+          "offset": 1
+        },
+        "units": {
+          "parameters": {
+            "offset": "month"
+          }
+        }
+      },
+      {
+        "id": "prospectives",
+        "type": "simulation_wrapper",
+        "parameters": {},
+        "experiment": {
+          "definition": "Schaefer",
+          "simulation": {
+            "start": 0,
+            "end": 20
+          },
+          "run": "complete",
+          "factors": [
+            {
+              "id": "effort",
+              "name": "Effort de pêche E",
+              "target": "E",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                80,
+                150,
+                260
+              ]
+            },
+            {
+              "id": "capturabilite",
+              "name": "Capturabilité q",
+              "target": "q",
+              "parameter": "value",
+              "type": "fixed",
+              "values": [
+                0.0008,
+                0.001
+              ]
+            }
+          ],
+          "selections": [
+            {
+              "id": "Nmin",
+              "name": "Biomasse minimale sur H=20",
+              "target": "N",
+              "criteria": "min"
+            },
+            {
+              "id": "NH",
+              "name": "Biomasse finale N(H)",
+              "target": "N",
+              "criteria": "max-last"
+            },
+            {
+              "id": "CH",
+              "name": "Capture cumulée finale C(H)",
+              "target": "C",
+              "criteria": "max-last"
+            }
+          ],
+          "objective": {
+            "method": "simple",
+            "type": "maximize",
+            "primary": "CH"
+          },
+          "scenarioResults": true,
+          "trajectoryObservations": [
+            {
+              "target": "N",
+              "samplingInterval": 0.1
+            },
+            {
+              "target": "C",
+              "samplingInterval": 0.1
+            }
+          ]
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "run",
+          "port": 0
+        },
+        "to": {
+          "component": "prospectives",
+          "port": 1
+        }
+      }
+    ],
+    "observations": [],
+    "units": {
+      "time": "month",
+      "provenance": {
+        "basis": "workshop-convention",
+        "note": "Horloge principale de démonstration en mois. Les horloges prospectives sont locales et indépendantes."
+      }
+    }
+  },
+  "simulation": {
+    "start": 0,
+    "end": 3
+  }
+}

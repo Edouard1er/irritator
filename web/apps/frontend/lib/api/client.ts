@@ -1,4 +1,4 @@
-import { catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2, type StructuralDiagnostic } from '@contracts';
+import { attachResultUnits, catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2, type StructuralDiagnostic } from '@contracts';
 import type { Catalog } from '@/lib/modeling/model';
 
 export class ClientError extends Error {
@@ -44,7 +44,7 @@ export async function runSimulation(request: RunRequest): Promise<HttpResult> {
     const result = request.schemaVersion === 3 ? parseWrapperResult(body, request) : parseResult(body, request);
     const runId = (body as { runId?: unknown }).runId;
     if (typeof runId !== 'string' || !runId) throw new Error('runId');
-    return { ...result, runId };
+    return { ...attachResultUnits(result, request), runId };
   } catch { throw new ClientError('RUNNER_PROTOCOL_ERROR', 'Les trajectoires reçues sont incohérentes avec la requête.'); }
 }
 export function errorText(error: unknown): string {

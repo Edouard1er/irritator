@@ -8,6 +8,8 @@ import { validateStructure, type StructuralDiagnostic } from './structural.js';
 export * from './structural.js';
 import { validateWrapperRequest } from './wrapper-v3.js';
 export * from './wrapper-v3.js';
+import { validateUnits } from './units.js';
+export * from './units.js';
 
 export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
 export interface ComponentSpec { sourceContracts?: { port: number; types: string[]; maximum: number }[]; type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
@@ -22,21 +24,22 @@ export const requestV2Schema = v2schema;
 const { $schema: _v3dialect, ...v3schema } = schemaV3Data;
 export const requestV3Schema = v3schema;
 export const caps = { maxComponents: 128, maxConnections: 512, maxRunCalls: 100000, maxPoints: 20000 };
-export interface Component { id: string; type: string; parameters: Record<string, number>; definition?: string; experiment?: import('./wrapper-v3.js').WrapperExperiment; experimentOverrides?: import('./wrapper-v3.js').ExperimentOverride[] }
+export interface Component { id: string; type: string; parameters: Record<string, number>; units?: import('./units.js').ComponentUnits; definition?: string; experiment?: import('./wrapper-v3.js').WrapperExperiment; experimentOverrides?: import('./wrapper-v3.js').ExperimentOverride[] }
 export interface Endpoint { component: string; port: number }
-export interface CoupledDefinition { id: string; name: string; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[]; components: Component[]; connections: { from: Endpoint; to: Endpoint }[] }
+export interface CoupledDefinition { id: string; name: string; units?: import('./units.js').ModelUnits; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[]; components: Component[]; connections: { from: Endpoint; to: Endpoint }[] }
 export interface ForecastContract { pair: string; planId: string; planVersion: number; quantity: string; unit: string; cohort: string; mode: 'operational' | 'diagnostic'; stateFactors: string[]; commandFactor: string; contextFactors: string[] }
 export interface RunRequest {
   schemaVersion: 1 | 2 | 3;
-  model: { id: string; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number; eventPorts?: number[] }[]; definitions?: CoupledDefinition[]; forecastContracts?: ForecastContract[] };
+  model: { id: string; units?: import('./units.js').ModelUnits; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number; eventPorts?: number[] }[]; definitions?: CoupledDefinition[]; forecastContracts?: ForecastContract[] };
   simulation: { start: number; end: number };
   limits?: Partial<typeof caps> & { maxDepth?: number; maxInstances?: number } & Partial<typeof import('./wrapper-v3.js').wrapperCaps>;
 }
 export interface RunResult {
+  units?: import('./units.js').ModelUnits;
   schemaVersion: 1; status: 'completed'; modelId: string;
   modelEvents?: { component: string; time: number; bag: number; port: number; value: [number, number, number] }[];
   simulation: { start: number; end: number; finalTime: number; runCalls: number };
-  observations: { component: string; samplingInterval: number; samples: { time: number; value: number }[] }[];
+  observations: { component: string; samplingInterval: number; unit?: import('./units.js').Unit; timeUnit?: import('./units.js').TimeUnit; samples: { time: number; value: number }[] }[];
   diagnostics: { observationPolicy: string; engineVersion: string; adapterVersion: string };
 }
 export class ApiError extends Error {
@@ -70,6 +73,7 @@ export function validateRequest(input: unknown): asserts input is RunRequest {
   validateGraph(input);
 }
 export function validateGraph(request: RunRequest): void {
+  try { validateUnits(request); } catch (e) { throw new ApiError('INVALID_UNITS', (e as Error).message); }
   validateStructure(request, false);
   if (request.schemaVersion === 3) { validateWrapperRequest(request); validateStructure(request); return; }
   if (request.schemaVersion === 2) { validateHierarchy(request); validateStructure(request); return; }

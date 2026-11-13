@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { validU64, validateRequest, wrapperCaps, type Component, type RunRequest, type WrapperExperiment, type WrapperSeed } from '@contracts';
+import { unitLabel, validU64, validateRequest, wrapperCaps, type Component, type RunRequest, type WrapperExperiment, type WrapperSeed } from '@contracts';
 import { errorText } from '@/lib/api/client';
 import type { ComponentSpec } from '@/lib/modeling/model';
 import { prospectiveAtoms, scenarioCount, type IdentityRename } from '@/lib/modeling/wrapper';
@@ -58,6 +58,7 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
     <section className="inspector-section"><h3>Modèle prospectif</h3>
       <label className="field"><span>Définition prospective</span><select aria-label="Définition prospective" value={definition ? e.definition : ''} onChange={event => edit({ ...e, definition: event.target.value })}><option value="">Choisir une définition du document…</option>{request.model.definitions?.map(d => <option key={d.id} value={d.id}>{d.name} ({d.id})</option>)}</select></label>
       <p className="small">{definition?.name ?? `Définition absente : ${e.definition}`}</p><button disabled={!definition} onClick={() => onOpen(e.definition)}>Ouvrir le prospectif</button>
+      <p className="small">Horloge locale : {unitLabel(definition?.units?.time)}. Les horizons et pas prospectifs utilisent cette horloge indépendante du parent.</p>
       <NumberField label="Début prospectif" value={e.simulation.start} minimum={-1e9} maximum={1e9} onChange={start => edit({ ...e, simulation: { ...e.simulation, start } })} />
       <NumberField label="Fin prospective" value={e.simulation.end} minimum={-1e9} maximum={1e9} onChange={end => edit({ ...e, simulation: { ...e.simulation, end } })} />
       <details><summary>Modèles atomiques du prospectif ({atoms.length})</summary><ul className="small">{atoms.map(a => <li key={a.path}><code>{a.path}</code> · {a.component.type}</li>)}</ul></details>
@@ -70,7 +71,7 @@ export function WrapperInspector({ component, request, spec, onExperiment, onRen
         <label className="field"><span>Cible du facteur</span><select aria-label="Cible du facteur" value={f.target} aria-invalid={!targets.some(a => a.path === f.target && a.parameter === f.parameter)} onChange={event => { const a = targets.find(a => a.path === event.target.value)!; edit({ ...e, factors: e.factors.map((x, j) => j === i ? { ...x, target: a.path, parameter: a.parameter! } : x) }); }}>
           {!targets.some(a => a.path === f.target) && <option value={f.target}>Cible absente : {f.target}</option>}
           {targets.map(a => <option key={a.path} value={a.path}>{a.path}.{a.parameter} · {a.component.type}</option>)}
-        </select></label><p className="small">Paramètre : <code>{f.parameter}</code></p>
+        </select></label><p className="small">Paramètre : <code>{f.parameter}</code> · {unitLabel(targets.find(a=>a.path===f.target)?.component.units?.parameters?.[f.parameter])}</p>
         <FactorPlanFields plan={f} onChange={plan => edit({ ...e, factors: e.factors.map((x, j) => j === i ? { ...(x.name ? { name: x.name } : {}), target: x.target, parameter: x.parameter, ...plan } : x) })} />
         <div className="experiment-actions"><button disabled={i === 0} aria-label={`Monter facteur ${f.id}`} onClick={() => edit({ ...e, factors: move(e.factors, i, -1) })}>↑</button><button disabled={i === e.factors.length - 1} aria-label={`Descendre facteur ${f.id}`} onClick={() => edit({ ...e, factors: move(e.factors, i, 1) })}>↓</button><button aria-label={`Supprimer facteur ${f.id}`} onClick={() => edit({ ...e, factors: e.factors.filter((_, j) => j !== i) })}>Supprimer</button></div>
       </fieldset>)}

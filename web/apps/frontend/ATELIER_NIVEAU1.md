@@ -1,206 +1,271 @@
 # Irritator Web — atelier participatif, niveau 1
 
-## Audit initial
+## État actuel : itération 2
 
-Branche : `two-modes`. Aucun changement local au début de l’intervention. Le pack
-`Irritator_Web_Niveau1_Pack_Codex.zip` a été lu avec ses six documents de consignes
-et ses cinq maquettes. Les références extraites sont dans
-`reports/niveau1-reference/` (non suivies par Git).
+L’itération 2 prolonge le frontend existant sur `two-modes`. Au début de cette
+intervention, `git status --short` était vide. Le présent document remplace la
+recette de l’itération 1 ; les limitations historiques sur les unités, les trois
+indicateurs, le nombre constant de poissons et le son bref sont levées pour les
+modèles explicitement documentés. Aucun commit ni push n’est créé.
 
-Points d’entrée vérifiés :
+Avant modification ont été inspectés les contrats v1/v2/v3, leurs validateurs
+Ajv, la frontière HTTP/runner C++, les graphes Schaefer, les facteurs, les
+observateurs, les inspecteurs, la sérialisation et les tests existants. Les guides
+Next locaux sur les composants clients ont été consultés.
 
-| Fonction | Chemin |
-| --- | --- |
-| Page Next.js et thème | `app/page.tsx`, `app/layout.tsx`, `app/globals.css` |
-| Document, navigation hiérarchique, React Flow, import/export et exécution | `components/editor/model-editor.tsx` |
-| Inspecteurs et observateurs des wrappers | `components/panels/wrapper-inspector.tsx` |
-| Résultats scientifiques, décisions, événements et CSV | `components/panels/results-panel.tsx` |
-| Trajectoires des scénarios et campagnes | `components/panels/wrapper-trajectories.tsx` |
-| Plotly local | `components/charts/trajectory-plot.tsx` |
-| HTTP et validation des résultats | `lib/api/client.ts`, `web/packages/contracts/` |
-| API et moteur | `POST /api/v1/simulations/run`, `web/apps/api/src/services/engine.ts`, `web/engine/runner/` |
+## Décision scientifique sur les modèles historiques
 
-Le frontend utilise Next 16.4.2, React 19, React Flow et Plotly. Les guides locaux
-Next sur les composants clients et le CSS ont été consultés. Aucune dépendance,
-version, licence, équation, transition DEVS, API ou fréquence d’observation moteur
-n’a été modifiée.
+Les fichiers historiques déclarent `r = 0.35`, `q = 0.0008 / 0.001`, `E = 80 / 150 /
+260`, N0 = 150 et K = 300. Leur graphe vérifié donne :
 
-## Intégration
+- dB/dt = r B (1 − B/K) − q a E B ;
+- dC/dt = q a E B.
 
-Les espaces Modélisation et Simulation restent montés, mais seul l’espace choisi
-est visible. Cela conserve le document, les nœuds, les ports, les connexions,
-la sélection, le viewport et les résultats en mémoire. La modélisation récupère
-la hauteur auparavant occupée par les résultats. Ouvrir/Nouveau revient à la
-modélisation ; lancer une exécution ouvre la simulation.
+Aucune indication retrouvée dans ces sources ne permet d’affirmer que leurs taux
+sont annuels ou mensuels. Les anciens JSON ne sont donc pas réétiquetés et aucune
+division par 12 n’est appliquée à leurs coefficients. Ils restent chargeables,
+exécutables et exportables avec des unités inconnues.
 
-`components/simulation/simulation-workspace.tsx` présente les deux publics et les
-scénarios déjà calculés. La préférence Pêcheur/Scientifique est conservée dans
-le stockage local. Les résultats eux-mêmes gardent la politique existante : en
-mémoire seulement. Le changement de lecture conserve le scénario et le curseur.
-Le changement de scénario remet la lecture, la correspondance manuelle et le
-seuil d’atelier à zéro : aucune convention d’un scénario n’est appliquée en secret
-à un autre.
+Le fichier **`web/examples/atelier-schaefer-month-v3.json`** est un nouveau modèle
+d’atelier, issu du graphe vérifié des six trajectoires. Il définit explicitement
+une **nouvelle hypothèse pédagogique** en tonnes et mois : r = 0,35 mois⁻¹,
+q = 0,0008 ou 0,001 (unité d’effort · mois)⁻¹. Il conserve les valeurs numériques
+pour cette hypothèse, sous un nouvel identifiant. Ce n’est ni la conversion d’une
+ancienne trajectoire physique établie, ni une calibration du lac. Cette provenance
+figure dans le JSON et dans le panneau des hypothèses.
 
-`lib/simulation/trajectory.ts` fournit le contrat normalisé, les adaptations,
-les sélecteurs, conversions explicites et la classification pure. Le lecteur
-ne fait aucun appel HTTP. La lecture dure environ 20 secondes à 1× ; les délais
-sont proportionnels aux écarts de temps enregistrés, avec un minimum de 24 ms par
-observation. Elle parcourt tous les points, y compris les observations simultanées,
-sans les interpoler. Quitter l’espace Simulation suspend la lecture. Les plages
-irrégulières gardent leurs instants réels.
+Pour l’utiliser, ouvrir ce JSON dans Modélisation, puis lancer la simulation.
+Il observe explicitement N et C pour les six scénarios déjà prévus. Les anciens
+exemples et les fichiers de référence ne sont pas écrasés.
 
-## Correspondance scientifique et unités
+## Métadonnées JSON et dimensions
 
-Le graphe de référence est celui de `web/examples/wrapper-schaefer-v3.json`.
-La reconnaissance vérifie le nombre d’atomes, leurs identifiants et types,
-les connexions avec leurs ports, ainsi que les coefficients signés des sommes.
-Le nom `N` ou `C` seul n’autorise aucune interprétation. Les valeurs des paramètres
-peuvent varier ; les facteurs de chaque résultat de scénario sont conservés.
-Les observations parent sont regroupées par occurrence couplée : le stock d’un
-modèle n’est jamais associé automatiquement à la capture d’un autre.
+Extrait de la définition couplée `Schaefer` :
 
-| Source vérifiée | Présentation | Unité actuelle |
-| --- | --- | --- |
-| Intégrateur `N` du graphe Schaefer reconnu | Stock global / biomasse totale du lac | unité du modèle ; dimension physique à valider |
-| Intégrateur `C`, alimenté par `qaEN` | Capture cumulée depuis le début | unité du modèle |
-| Multiplicateur `qaEN` si observé | Débit de capture | unité du modèle / unité de temps du modèle |
-| `N.parameters.X` | B0/N0 | unité du modèle |
-| Constantes `r`, `q`, `E`, `a` | Paramètres disponibles | unités non déclarées, sauf `a` comme fraction de présentation |
-| Constante `InvK` | K = 1/InvK si positif | unité du modèle |
-| `scenarioTrajectories[*].observations` | Séries natives du scénario | temps local enfant, sans conversion calendaire |
-| `observations` | Séries de l’exécution principale | temps du moteur parent |
+```json
+{
+  "units": {
+    "time": "month",
+    "biomass": "t",
+    "cumulativeCatch": "t",
+    "catchRate": "t/month",
+    "growthRate": "1/month",
+    "accessibility": "ratio",
+    "effort": "effort",
+    "catchability": "1/(effort*month)",
+    "provenance": {
+      "basis": "workshop-convention",
+      "note": "Nouvelle hypothèse pédagogique ; échelle historique inconnue."
+    }
+  }
+}
+```
 
-Dans ce graphe, `dN/dt = rN(1 − N/K) − qaEN` et `dC/dt = qaEN`.
-Le navigateur ne reconstruit pas ces équations : il affiche leurs observations.
-Il ne multiplie jamais une capture par `a` ou `q`. Le seul produit dérivé affiché
-est `a × N` si `a ∈ [0,1]`, explicitement décrit comme une fraction accessible du
-stock global et non comme un stock local autonome.
+Les composants portent aussi des unités structurées :
 
-Pour les graphes différents, le panneau « Comprendre les hypothèses » permet une
-correspondance explicite des séries : biomasse totale, capture cumulée, débit ou
-capture par intervalle. Sans correspondance, la donnée reste indisponible. Une
-modification de topologie ou de noms ne force pas une interprétation Schaefer.
+```json
+{
+  "id": "N",
+  "type": "qss3_integrator",
+  "parameters": { "X": 150, "dQ": 0.01 },
+  "units": { "output": "t", "parameters": { "X": "t", "dQ": "t" } }
+}
+```
 
-Le contrat HTTP actuel ne fournit ni unité physique, ni origine calendaire, ni date
-d’exécution. L’identifiant d’exécution, le modèle, le moteur et l’adaptateur sont
-affichés. Aucune tonne, année ou quantité de poissons n’est fabriquée. Les fonctions
-de conversion testées acceptent kg↔t et mois↔années avec origine explicitement
-déclarée ; elles ne sont pas appliquées à ces résultats sans métadonnées.
+`units` est facultatif sur `model`, chaque définition et chaque composant, dans
+les trois schémas JSON. Les unités acceptées sont énumérées ; les champs inconnus
+sont refusés. La provenance distingue déclaration, convention d’atelier et
+conversion documentée (`sourceTime` requis pour cette dernière).
 
-`ΔC` est la différence entre deux observations consécutives du cumul, sur leur
-intervalle exact. Il n’est jamais étiqueté « annuel ». Une capture négative ou un
-cumul décroissant produit un avertissement ; un incrément négatif est indisponible.
-Les valeurs de capture des tuiles nécessitent un échantillon exactement au temps
-sélectionné : aucune interpolation ni rapprochement silencieux. En cas de plusieurs
-captures au même instant, la dernière observation dans l’ordre source fait foi.
+La validation vérifie r en temps⁻¹, q en (effort × temps)⁻¹, B/N0/K/C/dQ en masse,
+InvK en masse⁻¹, a sans dimension dans [0,1], ainsi que les références de paramètres
+et les délais `offset`. Ainsi rB(1−B/K) et qaEB ont la dimension masse/temps.
+L’unité d’effort reste une unité définie par le modèle ; aucun bateau, jour de
+pêche ou engin concret n’est inventé.
 
-## Seuils et lecture
+Ce contrôle vise les déclarations du vocabulaire Schaefer reconnu ; il ne
+constitue pas un solveur dimensionnel général de tous les composants DEVS.
+Les taux annuels déclarés peuvent être convertis explicitement avec
+`convertRate(r, 'year', 'month') = r/12` et les durées avec
+`convertDuration(t, 'year', 'month') = 12t`. Ces fonctions ne migrent jamais un
+modèle à l’ouverture. kg↔t est testé ; l’adaptateur convertit les masses et débits
+explicitement déclarés en kg pour l’affichage en tonnes, ainsi que N0/K.
 
-Aucun seuil n’est présélectionné. Le participant saisit un seuil positif dans
-l’unité de la série ; la marge de présentation est initialement 20 %. Le seuil
-est toujours nommé « seuil choisi pour l’atelier », sans validation écologique.
+## Horloges et frontière moteur
 
-Priorité : rouge si `B <= seuil`, orange si `B <= seuil × (1 + marge)`, jaune si
-la pente est négative au-delà de la tolérance, vert si elle est stable ou positive.
-L’historique insuffisant reste neutre au-dessus de l’alerte. La pente vaut
-`ΔB/Δt` entre observations adjacentes ; elle est inconnue si le temps est répété
-ou une valeur invalide. La tolérance initiale est exactement zéro et peut être
-réglée dans les hypothèses selon l’échelle du modèle. Pas d’hystérésis cachée.
+Une occurrence couplée partage l’horloge DEVS de son parent. Des déclarations
+contradictoires année/mois sur ce même couplage sont refusées avant exécution.
+Une horloge manquante dans un descendant couplé peut hériter de celle du parent.
+En revanche, un prospectif `simulation_wrapper` possède sa propre horloge locale :
+les métadonnées de sa définition sont conservées indépendamment du parent.
+Aucune durée enfant n’est transformée implicitement en délai du parent.
 
-Les points non finis sont signalés. Les temps invalides sont exclus ; les valeurs
-invalides restent des lacunes graphiques. Le tri est stable et conserve les
-observations simultanées. Le lecteur ne dépasse jamais le dernier point disponible,
-y compris pour une exécution partielle ou annulée.
+Une transformation complète d’un couplage changeant d’échelle temporelle n’est
+pas automatisée : elle doit convertir les paramètres/délais/observateurs du modèle
+avant de déclarer un temps commun. Le nouveau modèle d’atelier est cohérent en
+mois et ne nécessite pas cette transformation.
 
-La bannière, les segments, les indicateurs et les commentaires consomment les mêmes
-sélecteurs. Le futur déjà enregistré est indiqué en pointillé gris ; les marches
-ne sont que des guides visuels. Les graphiques scientifiques complets existants
-restent disponibles, avec leurs tableaux et CSV ; un texte de curseur commun
-donne la position de lecture sans tronquer les sorties scientifiques.
+L’API valide les métadonnées, puis `nativeRequest` retire exclusivement `units`
+avant de transmettre le document au runner installé, dont le protocole scientifique
+reste inchangé. Après validation des sorties natives, `attachResultUnits` annote
+les observations avec `unit` et `timeUnit`, et les trajectoires prospectives avec
+leurs unités et provenance. Les annotations sont dérivées de la requête validée.
+Les valeurs et temps des observations ne sont jamais recalculés par cet adaptateur.
+Le test HTTP compare exactement chaque échantillon des six scénarios avec et sans
+métadonnées. Aucun changement C++, équation, transition DEVS, catalogue, dépendance
+ou version de protocole natif n’est nécessaire.
 
-## Accessibilité et maquettes
+## Scénarios et indicateurs
 
-Le thème clair existant suit la hiérarchie des maquettes 04–05 : état coloré et
-textuel, trois indicateurs, biomasse et lac symbolique, capture et commentaire,
-puis contrôles regroupés. L’espace de modélisation reprend la structure de la
-maquette 01 avec le vrai React Flow. La lecture scientifique préserve les graphes
-multi-scénarios des variantes 02–03.
+Les identifiants wrapper/campagne/scénario demeurent intacts. Les libellés Pêcheur
+classent les valeurs d’E par rang dans la campagne : faible, intermédiaire, élevée.
+Les variantes A/B suivent les valeurs triées de q. Le numéro du scénario ne sert
+jamais à déduire sa catégorie. Pour deux niveaux d’effort, seules faible/élevée
+sont utilisées ; un niveau unique est annoncé comme tel. Ces catégories sont
+relatives aux scénarios comparés, sans validation empirique de gestion.
 
-Les boutons, curseurs natifs et sélecteurs fonctionnent au clavier. Le curseur
-annonce l’instant et la valeur ; la bannière `aria-live=polite` change au changement
-d’état seulement. Le mouvement des silhouettes respecte la préférence système et
-le réglage explicite. Le nombre de silhouettes est constant et non proportionnel
-au stock réel. Le son est désactivé à l’ouverture, autorisé par un geste utilisateur,
-faible et bref, uniquement à l’entrée orange/rouge en lecture continue. Chercher
-un point, recommencer ou changer de réglage ne déclenche aucune rafale.
+La lecture Scientifique affiche le vrai numéro et E/q. Le panneau des hypothèses
+conserve tous les paramètres avec leurs unités et la provenance complète.
+Changer de scénario sélectionne les sorties déjà calculées ; aucun nouvel appel
+moteur. Il remet la lecture, les correspondances, le seuil et l’activation sonore
+à zéro pour éviter d’appliquer les conventions d’un scénario à un autre.
+
+Les trois indicateurs Pêcheur sont désormais :
+
+1. **Poissons dans tout le lac** : B(t), biomasse globale.
+2. **Poissons pêchés depuis le début** : C(t), cumul fourni par le moteur.
+3. **Pêche sur les 12 derniers mois** : C(t) − C(t−12 mois).
+
+La fenêtre doit être complète et les deux bornes présentes dans l’observateur C.
+La recherche tolère uniquement l’arrondi IEEE-754 (32 epsilon × échelle du temps),
+sans rapprocher des observations physiquement distinctes. Pour t=20 mois, la borne
+est 8 mois, jamais l’observation précédente. En années déclarées, la fenêtre vaut
+1 an. Un historique insuffisant, une borne absente, une lacune ou un cumul incohérent
+produit **Non disponible**, avec une raison explicite. Aucun cumul partiel n’est
+appelé capture annuelle ; aucun débit n’est intégré sans convention numérique.
+
+ΔB/Δt reste dans la lecture scientifique et détermine la tendance qualitative.
+La priorité commune est rouge si B≤Bcrit, orange si B≤Bcrit(1+marge), jaune si la
+pente est négative au-delà de la tolérance, vert sinon. Au-dessus de l’alerte,
+l’historique insuffisant reste neutre. Aucun seuil par défaut : 140 t ne constitue
+pas une référence écologique validée. La marge initiale de 20 % est pédagogique.
+
+## Visualisations synchronisées et présentation
+
+Les sélecteurs partagent le même index dans les observations enregistrées. Le
+lecteur conserve les instants irréguliers, parcourt les observations simultanées
+sans division par zéro, et s’arrête au dernier point disponible. Le changement
+de public et le passage en Grand écran conservent scénario et temps. Quitter
+Simulation ou masquer l’onglet suspend la lecture.
+
+- Le graphique de biomasse colore les observations déjà lues et affiche le futur
+  enregistré en pointillé gris, avec seuil et zone d’alerte.
+- Le lac utilise un seul Canvas 2D : **1 pictogramme = 1 tonne simulée**. Le nombre
+  est arrondi à la tonne la plus proche (83,87 t → 84 symboles) sans arrondir les
+  indicateurs. Aucun plafond à 10/20/50. Cellules stables, ordre déterministe,
+  apparition/disparition progressive pendant la lecture, mise à jour immédiate
+  lors d’une recherche, et image fixe en pause ou mouvement réduit.
+- Les pictogrammes ne sont ni des poissons réels d’une tonne, ni une preuve de
+  répartition spatiale. Sans unité de masse établie, l’échelle n’est pas affichée.
+- a×B, lorsqu’il est affiché, est une fraction accessible du stock global, jamais
+  un stock autonome par zone. Aucune capture n’est multipliée à nouveau par q/a/E.
+- La jauge SVG **Où en est la ressource ?** remplace les paragraphes : B, seuil,
+  limite d’alerte, K réellement disponible et direction. Le jaune dépend aussi
+  de la tendance ; il n’est pas déduit de la seule position sur la jauge.
+
+Le tableau de bord compact tient à 1920×1080 sans défilement vertical dans la
+recette (conteneur et contenu : 943 px). À 1366×768 et sur mobile, un défilement
+raisonnable conserve des contrôles lisibles ; pas de débordement horizontal mobile.
+Grand écran utilise la Fullscreen API, sinon une présentation fixe dans la fenêtre.
+Le bouton de retour et Échap fonctionnent ; la navigation de fond devient inerte
+au clavier. Les graphiques et le lac bénéficient de la surface supplémentaire.
+Aucune entrée/sortie de ce mode ne lance de calcul.
+
+Les graphiques scientifiques multi-scénarios natifs restent disponibles, ainsi
+que décisions, événements, tableaux et CSV. Axes, survols et tableaux portent les
+unités déclarées. Les CSV gardent leurs anciennes colonnes pour les résultats sans
+métadonnées ; sinon `timeUnit,unit` sont ajoutées. L’export JSON contient requête,
+résultats, unités, horloges, paramètres et provenance, sans conversion de nombres.
+
+## Sons et accessibilité
+
+Le son est désactivé initialement et nécessite un geste explicite autorisant
+AudioContext. Volume réglable, bouton **Arrêter l’alarme**, aucun son vert, jaune
+facultatif à l’entrée, orange de 2,4 secondes, rouge en sirène à modulation lente
+(0,65 Hz), continue uniquement pendant la lecture critique autorisée.
+
+Un seul graphe audio peut exister : remplacer une alerte détruit le précédent.
+La boucle rouge utilise un oscillateur et un LFO, sans timer d’accumulation. Pause,
+désactivation, recherche, changement de scénario, sortie de Simulation, onglet
+masqué et sortie d’état critique arrêtent et déconnectent les nœuds. Le volume
+modifie le gain sans recréer une alarme. Les refus du navigateur conservent les
+alertes visuelles. L’activation asynchrone ne peut pas réactiver un son annulé.
+L’annonce vocale, facultative dans la mission, n’est pas ajoutée.
+
+La préférence système de mouvement réduit est respectée et ne peut être annulée
+par inadvertance. Les boutons et curseurs fonctionnent au clavier. La bannière
+annonce les changements d’état, pas chaque frame ; le temps n’est pas aria-live.
+Les valeurs numériques restent disponibles indépendamment du Canvas.
 
 ## Vérification et preuves
 
-Tests ajoutés : `tests/workshop.test.ts`, `tests/workshop-components.test.tsx`,
-`tests/e2e/workshop.spec.ts`. Les jeux unitaires sont exclusivement dans les tests ;
-aucun jeu de démonstration n’est inclus dans l’interface réelle.
+Exécution sous Node 24.22.1 embarqué (le Node système est 26). Résultats :
 
-Les tests de navigateur appellent l’API et le runner C++ réels, sans interception.
-Ils comparent les 201 valeurs de la courbe à la réponse native, vérifient les six
-scénarios et les douze courbes scientifiques N/C, puis charger/lancer/lire/pause/
-reprendre/recommencer, clavier, conservation du modèle et du temps, CSV, absence
-de requêtes externes et absence de nouveau calcul pendant la lecture.
-
-Les preuves locales sont dans `reports/niveau1-evidence/` : réponse réelle JSON,
-rapport Playwright et captures ordinateur/mobile. Les PNG montrent les données
-du moteur, pas les séries illustratives du pack.
-
-Recette finale sous Node 24.22.1 :
-
-| Commande (depuis `web/apps/frontend`) | Résultat |
+| Vérification | Résultat |
 | --- | --- |
-| `npm test -- --maxWorkers=2` | 219 tests passent, 22 fichiers |
-| `npm run typecheck -- --incremental false` | TypeScript sans erreur |
-| `npm run build` | Build de production et génération statique réussis |
-| `npm run test:e2e -- tests/e2e/workshop.spec.ts` | 3 tests passent dans Chrome avec l’API et le runner réels |
-| `git diff --check` | Vérification des espaces et fins de lignes |
+| Frontend Vitest complet | 246 tests passent, 25 fichiers |
+| API : backend, processus, intégration HTTP et unités | 49 tests passent |
+| Chrome : workshop-v2.spec.ts + workshop.spec.ts | 7 parcours passent sur le build de production avec API et moteur C++ réels |
+| TypeScript frontend et compilation API | Sans erreur |
+| Build Next de production | Vérifié en fin d’itération |
+| git diff --check | Vérifié en fin d’itération |
 
-Les exécutables CLI de Vitest/TypeScript/Playwright ont également été invoqués
-directement avec le Node 24 embarqué, car le Node par défaut de la machine est
-26.13.0. La compilation de l’API existante (`npm run build` depuis `web`) réussit.
-Le runner utilisé est `build-web-test8o/Release/runner/irritator-runner.exe`.
-Aucun script `lint` n’existe dans le frontend : aucun lint séparé n’est revendiqué.
+Les tests couvrent import/export/localStorage, ancienne version sans unités,
+kg/t, année/mois et taux, dimensions incompatibles, horloges imbriquées, invariance
+numérique réelle, libellés indépendants des numéros, fenêtres irrégulières et leurs
+bornes, compte effectif de 100/150/600 symboles dessinés, pause/reprise/recherche,
+composants synchronisés, refus audio, graphes audio sans superposition, véritables
+oscillateurs Chrome, plein écran natif et refusé, Échap, clavier, conservation du
+modèle, exports, absence de requêtes externes et de recalcul pendant la lecture.
 
-La capture ordinateur a été comparée aux références : constructeur réel étendu,
-onglets séparés, bandeau et indicateurs, graphiques annotés et lac symbolique. La
-capture à 390 × 844 et les assertions navigateur confirment l’absence de débordement
-horizontal de la page et du tableau de bord pêcheur. Les captures incluent l’état
-favorable et le franchissement du seuil d’atelier ; la vue scientifique affiche
-les douze séries N/C des six scénarios réels.
+Les suites navigateur historiques hors atelier ne sont pas toutes rejouées ; les
+anciens tests qui supposent modélisation et résultats simultanément visibles
+restent à adapter au découpage introduit à l’itération 1. Aucun lint séparé n’est
+revendiqué : le frontend ne possède pas de script lint.
 
-## Limites conservées
+Le test dense démarre une véritable simulation à 600 t, puis vérifie l’augmentation
+du nombre de symboles sans multiplication des nœuds DOM. Sur cette machine,
+45 intervalles entre images donnent une médiane de 16,7 ms et un 95e percentile de
+16,8 ms (maximum 16,8 ms, après chargement des graphiques). Cette mesure locale n’est pas une garantie de
+fréquence d’affichage sur tout matériel ; elle est conservée dans
+`canvas-performance.json`. La pause fige également les pixels du Canvas.
 
-- Pas de nouvelle cartographie, de modèle spatial ou de fonctionnalité de niveau 2.
-- Pas de conversion physique/calendaire sans évolution explicite du contrat.
-- Pas d’agrégation annuelle, faute d’origine et de convention d’intégration.
-- La comparaison multi-scénarios existe dans la vue scientifique ; pas de nouvelle
-  référence automatique entre exécutions dont les unités sont inconnues.
-- La modélisation dense conserve son canevas avec défilement horizontal sur les
-  petits écrans ; la vue pêcheur passe en une colonne sans débordement.
-- Les anciens tests e2e qui supposent l’éditeur et les résultats simultanément
-  visibles doivent suivre la nouvelle navigation ; ils ne sont pas réécrits en bloc.
-- Aucune validation scientifique des unités ou du seuil n’est revendiquée.
+Preuves locales ignorées par Git : `reports/iteration2-evidence/` contient
+`real-engine-result.json`, `playwright.json`, `layout-1920.json`, les preuves HTTP
+d’intégration et les captures : orange, vert, rouge, jaune, Scientifique,
+Grand écran, bureau 1366×768 et mobile. Les captures utilisent les sorties réelles,
+pas les valeurs illustratives de la mission. Le runner utilisé est
+`build-web-test8o/Release/runner/irritator-runner.exe`.
 
-## Fichiers livrés et état Git
+## Fichiers de cette itération
 
-Modifiés : `README.md`, `app/layout.tsx`,
-`components/editor/model-editor.tsx`, `components/charts/trajectory-plot.tsx`.
+Chemins relatifs à la racine du dépôt :
 
-Ajoutés : `ATELIER_NIVEAU1.md`, `app/workshop.css`,
-`components/simulation/simulation-workspace.tsx`,
-`components/simulation/workshop-chart.tsx`, `lib/simulation/trajectory.ts`,
-`tests/workshop.test.ts`, `tests/workshop-components.test.tsx`,
-`tests/workshop-fixture.ts`, `tests/e2e/workshop.spec.ts`.
+- Contrats : `web/packages/contracts/{index.ts,wrapper-v3.ts,units.ts,request.schema.json,request-v2.schema.json,request-v3.schema.json}`.
+- API : `web/apps/api/src/services/engine.ts`, `web/apps/api/tests/units.test.ts`.
+- Exemple explicite : `web/examples/atelier-schaefer-month-v3.json`.
+- Frontend, sous `web/apps/frontend/` :
+  - `app/workshop.css` ;
+  - `components/simulation/{simulation-workspace.tsx,workshop-chart.tsx,biomass-lake.tsx,resource-gauge.tsx}` ;
+  - `components/charts/trajectory-plot.tsx` ;
+  - `components/panels/{inspector.tsx,wrapper-inspector.tsx,results-panel.tsx}` ;
+  - `lib/api/client.ts`, `lib/modeling/model.ts`, `lib/serialization/csv.ts` ;
+  - `lib/simulation/{trajectory.ts,indicators.ts,alert-audio.ts}` ;
+  - `tests/{workshop-components.test.tsx,workshop-v2.test.ts,workshop-v2-components.test.tsx,alert-audio.test.ts}` ;
+  - `tests/e2e/workshop-v2.spec.ts` ;
+  - `ATELIER_NIVEAU1.md`, `README.md`.
 
-Ces chemins sont relatifs à `web/apps/frontend`. L’état final contient quatre
-fichiers suivis modifiés et neuf nouveaux fichiers, sans changement backend.
-Les preuves restent locales dans le répertoire `reports` ignoré par le dépôt.
-Le fichier `next-env.d.ts` généré par le build a été rétabli dans son état initial.
-
-Aucun commit ni push n’a été créé. Proposition de message :
-`feat(frontend): add participatory fisheries simulation workspace`.
+Limites scientifiques : aucune calibration écologique, aucun seuil validé, aucune
+attribution rétroactive d’unités aux anciens modèles, aucune interpolation du
+cumul ni conversion implicite des horloges. Les résultats décrivent les hypothèses
+simulées ; ils ne constituent pas une prévision certaine de l’état réel du lac.

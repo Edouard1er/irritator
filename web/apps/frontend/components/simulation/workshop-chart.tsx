@@ -36,10 +36,10 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
       }
       if (time !== undefined) shapes.push({ type: 'line', x0: time, x1: time, yref: 'paper', y0: 0, y1: 1, line: { color: '#324a5c', dash: 'dot', width: 2 } });
       await plot.react(element, traces, {
-        autosize: true, margin: { l: 82, r: 24, t: 32, b: 70 }, paper_bgcolor: '#fff', plot_bgcolor: '#fff',
+        autosize: true, margin: { l: 65, r: 18, t: 18, b: 42 }, paper_bgcolor: '#fff', plot_bgcolor: '#fff',
         font: { family: 'Segoe UI, sans-serif', size: 12, color: '#496171' },
         xaxis: { title: { text: `Temps simulé (${timeUnit})` }, range: [series.points[0]?.time ?? 0, series.points.at(-1)?.time ?? 1], gridcolor: '#edf1f4' },
-        yaxis: { title: { text: `${biomass ? 'Biomasse totale' : series.kind === 'catch_rate' ? 'Débit de capture' : 'Capture'} (${series.unit}${series.kind === 'catch_rate' ? ` / ${timeUnit}` : ''})` }, gridcolor: '#edf1f4', rangemode: 'tozero' },
+        yaxis: { title: { text: `${biomass ? 'Biomasse' : series.kind === 'catch_rate' ? 'Débit de capture' : 'Capture'} (${series.unit}${series.kind === 'catch_rate' && !series.unit.includes('/') ? ` / ${timeUnit}` : ''})` }, gridcolor: '#edf1f4', rangemode: 'tozero' },
         shapes, annotations, showlegend: false, hovermode: 'closest', uirevision: series.id,
       }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'], toImageButtonOptions: { filename: 'irritator-atelier', format: 'png', scale: 2 } });
       if (disposed) { plot.purge(element); return; }

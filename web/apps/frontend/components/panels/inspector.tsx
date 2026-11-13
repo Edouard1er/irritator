@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Eye, MousePointer2, Trash2 } from 'lucide-react';
-import type { Component, RunRequest } from '@contracts';
+import { unitLabel, type Component, type RunRequest } from '@contracts';
 import type { ComponentSpec, ParameterSpec } from '@/lib/modeling/model';
 import { NumberField } from './number-field';
 
@@ -24,7 +24,7 @@ export function Inspector({ component, spec, observation, onParameter, onRename,
     {component ? <>
       <div className="inspector-title"><span className="eyebrow">{onOpen ? 'COMPOSANT COUPLÉ' : 'COMPOSANT ATOMIQUE'}</span><h2>{spec?.name ?? component.type}</h2><code>{component.type}</code>{spec?.description && <p className="small">{spec.description}</p>}{onOpen && <button onClick={onOpen}>Ouvrir le contenu</button>}</div>
       <section className="inspector-section"><h3>Identité</h3><label className="field"><span>Identifiant du composant</span><input value={id} aria-invalid={!!idError} onChange={e => setId(e.target.value)} onBlur={() => setIdError(onRename(id))} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />{idError && <small role="alert">{idError}</small>}</label></section>
-      <section className="inspector-section"><h3>Paramètres</h3>{spec ? Object.keys(spec.parameters).length ? Object.entries(spec.parameters).map(([key, bounds]) => <ParameterField key={`${component.id}-${key}`} bounds={bounds} label={key} value={component.parameters[key] ?? bounds.default ?? NaN} minimum={bounds.minimum} maximum={bounds.maximum} onChange={value => onParameter(key, value)} hint={bounds.description ?? (key === 'offset' ? 'Délai depuis le début de simulation.' : key === 'X' ? 'Condition initiale.' : key === 'dQ' ? 'Quantum strictement positif.' : undefined)} />) : <p className="muted small">Aucun paramètre pour ce composant.</p> : <p className="inline-error">Métadonnées indisponibles. Reconnectez le catalogue pour éditer les paramètres.</p>}</section>
+      <section className="inspector-section"><h3>Paramètres</h3>{spec ? Object.keys(spec.parameters).length ? Object.entries(spec.parameters).map(([key, bounds]) => <ParameterField key={`${component.id}-${key}`} bounds={bounds} label={component.units?.parameters?.[key] ? `${key} (${unitLabel(component.units.parameters[key])})` : key} value={component.parameters[key] ?? bounds.default ?? NaN} minimum={bounds.minimum} maximum={bounds.maximum} onChange={value => onParameter(key, value)} hint={bounds.description ?? (key === 'offset' ? 'Délai depuis le début de simulation.' : key === 'X' ? 'Condition initiale.' : key === 'dQ' ? 'Quantum strictement positif.' : undefined)} />) : <p className="muted small">Aucun paramètre pour ce composant.</p> : <p className="inline-error">Métadonnées indisponibles. Reconnectez le catalogue pour éditer les paramètres.</p>}</section>
       <section className="inspector-section"><h3><Eye size={14} /> Observation</h3>{canObserve ? <label className="checkbox"><input type="checkbox" checked={!!observation} onChange={e => onObserve(e.target.checked, observation?.samplingInterval ?? 1)} /> Observer ce composant</label> : <p className="small">Sélectionnez le chemin d’instance dans « Observations hiérarchiques ».</p>}
         {observation && <NumberField key={`${component.id}-sampling`} label="Pas d’observation" value={observation.samplingInterval} minimum={1e-6} maximum={1e9} onChange={value => onObserve(true, value)} hint="Rééchantillonnage effectué par le moteur." />}
       </section>

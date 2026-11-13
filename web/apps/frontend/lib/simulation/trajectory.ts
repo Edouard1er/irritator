@@ -1,4 +1,4 @@
-import { wrapperOccurrences, type Component, type RunRequest } from '@contracts';
+import { scopeForPath, unitLabel, wrapperOccurrences, type Component, type ModelUnits, type RunRequest } from '@contracts';
 import type { HttpResult } from '@/lib/api/client';
 import reference from '../../../../examples/wrapper-schaefer-v3.json';
 
@@ -9,6 +9,7 @@ export type Trajectory = {
   id: string; runId: string; label: string; model: string; timeUnit: string;
   series: Series[]; parameters: Record<string, number>; warnings: string[]; status: string;
   provenance: string; isDemo: false;
+  units?: ModelUnits; parameterUnits?: Record<string, string>; scenarioId?: number; group?: string;
 };
 export type Mapping = { biomass?: string; capture?: string; captureKind?: Exclude<SeriesKind, 'biomass_total' | 'other'> };
 export type AlertConfig = { bCrit?: number; proximityRatio: number; slopeTolerance: number };
@@ -78,7 +79,7 @@ export function convertTime(value: number, from: string, to: string, explicitOri
   return undefined;
 }
 
-type Scope = Pick<RunRequest['model'], 'components' | 'connections'>;
+type Scope = Pick<RunRequest['model'], 'components' | 'connections' | 'units'>;
 const canonical = reference.model.definitions[0]!;
 const edgeKey = (e: Scope['connections'][number]) => `${e.from.component}:${e.from.port}>${e.to.component}:${e.to.port}`;
 /** Recognize the shipped Schaefer graph, never just an atom named N or C. */
@@ -102,7 +103,9 @@ function scopeAt(request: RunRequest, path: string): Scope | undefined {
   for (const id of path.split('/').filter(Boolean)) {
     const c: Component | undefined = scope?.components.find(c => c.id === id);
     const definition: string | undefined = c?.definition ?? (c?.type.startsWith('coupled:') ? c.type.slice(8) : undefined);
+    const parentUnits: ModelUnits | undefined = scope?.units;
     scope = request.model.definitions?.find(d => d.id === definition);
+    if (scope && !scope.units && parentUnits) scope = { ...scope, units: { time: parentUnits.time, provenance: parentUnits.provenance } };
   }
   return scope;
 }
@@ -116,9 +119,15 @@ export function normalizeRun(result: HttpResult, request: RunRequest): Trajector
       const points = normalizePoints(o.samples, warnings);
       if (kind === 'biomass_total' && points.some(p => p.value <= 0)) warnings.push('Biomasse nulle ou négative observée : vérifier les hypothèses du modèle.');
       if (kind.startsWith('catch_') && points.some((p, i) => p.value < 0 || (kind === 'catch_cumulative' && i > 0 && p.value < points[i - 1]!.value))) warnings.push('Anomalie de capture : valeur négative ou cumul décroissant.');
-      return { id: o.component, kind, unit: modelUnit, points };
+      const source = scopeForPath(request, atom, scope ?? request.model).component;
+      const declared = source?.units?.output ?? o.unit;
+      const convertMass = (declared === 'kg' || declared?.startsWith('kg/')) && ['biomass_total', 'catch_cumulative', 'catch_interval', 'catch_rate'].includes(kind);
+      return { id: o.component, kind, unit: unitLabel(convertMass ? declared!.replace('kg','t') : declared), points: convertMass ? points.map(p => ({ ...p, value: p.value / 1000 })) : points };
     });
-    return { id, runId: result.runId, label, model: result.modelId, timeUnit: modelUnit, series, parameters: params ?? {}, warnings: [...new Set(warnings)], status, provenance: `${result.diagnostics.engineVersion} / ${result.diagnostics.adapterVersion}`, isDemo: false };
+    const parameterUnits: Record<string, string> = {};
+    for (const c of scope?.components ?? []) { const key = c.id === 'N' ? 'B0/N0' : c.id === 'InvK' ? 'K' : c.id; const u = c.id === 'InvK' ? scope?.units?.biomass : c.units?.parameters?.[c.id === 'N' ? 'X' : 'value']; if (u) parameterUnits[key] = unitLabel(u === 'kg' ? 't' : u); }
+    const p = { ...params }; if (scope?.units?.biomass === 'kg') for (const key of ['B0/N0', 'K']) if (p[key] !== undefined) p[key] /= 1000;
+    return { id, runId: result.runId, label, model: result.modelId, timeUnit: unitLabel(scope?.units?.time), units: scope?.units, parameterUnits, series, parameters: p, warnings: [...new Set(warnings)], status, provenance: `${result.diagnostics.engineVersion} / ${result.diagnostics.adapterVersion}`, isDemo: false };
   };
   const runs: Trajectory[] = [];
   // Separate coupled occurrences: never pair lake A's N with lake B's C.
@@ -139,7 +148,7 @@ export function normalizeRun(result: HttpResult, request: RunRequest): Trajector
       const params = isSchaefer(scope) ? parameters(scope) : {};
       for (const factor of experiment?.factors ?? []) { const value = row.factors[factor.id]; if (finite(value)) params[factor.target === 'N' ? 'B0/N0' : factor.target] = value; }
       if (params.InvK !== undefined && params.InvK > 0) { params.K = 1 / params.InvK; delete params.InvK; }
-      runs.push(make(`${row.wrapperId}:${row.campaignId}:${row.scenarioId}`, `${row.wrapperId} · campagne ${row.campaignId} · situation ${row.scenarioId + 1} — ${Object.entries(row.factors).map(([k, v]) => `${k}=${v}`).join(', ')}`, row.observations, scope, row.status, params));
+      runs.push({ ...make(`${row.wrapperId}:${row.campaignId}:${row.scenarioId}`, `${row.wrapperId} · campagne ${row.campaignId} · situation ${row.scenarioId + 1} — ${Object.entries(row.factors).map(([k, v]) => `${k}=${v}`).join(', ')}`, row.observations, scope, row.status, params), scenarioId: row.scenarioId, group: `${row.wrapperId}:${row.campaignId}` });
     }
   }
   return runs;

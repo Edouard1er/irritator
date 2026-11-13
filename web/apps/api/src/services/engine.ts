@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { nativeRequest, attachResultUnits } from '../../../../packages/contracts/units.js';
 import { isDeepStrictEqual } from 'node:util';
 import { ApiError, catalog, runnerCapabilities, parseResult, parseWrapperResult, validateRequest, type RunRequest, type RunResult, type RunResultV2 } from '../../../../packages/contracts/index.js';
 import type { Config } from '../config/index.js';
@@ -103,7 +104,7 @@ export class ProcessEngine implements Engine {
     }
     validateRequest(effective);
     if (effective.schemaVersion === 3) await this.capabilities(signal);
-    const { value, exitCode } = await this.invoke([],JSON.stringify(effective),signal);
+    const { value, exitCode } = await this.invoke([],JSON.stringify(nativeRequest(effective)),signal);
     if(exitCode!==0) {
       const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown; diagnostics?: import('../../../../packages/contracts/index.js').StructuralDiagnostic[] } } | null;
       if(!failure || failure.schemaVersion!==1 || failure.status!=='failed' || typeof failure.error?.code!=='string' || typeof failure.error.message!=='string') throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner failed without a valid error envelope',502);
@@ -114,7 +115,7 @@ export class ProcessEngine implements Engine {
       const engine = Number.isInteger(detail.engineCategory) && Number.isInteger(detail.engineCode) ? { engineCategory:Number(detail.engineCategory),engineCode:Number(detail.engineCode) } : undefined;
       throw new ApiError(detail.code as string,detail.message as string,status,engine,detail.diagnostics);
     }
-    return effective.schemaVersion === 3 ? parseWrapperResult(value,effective) : parseResult(value,effective);
+    return attachResultUnits(effective.schemaVersion === 3 ? parseWrapperResult(value,effective) : parseResult(value,effective), effective);
   }
   async close(): Promise<void> {
     this.closed=true;

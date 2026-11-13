@@ -38,16 +38,16 @@ describe('Workshop presentation and player', () => {
   });
   it('sounds only at alert entries during continuous playback and never on seek or restart', async () => {
     vi.useFakeTimers(); const beep = vi.fn();
-    class FakeAudio { state = 'running'; currentTime = 0; destination = {}; resume = async () => {}; close = async () => {}; createOscillator() { return { connect() {}, frequency: { value: 0 }, start: beep, stop() {} }; } createGain() { return { connect() {}, gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} } }; } }
+    class FakeAudio { state = 'running'; currentTime = 0; destination = {}; resume = async () => {}; close = async () => {}; createOscillator() { return { connect() {}, disconnect() {}, frequency: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {} }, start: beep, stop() {} }; } createGain() { return { connect() {}, disconnect() {}, gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {} } }; } }
     vi.stubGlobal('AudioContext', FakeAudio); start();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });
     await act(async () => { fireEvent.click(screen.getByLabelText('Son des alertes')); });
     expect(beep).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' }));
     act(() => vi.advanceTimersByTime(5000)); act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(1);
-    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(2);
-    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(2);
-    fireEvent.change(screen.getByLabelText('Position temporelle'), { target: { value: '2' } }); expect(beep).toHaveBeenCalledTimes(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Recommencer' })); expect(beep).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(3); // Voice + slow modulation for red.
+    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(3);
+    fireEvent.change(screen.getByLabelText('Position temporelle'), { target: { value: '2' } }); expect(beep).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Recommencer' })); expect(beep).toHaveBeenCalledTimes(3);
   });
   it('switches real scenarios and resets their player and workshop threshold', () => {
     start(); fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import type { RunResult } from '@contracts';
+import { unitLabel, type RunResult } from '@contracts';
 import type * as Plotly from 'plotly.js';
 
 let plotlyPromise: Promise<typeof Plotly> | undefined;
@@ -28,16 +28,18 @@ export default function TrajectoryPlot({ observations, childClock = false }: { o
     loadPlotly().then(async module => {
       if (disposed) return;
       plot = module;
+      const times = [...new Set(observations.map(o => unitLabel(o.timeUnit)))];
+      const values = [...new Set(observations.map(o => unitLabel(o.unit)))];
       await plot.react(target, observations.map(o => ({
         type: 'scatter' as const, mode: 'lines+markers' as const, name: o.label ?? o.component,
         x: o.samples.map(s => s.time), y: o.samples.map(s => s.value),
         line: { width: 2, shape: 'linear' as const }, marker: { size: 5 },
-        hovertemplate: `${o.hoverLabel ?? o.component}<br>t = %{x}<br>valeur = %{y}<extra></extra>`,
+        hovertemplate: `${o.hoverLabel ?? o.component}<br>t = %{x} (${unitLabel(o.timeUnit)})<br>valeur = %{y} (${unitLabel(o.unit)})<extra></extra>`,
       })), {
         autosize: true, margin: { l: 58, r: childClock ? 310 : 24, t: 16, b: 45 },
         paper_bgcolor: 'white', plot_bgcolor: 'white', font: { family: 'Segoe UI, sans-serif', size: 11, color: '#576777' },
-        xaxis: { title: { text: childClock ? 'Temps local enfant' : 'Temps simulé' }, gridcolor: '#eff2f5', zerolinecolor: '#e1e7ed' },
-        yaxis: { title: { text: 'Valeur observée' }, gridcolor: '#eff2f5', zerolinecolor: '#e1e7ed' },
+        xaxis: { title: { text: `${childClock ? 'Temps local enfant' : 'Temps simulé'} (${times.join(', ')})` }, gridcolor: '#eff2f5', zerolinecolor: '#e1e7ed' },
+        yaxis: { title: { text: `Valeur observée (${values.join(', ')})` }, gridcolor: '#eff2f5', zerolinecolor: '#e1e7ed' },
         colorway: childClock ? ['#107b77', '#6b66b6', '#cf8640', '#3d7db6', '#b55872', '#55752f', '#e3633c', '#9d4695', '#4c91b5', '#997044', '#588f74', '#b56728'] : ['#107b77', '#6b66b6', '#cf8640', '#3d7db6', '#b55872'],
         legend: childClock ? { orientation: 'v', x: 1.02, y: 1, font: { size: 9 } } : { orientation: 'h', x: 1, xanchor: 'right', y: 1.13 }, showlegend: observations.length > 1,
         hovermode: 'closest', uirevision: 'trajectory',

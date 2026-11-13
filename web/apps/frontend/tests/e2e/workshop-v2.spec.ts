@@ -1,0 +1,110 @@
+import { test, expect } from '@playwright/test';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+const evidence=path.resolve('../../../reports/iteration2-evidence');
+const fixture=path.resolve('../../examples/atelier-schaefer-month-v3.json');
+async function run(page:import('@playwright/test').Page,buffer?:Buffer){
+  page.on('dialog',d=>d.accept());await page.goto('/');await expect(page.getByRole('button',{name:/Moteur connecté/})).toBeVisible();
+  await page.getByLabel('Ouvrir un modèle JSON',{exact:true}).setInputFiles(buffer?{name:'atelier-dense.json',mimeType:'application/json',buffer}:fixture);
+  const pending=page.waitForResponse(r=>r.url().endsWith('/api/v1/simulations/run')&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'Exécuter la simulation',exact:true}).click();const response=await pending;const data=await response.json();expect(response.status(),JSON.stringify(data)).toBe(200);return data;
+}
+test('monthly real engine: synchronized indicators, qualitative scenarios, scale and compact projection',async({page})=>{
+  await page.setViewportSize({width:1920,height:1080});const errors:string[]=[],external:string[]=[];let calls=0;
+  page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().endsWith('/api/v1/simulations/run'))calls++;if(/^https?:/.test(r.url())&&!['127.0.0.1','localhost'].includes(new URL(r.url()).hostname))external.push(r.url());});
+  const data=await run(page);await mkdir(evidence,{recursive:true});await writeFile(path.join(evidence,'real-engine-result.json'),JSON.stringify(data,null,2));
+  const options=await page.getByLabel('Situation simulée').locator('option').allTextContents();expect(options).toHaveLength(6);expect(options.join(' ')).toContain('Pêche faible');expect(options.join(' ')).toContain('Pêche élevée');expect(options.join(' ')).toContain('variante A');expect(options.join(' ')).toContain('variante B');
+  await expect(page.getByLabel('Son des alertes')).not.toBeChecked();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','150');
+  await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('140');
+  await expect(page.getByRole('heading',{name:'ALERTE : SEUIL APPROCHÉ'})).toBeVisible();
+  await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
+  const titles=await page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>[el.layout.xaxis.title.text,el.layout.yaxis.title.text]);expect(titles[0]).toContain('mois');expect(titles[1]).toContain('(t)');
+  await page.screenshot({path:path.join(evidence,'01-orange-1920.png'),fullPage:true});
+  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(async()=>Number(await page.getByLabel('Position temporelle').inputValue())).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();const pausedCanvas=await page.locator('canvas[data-fish-count]').evaluate((el:HTMLCanvasElement)=>el.toDataURL());
+  await page.waitForTimeout(200);expect(await page.locator('canvas[data-fish-count]').evaluate((el:HTMLCanvasElement)=>el.toDataURL())).toBe(pausedCanvas);
+  await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
+  const row=data.scenarioTrajectories[0],b=row.observations.find((o:any)=>o.component==='N').samples.at(-1),c=row.observations.find((o:any)=>o.component==='C').samples;
+  const last=c.at(-1),boundary=c.find((s:any)=>Math.abs(s.time-(last.time-12))<1e-10),annual=last.value-boundary.value;
+  const metrics=page.locator('.metric-card');const fmt=(n:number)=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
+  await expect(metrics.nth(0)).toContainText(fmt(b.value));await expect(metrics.nth(1)).toContainText(fmt(last.value));await expect(metrics.nth(2)).toContainText(fmt(annual));
+  await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count',String(Math.round(b.value)));
+  await expect(page.locator('[data-biomass]')).toHaveAttribute('data-biomass',String(b.value));
+  await expect(page.getByRole('heading',{name:'ÉVOLUTION FAVORABLE'})).toBeVisible();
+  await writeFile(path.join(evidence,'layout-1920.json'),JSON.stringify(await page.locator('.simulation-container').evaluate(el=>({height:el.clientHeight,scroll:el.scrollHeight,playerBottom:el.querySelector('.timeline-player')!.getBoundingClientRect().bottom,viewport:innerHeight})),null,2));
+  expect(await page.locator('.simulation-container').evaluate(el=>el.scrollHeight<=el.clientHeight+2)).toBe(true);
+  await page.screenshot({path:path.join(evidence,'02-green-1920.png'),fullPage:true});
+  await page.getByRole('button',{name:'Grand écran',exact:true}).click();await expect(page.getByRole('button',{name:'Quitter le grand écran'})).toBeVisible();
+  await expect(page.getByLabel('Position temporelle')).toHaveValue('200');
+  expect(await page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
+  await page.screenshot({path:path.join(evidence,'03-fullscreen.png'),fullPage:true});
+  await page.keyboard.press('Escape');await expect(page.getByRole('button',{name:'Grand écran',exact:true})).toBeVisible();await expect(page.getByLabel('Position temporelle')).toHaveValue('200');
+  await page.getByRole('button',{name:'Scientifique',exact:true}).click();await expect(page.getByLabel('Situation simulée').locator('option').first()).toContainText('E = 80');
+  await expect(page.locator('.prospective-trajectories .js-plotly-plot')).toBeVisible();
+  expect(await page.locator('.prospective-trajectories .js-plotly-plot').evaluate((el:any)=>el.layout.xaxis.title.text)).toContain('mois');
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:'CSV des trajectoires prospectives'}).click();const file=await download;const csv=await readFile((await file.path())!,'utf8');expect(csv).toContain(',timeUnit,unit');expect(csv).toContain('"month","t"');
+  await page.screenshot({path:path.join(evidence,'04-scientific.png'),fullPage:true});
+  await page.getByRole('button',{name:'Lecture pêcheur',exact:true}).click();await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('140');
+  await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
+  await expect(page.getByRole('heading',{name:'DANGER : SEUIL FRANCHI'})).toBeVisible();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','84');
+  await page.screenshot({path:path.join(evidence,'05-red-1920.png'),fullPage:true});
+  await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('Home');
+  await page.getByLabel('Position temporelle').press('ArrowRight');
+  // At 0.1 month, the high effort trajectory declines while still within orange.
+  await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('50');await expect(page.getByRole('heading',{name:'BAISSE À SURVEILLER'})).toBeVisible();
+  await page.screenshot({path:path.join(evidence,'06-yellow-1920.png'),fullPage:true});
+  await page.setViewportSize({width:1366,height:768});await page.screenshot({path:path.join(evidence,'07-desktop-1366.png'),fullPage:true});await page.getByRole('button',{name:'Reprendre',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('button',{name:'Reprendre',exact:true})).toBeInViewport();
+  await page.setViewportSize({width:390,height:844});await page.emulateMedia({reducedMotion:'reduce'});await expect(page.getByLabel('Mouvement réduit')).toBeChecked();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.locator('.simulation-container').evaluate(el=>el.scrollTop=0);await page.screenshot({path:path.join(evidence,'08-mobile.png'),fullPage:true});
+  expect(calls).toBe(1);expect(errors).toEqual([]);expect(external).toEqual([]);
+});
+test('presentation fallback preserves time and exits with Escape when fullscreen is denied',async({page})=>{
+  await page.addInitScript(()=>{Element.prototype.requestFullscreen=async()=>{throw new Error('Denied');};});
+  await run(page);await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
+  await page.getByRole('button',{name:'Grand écran',exact:true}).click();await expect(page.getByText('Présentation dans la fenêtre · Échap pour revenir.')).toBeVisible();
+  await expect(page.getByLabel('Position temporelle')).toHaveValue('200');await page.keyboard.press('Escape');await expect(page.getByRole('button',{name:'Grand écran',exact:true})).toBeVisible();await expect(page.getByLabel('Position temporelle')).toHaveValue('200');
+});
+
+test('real Web Audio red alarm remains single and stops on pause, mute, scenario and exit',async({page})=>{
+  await page.addInitScript(()=>{
+    const Native=window.AudioContext;let active=0;
+    (window as any).activeAlarmOscillators=()=>active;
+    window.AudioContext=class extends Native {createOscillator(){const node=super.createOscillator();const start=node.start.bind(node),stop=node.stop.bind(node);let live=false;
+      node.start=(when?:number)=>{start(when);if(!live){live=true;active++;}};
+      node.stop=(when?:number)=>{stop(when);if(live){live=false;active--;}};return node;}};
+  });
+  await run(page);await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('230');
+  await page.getByLabel('Volume des alertes').focus();await page.getByLabel('Volume des alertes').press('Home');
+  const count=()=>page.evaluate(()=>(window as any).activeAlarmOscillators());expect(await count()).toBe(0);
+  await page.getByLabel('Son des alertes').check();expect(await count()).toBe(0);
+  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(count).toBe(2);
+  await page.waitForTimeout(450);expect(await count()).toBe(2);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();await expect.poll(count).toBe(0);
+  await page.getByRole('button',{name:'Reprendre',exact:true}).click();await expect.poll(count).toBe(2);
+  await page.getByRole('button',{name:'Arrêter l’alarme'}).click();await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
+  await page.getByLabel('Son des alertes').check();await expect.poll(count).toBe(2);
+  await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
+  await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('230');await page.getByLabel('Son des alertes').check();await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(count).toBe(2);
+  await page.getByRole('button',{name:'Modélisation',exact:true}).click();await expect.poll(count).toBe(0);
+});
+
+test('hundreds of native biomass symbols remain responsive with no DOM expansion',async({page})=>{
+  await page.setViewportSize({width:1920,height:1080});
+  const model=JSON.parse(await readFile(fixture,'utf8')),definition=model.model.definitions.find((d:any)=>d.id==='Schaefer');
+  definition.components.find((c:any)=>c.id==='N').parameters.X=600;definition.components.find((c:any)=>c.id==='InvK').parameters.value=.001;
+  const experiment=model.model.components.find((c:any)=>c.id==='prospectives').experiment;
+  for(const factor of experiment.factors)if(factor.values)factor.values=[factor.values[0]];
+  const data=await run(page,Buffer.from(JSON.stringify(model)));const canvas=page.locator('canvas[data-fish-count]');
+  await expect(canvas).toHaveAttribute('data-fish-count','600');await expect(page.locator('.lake-illustration canvas')).toHaveCount(1);expect(await page.locator('.lake-illustration svg').count()).toBe(0);
+  await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
+  await expect.poll(()=>page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data?.[0]?.y?.length)).toBe(201);
+  await mkdir(evidence,{recursive:true});await page.screenshot({path:path.join(evidence,'09-dense-600.png'),fullPage:true});
+  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();
+  const intervals=await page.evaluate(()=>new Promise<number[]>(resolve=>{const deltas:number[]=[];let last=0;const frame=(time:number)=>{if(last)deltas.push(time-last);last=time;if(deltas.length===45)resolve(deltas);else requestAnimationFrame(frame);};requestAnimationFrame(frame);}));
+  await page.getByRole('button',{name:'Pause',exact:true}).click();const sorted=intervals.toSorted((a,b)=>a-b),p95=sorted[Math.floor(sorted.length*.95)]!;
+  await writeFile(path.join(evidence,'canvas-performance.json'),JSON.stringify({initialBiomass:600,symbols:Number(await canvas.getAttribute('data-fish-count')),frames:intervals.length,medianMs:sorted[Math.floor(sorted.length/2)],p95Ms:p95,maxMs:sorted.at(-1)},null,2));
+  expect(p95).toBeLessThan(200);const image=await canvas.evaluate((el:HTMLCanvasElement)=>el.toDataURL());await page.waitForTimeout(200);expect(await canvas.evaluate((el:HTMLCanvasElement)=>el.toDataURL())).toBe(image);
+  await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
+  const final=data.scenarioTrajectories[0].observations.find((o:any)=>o.component==='N').samples.at(-1).value;
+  await expect(canvas).toHaveAttribute('data-fish-count',String(Math.round(final)));expect(final).toBeGreaterThan(600);
+});

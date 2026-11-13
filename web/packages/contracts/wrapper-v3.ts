@@ -69,6 +69,7 @@ export function wrapperOutputs(e: WrapperExperiment): WrapperLayout['outputs'] {
   return out.map((p, port) => ({ port, ...p }));
 }
 export interface ScenarioTrajectory {
+  units?: import('./units.js').ModelUnits;
   wrapperId: string; campaignId: number; scenarioId: number;
   status: 'completed' | 'numerical-invalid' | 'budget-exceeded' | 'canceled' | 'unavailable';
   factors: Record<string, number>; start: number; horizonRequested: number; horizonApplied: number;

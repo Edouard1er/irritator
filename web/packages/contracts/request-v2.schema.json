@@ -132,9 +132,15 @@
                     }
                   }
                 }
+              },
+              "units": {
+                "$ref": "#/definitions/modelUnits"
               }
             }
           }
+        },
+        "units": {
+          "$ref": "#/definitions/modelUnits"
         }
       }
     },
@@ -264,6 +270,9 @@
         },
         "definition": {
           "$ref": "#/definitions/id"
+        },
+        "units": {
+          "$ref": "#/definitions/componentUnits"
         }
       },
       "oneOf": [
@@ -316,6 +325,182 @@
           },
           "name": {
             "$ref": "#/definitions/id"
+          }
+        }
+      }
+    },
+    "modelUnits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "time",
+        "provenance"
+      ],
+      "properties": {
+        "time": {
+          "enum": [
+            "month",
+            "year"
+          ]
+        },
+        "biomass": {
+          "enum": [
+            "t",
+            "kg"
+          ]
+        },
+        "cumulativeCatch": {
+          "enum": [
+            "t",
+            "kg"
+          ]
+        },
+        "catchRate": {
+          "enum": [
+            "t",
+            "kg",
+            "month",
+            "year",
+            "t/month",
+            "t/year",
+            "kg/month",
+            "kg/year",
+            "1/month",
+            "1/year",
+            "1/t",
+            "1/kg",
+            "ratio",
+            "effort",
+            "1/(effort*month)",
+            "1/(effort*year)"
+          ]
+        },
+        "growthRate": {
+          "enum": [
+            "t",
+            "kg",
+            "month",
+            "year",
+            "t/month",
+            "t/year",
+            "kg/month",
+            "kg/year",
+            "1/month",
+            "1/year",
+            "1/t",
+            "1/kg",
+            "ratio",
+            "effort",
+            "1/(effort*month)",
+            "1/(effort*year)"
+          ]
+        },
+        "accessibility": {
+          "enum": [
+            "ratio"
+          ]
+        },
+        "effort": {
+          "enum": [
+            "effort"
+          ]
+        },
+        "catchability": {
+          "enum": [
+            "t",
+            "kg",
+            "month",
+            "year",
+            "t/month",
+            "t/year",
+            "kg/month",
+            "kg/year",
+            "1/month",
+            "1/year",
+            "1/t",
+            "1/kg",
+            "ratio",
+            "effort",
+            "1/(effort*month)",
+            "1/(effort*year)"
+          ]
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "note"
+          ],
+          "properties": {
+            "basis": {
+              "enum": [
+                "declared",
+                "workshop-convention",
+                "converted"
+              ]
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "sourceTime": {
+              "enum": [
+                "month",
+                "year"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "componentUnits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "enum": [
+            "t",
+            "kg",
+            "month",
+            "year",
+            "t/month",
+            "t/year",
+            "kg/month",
+            "kg/year",
+            "1/month",
+            "1/year",
+            "1/t",
+            "1/kg",
+            "ratio",
+            "effort",
+            "1/(effort*month)",
+            "1/(effort*year)"
+          ]
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "enum": [
+              "t",
+              "kg",
+              "month",
+              "year",
+              "t/month",
+              "t/year",
+              "kg/month",
+              "kg/year",
+              "1/month",
+              "1/year",
+              "1/t",
+              "1/kg",
+              "ratio",
+              "effort",
+              "1/(effort*month)",
+              "1/(effort*year)"
+            ]
           }
         }
       }

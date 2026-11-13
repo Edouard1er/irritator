@@ -292,3 +292,9 @@ IRRITATOR_API_URL doit être défini avant le build ou le démarrage dev de Next
 ## Atelier participatif — niveau 1
 
 Voir [l’intégration, le mapping scientifique et la recette](./ATELIER_NIVEAU1.md).
+
+Itération 2 : ouvrir [`atelier-schaefer-month-v3.json`](../../examples/atelier-schaefer-month-v3.json)
+pour l’atelier explicitement défini en tonnes et mois. Cette nouvelle convention
+pédagogique ne calibre pas les anciens modèles, dont les unités restent inconnues.
+Le rapport décrit les fenêtres de 12 mois, les symboles proportionnels, les alarmes,
+la jauge et le mode Grand écran.

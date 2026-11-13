@@ -84,3 +84,43 @@
 @media(max-width:720px){.workbench{min-height:100dvh;height:100dvh}.simulation-workspace{padding:20px 14px}.workshop-heading{flex-direction:column;gap:12px}.workshop-heading h1{font-size:23px}.workshop-main-grid,.workshop-secondary-grid{grid-template-columns:1fr}.workshop-metrics{grid-template-columns:1fr;gap:10px}.metric-card{display:flex;align-items:center;justify-content:space-between;gap:15px}.metric-card h2{min-height:0;max-width:48%;font-size:13px}.metric-card p{margin:0;text-align:right}.metric-card p>span{display:block;max-width:150px;margin-top:5px}.qualitative-banner{gap:12px;padding:18px 15px;flex-wrap:wrap}.qualitative-banner h2{font-size:21px}.qualitative-banner>div{flex:1;min-width:180px}.status-symbol{width:40px;height:40px;font-size:26px}.banner-time{margin-left:52px}.workshop-card{padding:18px 14px}.workshop-plot{height:310px}.timeline-player{padding:18px 14px}.timeline-buttons output{width:100%;margin:8px 0 0}.timeline-settings{gap:15px}.workspace-navigation{padding:0 16px;gap:25px}.app-header .header-divider,.app-header .model-name{display:none}.file-actions{margin-left:auto}.header-right{width:100%;justify-content:space-between}.app-footer{font-size:8px;padding:0 8px}.app-footer>span:last-child{display:none}.scientific-workspace .results-toolbar{align-items:start;flex-direction:column;padding:8px}.scientific-workspace .tabs{gap:12px;flex-wrap:wrap}.scientific-workspace .results-actions{margin:8px}.scientific-workspace .prospective-trajectories{padding:12px}.scientific-workspace .data-area{max-width:100%}}
 @media(prefers-reduced-motion:reduce){.lake-illustration.moving svg,.qualitative-banner.is-reading{animation:none!important}}
 @media(prefers-reduced-transparency:reduce){.lake-ripple{border-color:#d4edf0}.canvas-label{background:#fff}}
+
+/* Iteration 2: a compact projection dashboard; smaller screens may scroll. */
+.simulation-workspace{max-width:1900px;padding:10px 22px 4px;line-height:1.4}
+.workshop-topline{display:flex;gap:18px;align-items:center;margin-bottom:10px;min-height:48px}
+.workshop-heading{display:block;margin:0;flex:1;min-width:220px}
+.workshop-heading h1{font-size:20px;margin:2px 0}.workshop-heading .run-badge{display:none}
+.scenario-picker{display:grid;gap:3px;font-size:11px;min-width:230px;max-width:36%;flex:1}
+.scenario-picker select{width:100%;font-size:13px;min-height:36px}
+.audience-toggle{padding:2px}.audience-toggle button{min-height:34px}.presentation-button{min-height:39px}
+.qualitative-banner{min-height:60px;padding:10px 16px;margin-bottom:10px;gap:14px;border-radius:9px}
+.qualitative-banner h2{font-size:22px}.qualitative-banner p{font-size:12px}
+.status-symbol{width:38px;height:38px;font-size:26px}.banner-time{align-self:center;font-size:14px}
+.workshop-metrics{gap:12px;margin-bottom:10px}.metric-card{padding:10px 16px;min-height:80px}
+.metric-card h2{font-size:13px;min-height:0;font-weight:600}.metric-card p{margin-top:4px}
+.metric-card strong{font-size:29px}.metric-card p>span{font-size:16px}.metric-card small{font-size:10px;color:#526b7b}
+.workshop-main-grid,.workshop-secondary-grid{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:12px;margin-bottom:10px}
+.workshop-card{padding:10px 16px;border-radius:9px}.workshop-card h2{font-size:15px}
+.workshop-plot{height:185px;margin:0;width:100%}.workshop-secondary-grid .workshop-plot{height:142px}
+.workshop-card>p{font-size:11px;margin-top:4px}.status-legend{margin:0;gap:5px 13px;font-size:9px}
+.lake-card{display:flex;flex-direction:column}.lake-illustration{flex:1;min-height:110px;height:130px;margin-top:6px;background:radial-gradient(ellipse at 35% 30%,#d5f4ee,#8acfd7 65%,#3b9db6);border-radius:8px}
+.lake-illustration canvas{display:block;width:100%;height:100%;position:absolute;inset:0}
+.lake-count{position:absolute;bottom:6px;right:8px;background:#ffffffe8;border:1px solid #b8dce0;padding:2px 7px;border-radius:12px;font-size:10px;color:#184b5e}
+.lake-unavailable{padding:25px 15px;color:#264f5f}.illustration-note{padding:4px 0;background:none;font-size:11px!important}
+.lake-card .accessibility-note{margin-top:4px;padding:4px 7px;font-size:10px}
+.resource-gauge{display:flex;flex-direction:column;justify-content:space-between}
+.gauge-summary{display:flex;align-items:center;justify-content:space-between;margin:4px 0;color:var(--state-ink);font-size:12px}.gauge-summary strong{font-size:20px}
+.resource-gauge svg{display:block;width:100%;height:100px;overflow:visible}.resource-gauge>p{font-size:10px}
+.gauge-legend{display:flex;gap:14px;font-size:10px}.gauge-legend span{display:flex;align-items:center;gap:5px}.gauge-legend i{width:9px;height:9px;border-radius:50%}
+.timeline-player{padding:8px 14px;border-radius:9px}.timeline-buttons{gap:10px}.timeline-buttons button{min-height:34px;font-size:12px}.timeline-buttons>label{display:flex;align-items:center;gap:7px;font-size:11px}.timeline-buttons select{padding:4px}
+.timeline-slider{margin-top:5px;gap:0;font-size:10px}.timeline-slider input{height:21px}
+.timeline-settings{gap:10px 18px;margin:4px 0 0;font-size:11px}.timeline-settings button{font-size:11px;padding:5px 8px}.timeline-settings input[type=range]{width:90px;padding:0;accent-color:var(--accent)}.timeline-settings input[type=number]{width:82px;padding:4px}
+.workshop-hypotheses{padding:5px 0 0;font-size:11px}.workshop-hypotheses summary{padding:3px 0}.hypothesis-settings{display:flex;align-items:center;gap:18px;flex-wrap:wrap}.hypothesis-settings label{display:flex;align-items:center;gap:6px}.hypothesis-settings input[type=number]{width:90px}
+.fullscreen-note{font-size:11px;margin-bottom:6px;color:#486372}
+.simulation-workspace.presentation-mode{position:fixed;inset:0;z-index:1000;overflow:auto;background:#f2f7f8;max-width:none;width:100%;height:100dvh;padding:14px 24px}
+.presentation-mode .workshop-plot{height:clamp(190px,27vh,360px)}.presentation-mode .workshop-secondary-grid .workshop-plot{height:clamp(150px,19vh,240px)}
+.presentation-mode .lake-illustration{min-height:170px}.presentation-mode .resource-gauge svg{height:130px}
+.simulation-workspace:fullscreen{background:#f2f7f8}
+@media(min-width:1600px) and (min-height:1000px){.simulation-workspace:not(.presentation-mode) .workshop-plot{height:215px}.simulation-workspace:not(.presentation-mode) .workshop-secondary-grid .workshop-plot{height:160px}.resource-gauge svg{height:112px}}
+@media(max-width:1200px){.workshop-topline{flex-wrap:wrap;gap:10px}.workshop-heading{flex-basis:45%}.scenario-picker{max-width:none;flex-basis:45%}.audience-toggle{margin-right:auto}}
+@media(max-width:720px){.simulation-workspace{padding:12px}.workshop-topline{gap:10px}.workshop-heading{min-width:0;flex-basis:100%}.workshop-heading h1{font-size:21px}.scenario-picker{flex-basis:100%;min-width:0}.workshop-metrics{grid-template-columns:1fr;gap:8px}.metric-card{display:block;padding:10px 12px;min-height:72px}.metric-card h2{max-width:none}.metric-card p{margin:4px 0;text-align:left}.metric-card p>span{display:inline;font-size:15px}.workshop-main-grid,.workshop-secondary-grid{grid-template-columns:1fr}.workshop-plot,.presentation-mode .workshop-plot{height:260px}.workshop-secondary-grid .workshop-plot,.presentation-mode .workshop-secondary-grid .workshop-plot{height:210px}.lake-illustration{height:230px;min-height:230px}.resource-gauge svg{height:140px}.banner-time{margin-left:0}.qualitative-banner h2{font-size:19px}.qualitative-banner>div{min-width:0}.timeline-buttons output{margin:0}.timeline-settings{gap:12px}.simulation-workspace.presentation-mode{padding:12px}.status-legend{font-size:10px}.workshop-card{padding:12px}.gauge-legend{gap:8px;flex-wrap:wrap}}
