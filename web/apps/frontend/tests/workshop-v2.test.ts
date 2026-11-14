@@ -79,7 +79,7 @@ describe('Twelve-month cumulative window',()=>{
   });
   it('does not conceal gaps, negative or decreasing cumulatives',()=>{expect(rollingCatch([{time:0,value:0},{time:10,value:100},{time:12,value:80}],12,'month').value).toBeUndefined();expect(rollingCatch([{time:0,value:0},{time:5,value:NaN},{time:12,value:80}],12,'month').value).toBeUndefined();});
 });
-describe('Tonnes represented by fish symbols',()=>{
-  it.each([20,50,100,150,250,700])('%s tonnes are represented without a hidden cap',value=>expect(fishCount(value,'t')).toBe(value));
-  it('rounds only the symbol count and refuses an unknown physical scale',()=>{expect(fishCount(83.87,'t')).toBe(84);expect(fishCount(83.1,'t')).toBe(83);expect(fishCount(-1,'t')).toBeUndefined();expect(fishCount(100,'unité du modèle')).toBeUndefined();});
+describe('Tonnes represented by fish',()=>{
+  it.each([20,50,100,150,158.6,250,300,700])('%s tonnes are represented without a hidden cap',value=>expect(fishCount(value,'t')).toBe(Math.round(value/10)));
+  it('rounds only the fish count and refuses an unknown physical scale',()=>{expect(fishCount(83.87,'t')).toBe(8);expect(fishCount(158.6,'t')).toBe(16);expect(fishCount(-1,'t')).toBe(0);expect(fishCount(100,'unité du modèle')).toBeUndefined();});
 });

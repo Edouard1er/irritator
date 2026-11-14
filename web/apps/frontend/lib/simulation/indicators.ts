@@ -35,5 +35,5 @@ export function rollingCatch(points: Point[], time: number, timeUnit?: 'month' |
   return current >= previous ? { from, to: time, value: current - previous, reason: 'Fenêtre complète · bornes observées' } : { from, to: time, reason: 'Cumul décroissant' };
 }
 
-/** Nearest whole pictogram; underlying numeric biomass is never rounded. */
-export const fishCount = (biomass?: number, unit?: string): number | undefined => unit === 't' && biomass !== undefined && Number.isFinite(biomass) && biomass >= 0 && Number.isSafeInteger(Math.round(biomass)) ? Math.round(biomass) : undefined;
+/** One rendered fish per ten tonnes; native biomass remains unchanged. */
+export const fishCount = (biomass?: number, unit?: string): number | undefined => unit === 't' && biomass !== undefined && Number.isFinite(biomass) && Number.isSafeInteger(Math.round(biomass / 10)) ? Math.max(0, Math.round(biomass / 10)) : undefined;

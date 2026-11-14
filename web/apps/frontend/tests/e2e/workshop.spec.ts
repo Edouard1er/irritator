@@ -22,7 +22,7 @@ test('atelier réel : charger, lancer, lire, pause, reprendre, recommencer et co
   expect(response.status(), JSON.stringify(result)).toBe(200); expect(result.scenarioTrajectories).toHaveLength(6);
   await writeFile(path.join(evidence, 'execution-reelle.json'), JSON.stringify({ request: response.request().postDataJSON(), result }, null, 2));
   await expect(page.locator('.simulation-workspace')).toBeVisible(); await expect(page.getByLabel('Situation simulée').locator('option')).toHaveCount(6);
-  await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
+  await expect(page.getByLabel('Son des alertes')).toBeChecked();
   await page.getByLabel('Seuil choisi pour l’atelier', { exact: true }).fill('140');
   await expect(page.getByRole('heading', { name: 'ALERTE : SEUIL APPROCHÉ' })).toBeVisible();
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();

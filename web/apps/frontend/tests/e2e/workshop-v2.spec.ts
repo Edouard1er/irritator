@@ -14,7 +14,7 @@ test('monthly real engine: synchronized indicators, qualitative scenarios, scale
   page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().endsWith('/api/v1/simulations/run'))calls++;if(/^https?:/.test(r.url())&&!['127.0.0.1','localhost'].includes(new URL(r.url()).hostname))external.push(r.url());});
   const data=await run(page);await mkdir(evidence,{recursive:true});await writeFile(path.join(evidence,'real-engine-result.json'),JSON.stringify(data,null,2));
   const options=await page.getByLabel('Situation simulée').locator('option').allTextContents();expect(options).toHaveLength(6);expect(options.join(' ')).toContain('Pêche faible');expect(options.join(' ')).toContain('Pêche élevée');expect(options.join(' ')).toContain('variante A');expect(options.join(' ')).toContain('variante B');
-  await expect(page.getByLabel('Son des alertes')).not.toBeChecked();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','150');
+  await expect(page.getByLabel('Son des alertes')).toBeChecked();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','15');
   await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('140');
   await expect(page.getByRole('heading',{name:'ALERTE : SEUIL APPROCHÉ'})).toBeVisible();
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
@@ -28,7 +28,7 @@ test('monthly real engine: synchronized indicators, qualitative scenarios, scale
   const last=c.at(-1),boundary=c.find((s:any)=>Math.abs(s.time-(last.time-12))<1e-10),annual=last.value-boundary.value;
   const metrics=page.locator('.metric-card');const fmt=(n:number)=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(n);
   await expect(metrics.nth(0)).toContainText(fmt(b.value));await expect(metrics.nth(1)).toContainText(fmt(last.value));await expect(metrics.nth(2)).toContainText(fmt(annual));
-  await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count',String(Math.round(b.value)));
+  await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count',String(Math.round(b.value/10)));
   await expect(page.locator('[data-biomass]')).toHaveAttribute('data-biomass',String(b.value));
   await expect(page.getByRole('heading',{name:'ÉVOLUTION FAVORABLE'})).toBeVisible();
   await writeFile(path.join(evidence,'layout-1920.json'),JSON.stringify(await page.locator('.simulation-container').evaluate(el=>({height:el.clientHeight,scroll:el.scrollHeight,playerBottom:el.querySelector('.timeline-player')!.getBoundingClientRect().bottom,viewport:innerHeight})),null,2));
@@ -46,7 +46,7 @@ test('monthly real engine: synchronized indicators, qualitative scenarios, scale
   await page.screenshot({path:path.join(evidence,'04-scientific.png'),fullPage:true});
   await page.getByRole('button',{name:'Lecture pêcheur',exact:true}).click();await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('140');
   await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
-  await expect(page.getByRole('heading',{name:'DANGER : SEUIL FRANCHI'})).toBeVisible();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','84');
+  await expect(page.getByRole('heading',{name:'DANGER : SEUIL FRANCHI'})).toBeVisible();await expect(page.locator('canvas[data-fish-count]')).toHaveAttribute('data-fish-count','8');
   await page.screenshot({path:path.join(evidence,'05-red-1920.png'),fullPage:true});
   await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('Home');
   await page.getByLabel('Position temporelle').press('ArrowRight');
@@ -83,19 +83,19 @@ test('real Web Audio red alarm remains single and stops on pause, mute, scenario
   await page.getByRole('button',{name:'Reprendre',exact:true}).click();await expect.poll(count).toBe(2);
   await page.getByRole('button',{name:'Arrêter l’alarme'}).click();await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
   await page.getByLabel('Son des alertes').check();await expect.poll(count).toBe(2);
-  await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
+  await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).toBeChecked();
   await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('230');await page.getByLabel('Son des alertes').check();await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(count).toBe(2);
   await page.getByRole('button',{name:'Modélisation',exact:true}).click();await expect.poll(count).toBe(0);
 });
 
-test('hundreds of native biomass symbols remain responsive with no DOM expansion',async({page})=>{
+test('native biomass fish remain responsive with no DOM expansion',async({page})=>{
   await page.setViewportSize({width:1920,height:1080});
   const model=JSON.parse(await readFile(fixture,'utf8')),definition=model.model.definitions.find((d:any)=>d.id==='Schaefer');
   definition.components.find((c:any)=>c.id==='N').parameters.X=600;definition.components.find((c:any)=>c.id==='InvK').parameters.value=.001;
   const experiment=model.model.components.find((c:any)=>c.id==='prospectives').experiment;
   for(const factor of experiment.factors)if(factor.values)factor.values=[factor.values[0]];
   const data=await run(page,Buffer.from(JSON.stringify(model)));const canvas=page.locator('canvas[data-fish-count]');
-  await expect(canvas).toHaveAttribute('data-fish-count','600');await expect(page.locator('.lake-illustration canvas')).toHaveCount(1);expect(await page.locator('.lake-illustration svg').count()).toBe(0);
+  await expect(canvas).toHaveAttribute('data-fish-count','60');await expect(page.locator('.lake-illustration canvas')).toHaveCount(1);expect(await page.locator('.lake-illustration svg').count()).toBe(0);
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
   await expect.poll(()=>page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data?.[0]?.y?.length)).toBe(201);
   await mkdir(evidence,{recursive:true});await page.screenshot({path:path.join(evidence,'09-dense-600.png'),fullPage:true});
@@ -106,5 +106,5 @@ test('hundreds of native biomass symbols remain responsive with no DOM expansion
   expect(p95).toBeLessThan(200);const image=await canvas.evaluate((el:HTMLCanvasElement)=>el.toDataURL());await page.waitForTimeout(200);expect(await canvas.evaluate((el:HTMLCanvasElement)=>el.toDataURL())).toBe(image);
   await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
   const final=data.scenarioTrajectories[0].observations.find((o:any)=>o.component==='N').samples.at(-1).value;
-  await expect(canvas).toHaveAttribute('data-fish-count',String(Math.round(final)));expect(final).toBeGreaterThan(600);
+  await expect(canvas).toHaveAttribute('data-fish-count',String(Math.round(final/10)));expect(final).toBeGreaterThan(600);
 });

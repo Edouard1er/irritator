@@ -26,7 +26,7 @@ describe('Workshop presentation and player', () => {
     expect(screen.getByText('Sorties scientifiques conservées')).toBeVisible(); expect(screen.getByLabelText('Position temporelle')).toHaveValue('3');
     fireEvent.click(screen.getByRole('button', { name: 'Lecture pêcheur' })); expect(screen.getByRole('heading', { name: 'DANGER : SEUIL FRANCHI' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Recommencer' })); expect(screen.getByLabelText('Position temporelle')).toHaveValue('0'); expect(fetcher).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Son des alertes')).not.toBeChecked(); expect(screen.getByText(/unités physiques/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('Son des alertes')).toBeChecked(); fireEvent.click(screen.getByRole('button', { name: 'Scientifique' })); fireEvent.click(screen.getByText('Comprendre les hypothèses, les unités et les observateurs')); expect(screen.getByText(/unités physiques/i)).toBeVisible();
   });
   it('plays, pauses, resumes and uses the same observations at a faster speed', () => {
     vi.useFakeTimers(); start();
@@ -36,18 +36,19 @@ describe('Workshop presentation and player', () => {
     fireEvent.change(screen.getByLabelText('Vitesse de lecture'), { target: { value: '2' } }); fireEvent.click(screen.getByRole('button', { name: 'Reprendre' }));
     act(() => vi.advanceTimersByTime(2500)); expect(screen.getByLabelText('Position temporelle')).toHaveValue('2');
   });
-  it('sounds only at alert entries during continuous playback and never on seek or restart', async () => {
+  it('sounds only below the critical threshold during playback, never on seek or restart', async () => {
     vi.useFakeTimers(); const beep = vi.fn();
     class FakeAudio { state = 'running'; currentTime = 0; destination = {}; resume = async () => {}; close = async () => {}; createOscillator() { return { connect() {}, disconnect() {}, frequency: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {} }, start: beep, stop() {} }; } createGain() { return { connect() {}, disconnect() {}, gain: { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, setTargetAtTime() {}, linearRampToValueAtTime() {} } }; } }
     vi.stubGlobal('AudioContext', FakeAudio); start();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });
-    await act(async () => { fireEvent.click(screen.getByLabelText('Son des alertes')); });
-    expect(beep).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' }));
-    act(() => vi.advanceTimersByTime(5000)); act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(1);
-    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(3); // Voice + slow modulation for red.
-    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(3);
-    fireEvent.change(screen.getByLabelText('Position temporelle'), { target: { value: '2' } }); expect(beep).toHaveBeenCalledTimes(3);
-    fireEvent.click(screen.getByRole('button', { name: 'Recommencer' })); expect(beep).toHaveBeenCalledTimes(3);
+    expect(screen.getByLabelText('Son des alertes')).toBeChecked();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' })); });
+    expect(beep).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(5000)); act(() => vi.advanceTimersByTime(5000)); expect(beep).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(2); // Voice + slow modulation for red.
+    act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByLabelText('Position temporelle'), { target: { value: '2' } }); expect(beep).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Recommencer' })); expect(beep).toHaveBeenCalledTimes(2);
   });
   it('switches real scenarios and resets their player and workshop threshold', () => {
     start(); fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });
@@ -64,8 +65,8 @@ describe('Workshop presentation and player', () => {
   });
   it('keeps visual alerts when browser audio is refused', async () => {
     vi.stubGlobal('AudioContext', class { constructor() { throw new Error('Audio blocked'); } });
-    start(); await act(async () => { fireEvent.click(screen.getByLabelText('Son des alertes')); });
-    expect(screen.getByLabelText('Son des alertes')).not.toBeChecked();
+    start(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' })); });
+    expect(screen.getByLabelText('Son des alertes')).toBeChecked();
     expect(screen.getByText(/Le navigateur ne permet pas le son/)).toBeVisible();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });
     fireEvent.change(screen.getByLabelText('Position temporelle'), { target: { value: '3' } });

@@ -296,8 +296,11 @@ Voir [l’intégration, le mapping scientifique et la recette](./ATELIER_NIVEAU1
 Itération 2 : ouvrir [`atelier-schaefer-month-v3.json`](../../examples/atelier-schaefer-month-v3.json)
 pour l’atelier explicitement défini en tonnes et mois. Cette nouvelle convention
 pédagogique ne calibre pas les anciens modèles, dont les unités restent inconnues.
-Le rapport décrit les fenêtres de 12 mois, les symboles proportionnels, les alarmes,
-la jauge et le mode Grand écran.
+Le rapport décrit les fenêtres de 12 mois, les poissons proportionnels, les alarmes
+et le mode Grand écran. La lecture Pêcheur 3.1 agrandit le lac sur la hauteur des
+deux graphiques : un poisson représente dix tonnes, les captures mensuelles sont
+reliées en courbe sans lissage et la sirène est préparée dès le clic de lecture.
+Le son est activé par défaut, sauf désactivation explicite conservée.
 
 ## Interventions temporelles (itération 3)
 

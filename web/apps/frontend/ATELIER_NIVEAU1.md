@@ -1,6 +1,134 @@
 # Irritator Web — atelier participatif, niveau 1
 
-## État actuel : itération 3 — interventions temporelles
+## État actuel : itération 3.1 — lecture Pêcheur
+
+Cette révision prolonge les modifications locales de l’itération 3 sur `two-modes`.
+Elle concerne uniquement le frontend, ses tests et la documentation. Le moteur C++,
+les équations de Schaefer, les contrats, le compilateur temporel, les JSON et les
+valeurs scientifiques ne changent pas dans cette révision. Aucun commit ni push.
+
+### Lac agrandi et lecture allégée
+
+La jauge « Où en est la ressource ? » est retirée du tableau de bord. Une seule
+grille place la biomasse et les captures à gauche, le lac sur leurs deux rangées
+à droite. Le Canvas occupe la majorité de cette carte, avec une hauteur minimale
+de 390 px pour son conteneur sur ordinateur, accrue en Grand écran. Sur mobile,
+le lac précède les deux graphiques dans une colonne sans débordement horizontal.
+
+Le rendu utilise désormais **un poisson pour 10 tonnes**, avec
+`max(0, round(B/10))`. Exemples : 100 t → 10 poissons, 158,6 t → 16, 300 t → 30.
+La biomasse native conserve toute sa précision : seules les quantités dessinées
+sont arrondies. Les indicateurs et courbes ne sont pas recalculés. La pastille du
+lac formate B en français jusqu’à six décimales ; l’attribut accessible et les
+données conservent la valeur numérique native. Le Canvas unique garde ses positions
+déterministes et ses transitions d’opacité ; pause et mouvement réduit figent
+les pixels, hors changement explicite de données ou de taille.
+
+Les paragraphes sous le lac et la légende de salinité ajoutée en CSS sont supprimés.
+Restent le titre, la biomasse et, si connue, une petite pastille d’accessibilité.
+Les précisions de provenance, les équations et les conventions restent dans la
+lecture Scientifique et les métadonnées JSON. L’édition Pêcheur conserve les
+contrôles et erreurs de validité, mais masque les explications techniques.
+Le seuil porte toujours le nom « Seuil choisi pour l’atelier » : il n’est pas
+présenté comme une mesure écologique officiellement établie.
+
+### Captures mensuelles discrètes, présentées en courbe
+
+« Poissons pêchés chaque mois » remplace l’histogramme. L’axe horizontal est
+« Temps (mois) », le vertical « Quantité pêchée (tonnes) ». Le calcul inchangé est
+**P(m) = C(m) − C(m−1)**, à partir des observations natives aux bornes mensuelles.
+Aucun débit instantané, lissage ou nouvelle intégration. Les mois absents restent
+indisponibles et interrompent le tracé.
+
+Les segments droits et les points apparaissent aux fins de mois pendant la lecture.
+Le dernier mois complet est mis en évidence ; le curseur vertical suit le temps
+commun, y compris à l’intérieur d’un mois incomplet. Survol ou focus d’un point
+affiche mois et quantité. Un clic ou Entrée/Espace sur un point rejoint cette
+observation mensuelle et suspend la lecture. Le clavier du curseur principal
+reste utilisable. La référence initiale, lorsqu’activée, est en pointillés bleus.
+Après une intervention, les points utilisent le nouveau cumul du moteur.
+
+### Audio préparé avant le seuil
+
+La préférence est active par défaut. Une désactivation explicite est conservée
+dans `localStorage['irritator-alert-sound']`, et respectée aux nouvelles sessions
+ou situations. Une activation explicite rétablit la préférence.
+Le premier clic de lecture ou d’activation sonore crée/reprend l’AudioContext
+indépendamment du statut de biomasse ; Appliquer prépare aussi l’audio dans le
+geste utilisateur avant le recalcul asynchrone.
+
+Aucune voix ne joue au-dessus du seuil, y compris dans les états orange et jaune.
+Pendant la lecture Pêcheur active et visible, la sirène rouge continue exige
+son activé, contexte prêt et **B ≤ seuil configuré**. Le franchissement ne demande
+aucun nouveau clic. Retour au-dessus du seuil, désactivation, pause, déplacement
+manuel, changement de situation/public, sortie et onglet masqué arrêtent la voix.
+Une seule voix et son oscillateur de modulation sont utilisés ; arrêt et démontage
+déconnectent leurs nœuds. Les variations de volume ne relancent pas la sirène.
+L’édition suspend le son ; un recalcul réussi conserve la préférence et reprend
+la sirène si les conditions sont réunies à la reprise.
+
+Un refus du navigateur ne change pas la préférence explicite : il affiche un
+message compact et conserve les alertes visuelles. Un nouveau geste permet une
+nouvelle tentative. Aucune tentative ne contourne la politique audio du navigateur.
+
+### Saisons visibles et indépendantes de la pluie
+
+Le repère météo de 40–64 px, adapté à la largeur du Canvas, comporte soleil et
+rayons au printemps/été, nuages à l’automne/hiver, vent en hiver et végétation au
+printemps. Pas de neige. Le nom de la saison reste lisible dans un badge.
+Ciel et ambiance changent aux temps simulés 3, 6, 9, 12, puis le cycle recommence.
+Le calendrier pédagogique existant reste celui de l’expérience, sans horloge réelle.
+La pluie demeure indépendante, proportionnelle à P dans [0,10], et peut coexister
+avec chaque saison. Eau selon S et pirogues selon la flotte restent synchronisées
+avec le curseur, y compris après une intervention.
+
+### Recette 3.1 et captures
+
+Validation exécutée sous Node 24.22.1 :
+- Vitest frontend complet : **296 tests passent dans 27 fichiers**.
+- Typecheck TypeScript frontend : sans erreur.
+- Build Next.js de production : sans erreur.
+- Recette Chrome de production avec le runner C++ réel : **12 parcours passent**.
+- Après le dernier ajustement des libellés, contre-vérification ciblée : 15 tests
+  du graphique et du lac et les deux parcours Chrome 3.1 passent.
+- Contrôle visuel des captures ordinateur, saisons, pluie, courbe, alerte et mobile.
+
+Les tests ajoutés couvrent les proportions demandées, la valeur native préservée,
+les points mensuels exacts, les lacunes, le curseur, le focus/clavier, le calendrier
+et sa répétition. La recette audio instrumente le véritable AudioContext de Chrome :
+activation au-dessus du seuil, franchissement automatique, égalité B=seuil, arrêt,
+désactivation persistante et reprise après intervention sans superposition.
+Les tests historiques de l’atelier sont adaptés à la nouvelle préférence et à
+l’échelle de dix tonnes. Les suites API et les suites navigateur hors atelier ne
+sont pas relancées pour cette révision frontend.
+
+Preuves locales ignorées par Git dans `reports/iteration31-evidence/` :
+`01-lac-agrandi.png`, `02-ete.png`, `03-pluie.png`,
+`04-biomasse-critique.png`, `05-captures-mensuelles.png`,
+`06-grand-ecran.png`, `07-hiver.png`, `08-mobile.png`,
+`09-mobile-lac.png`, `10-mobile-captures.png`.
+`native-and-layout.json` conserve la requête d’intervention, les résultats natifs
+et les dimensions ; `web-audio.json`, `playwright.json` et
+`playwright-final31.json` conservent les contrôles. Sur le parcours audio natif :
+un seul contexte créé, au maximum deux oscillateurs simultanés (voix et modulation),
+zéro oscillateur actif ou connecté après désactivation. Les tests unitaires audio
+vérifient aussi la déconnexion des gains. À 1920×1080, le Canvas occupe environ
+412 px de haut et les commandes sont visibles ; Grand écran agrandit encore le lac.
+Le redimensionnement mobile attend la mise à jour des graphiques avant de contrôler
+les largeurs. Le build ne laisse aucune modification de `next-env.d.ts`.
+
+Fichiers concernés par la révision 3.1 :
+- `components/simulation/{simulation-workspace,biomass-lake,monthly-catch-chart,conditions-editor}.tsx`.
+- `lib/simulation/indicators.ts`, `app/workshop.css`.
+- `tests/workshop-{components,v2,v2-components}.test.{ts,tsx}`,
+  `tests/workshop-v31.test.tsx`, `tests/e2e/workshop{,-v2,-v31}.spec.ts`.
+- Ce rapport et `README.md`.
+
+Les sections suivantes sont les références historiques des itérations 3 et 2 ;
+leurs anciennes proportions, jauge, barres et sons orange/jaune sont remplacés
+par les comportements 3.1 décrits ci-dessus.
+
+## Référence conservée — itération 3 : interventions temporelles
 
 Sur `two-modes`, l’atelier possède maintenant une expérience v3 temporelle explicite :
 `web/examples/atelier-interventions-month-v3.json`. Ouvrir ce fichier, exécuter,
