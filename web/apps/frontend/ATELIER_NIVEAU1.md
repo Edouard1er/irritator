@@ -1,6 +1,235 @@
 # Irritator Web — atelier participatif, niveau 1
 
-## État actuel : itération 2
+## État actuel : itération 3 — interventions temporelles
+
+Sur `two-modes`, l’atelier possède maintenant une expérience v3 temporelle explicite :
+`web/examples/atelier-interventions-month-v3.json`. Ouvrir ce fichier, exécuter,
+parcourir le temps, puis **Modifier les conditions**. L’édition suspend immédiatement
+la lecture et le son. **Appliquer à partir du mois X** recalcule depuis l’origine,
+conserve les états N et C, puis reprend à la même observation X. Une erreur conserve
+la trajectoire précédente, l’historique précédent et la pause.
+
+Un scénario du modèle mensuel de l’itération 2 peut aussi être préparé avec
+**Activer les interventions · nouveau départ**, dans les réglages du lecteur.
+Cette action crée une nouvelle expérience à t=0 avec ses véritables facteurs E/q,
+N0 et K ; elle ajoute explicitement le calendrier pédagogique. Elle n’applique pas
+rétroactivement des saisons à l’ancienne exécution. Les anciennes versions sans
+champ `temporal` conservent exactement leur chemin d’exécution.
+
+### Modèle et conventions scientifiques
+
+Les intégrateurs natifs conservent N′ = r(t) N (1−N/K) − q(t)a(t)E(t)N et
+C′ = q(t)a(t)E(t)N, en tonnes et mois. Le compilateur calcule uniquement les signaux
+de paramètres constants par morceaux ; aucune trajectoire N/C n’est intégrée dans
+le navigateur ou l’API. Les courbes et les indicateurs proviennent du runner C++.
+
+- r = r0 × f_saison × exp(−ks(S−Sopt)²) ; r0 = 0,35 mois⁻¹ initialement.
+- q = q0 × exp(betaP × P/10) ; q0 = 0,001 (effort·mois)⁻¹ dans le nouvel exemple.
+- S/P/Sopt sont des indices dans [0,10], a une fraction dans [0,1], E un effort
+  dans [0,10000]. βp est accepté de −10 à 10 ; zéro neutralise l’effet de pluie.
+- S=3, Sopt=3, ks=0,05, P=0, βp=0,3, a=1, E=150 constituent les valeurs initiales.
+- Les coefficients printemps/été/automne/hiver valent 1,15 / 1 / 0,85 / 0,7.
+  Ils sont configurables, ainsi que tous les coefficients environnementaux, dans
+  l’édition en lecture Scientifique. Les limites numériques sont des garde-fous
+  logiciels documentés, pas des bornes écologiques validées.
+
+Le mois est 1+floor(t)%12. Printemps : mois 1–3 ; été : 4–6 ; automne : 7–9 ;
+hiver : 10–12. Les événements sont à 3, 6, 9, 12, 15… dans l’horizon simulé.
+Ce calendrier et les réponses environnementales sont **des hypothèses pédagogiques
+non calibrées**, sans description climatique validée du lac de Guiers. Le ciel,
+les particules saisonnières, la pluie et la palette bleu→ocre de salinité sont
+illustratifs ; la légende le précise. La biomasse reste globale au lac.
+
+### Nouvelle structure JSON v3 facultative
+
+Le graphe Schaefer de départ reste inchangé. Une extension de l’expérience ajoute :
+
+```json
+{
+  "temporal": {
+    "target": "lake",
+    "scenario": "atelier:lake",
+    "parameters": {
+      "r0": 0.35, "q0": 0.001, "S": 3, "Sopt": 3, "ks": 0.05,
+      "P": 0, "betaP": 0.3, "a": 1, "E": 150,
+      "spring": 1.15, "summer": 1, "autumn": 0.85, "winter": 0.7
+    },
+    "fleet": {
+      "mode": "balanced", "shares": [0.6, 0.25, 0.15],
+      "initial": {"counts": [2, 1, 1], "utilization": [1, 1, 1]}
+    },
+    "fleetHistory": [],
+    "interventions": [{
+      "time": 10, "parameter": "P", "oldValue": 0, "newValue": 8,
+      "unit": "index", "scenario": "atelier:lake",
+      "provenance": "atelier: saisie explicite, interface Simulation"
+    }],
+    "provenance": "Hypothèses pédagogiques, réponses non calibrées."
+  }
+}
+```
+
+Cet extrait complète le document v3, il n’est pas un modèle autonome. `target`
+désigne une occurrence couplée racine du graphe Schaefer reconnu, en tonnes/mois.
+`scenario` conserve l’identité de la situation source. Chaque ligne d’intervention
+porte instant, paramètre, ancienne/nouvelle valeur, unité, cible et provenance.
+Les listes sont chronologiques ; une seule ligne par paramètre et instant.
+Les anciennes valeurs sont vérifiées. Dates hors horizon, NaN, indices hors domaine,
+unités incorrectes, références ambiguës et flotte incohérente sont refusés avant
+exécution. Le JSON est conservé dans l’éditeur et sa sauvegarde locale après succès ;
+**Enregistrer** et **Exporter l’expérience avec historique** incluent l’extension.
+
+À date égale, tous les nouveaux coefficients sont évalués comme un seul état de
+conditions. L’interface ordonne les lignes selon r0, q0, S, Sopt, ks, P, betaP, a, E,
+printemps, été, automne, hiver. Deux paramètres distincts commutent : l’ordre des
+lignes simultanées ne modifie pas les signaux résultants. Une nouvelle décision au
+même instant remplace l’ancienne pour le paramètre concerné. Insérer une décision
+plus tôt conserve les décisions futures absolues et recalcule leurs anciennes
+valeurs ; les flottes futures sont remises en cohérence avec leurs efforts.
+
+### Architecture des événements et recalcul
+
+L’audit de `constant`, `qss3_wsum_2`, `qss3_multiplier` et des intégrateurs existants
+permet de réutiliser le catalogue natif, sans nouveau composant atomique C++.
+`web/packages/contracts/temporal.ts` compile chaque signal r/q/a/E en somme de
+constantes différées : valeur initiale à t=0, puis différences à chaque date utile.
+Une constante native émet une seule fois à son `offset`, puis devient passive.
+Chaque entrée des sommes vaut zéro avant son émission. La chaîne finit sur le nom
+public r/q/a/E, déjà relié aux équations Schaefer. Les changements simultanés se
+propagent par les sacs DEVS à temps logique égal ; aucun temps physique ne s’écoule
+pendant ces transitions. Les intégrateurs N/C et leurs paramètres X/dQ restent
+intacts. Aucun stock spatial supplémentaire n’est créé.
+
+L’API valide le document original, compile les événements, retire les métadonnées
+d’unités, revalide le graphe et transmet ce JSON natif au runner. Les limites du
+serveur s’appliquent également au graphe développé. Le runner construit et exécute
+une simulation fraîche complète depuis l’origine ; ses sorties sont annotées avec
+les unités du document original. Le protocole natif/catalogue et les sources C++
+ne changent pas. Le champ `temporal` est une extension du contrat de l’API v3 :
+pour exécuter directement avec le CLI historique, utiliser **Exporter le graphe
+DEVS compilé**, plutôt que passer le JSON étendu brut au CLI.
+
+Après réponse valide, le lecteur recherche la même observation X dans N et remet
+le curseur à cet index, sans interpolation. Son seuil, son volume et ses réglages
+restent en place. La lecture reprend si l’espace est encore actif et l’onglet
+visible. Sans point de reprise, la réponse est refusée et l’ancienne vue conservée.
+La borne finale est exclue par la convention du simulateur : aucune intervention
+n’y est proposée. Les transitions saisonnières à la borne finale n’affectent pas
+l’intervalle simulé. Pour le calendrier affiché et les dates saisies à partir du
+curseur, un entier voisin à 32 epsilon × échelle près est reconnu comme le mois
+exact (ex. 5,999999999999995→6). Aucun temps d’observation exporté ni N/C n’est modifié.
+
+### Flottes, captures et animation
+
+E = 50G uG + 30M uM + 20P uP. La composition équilibrée recherche un effort exact,
+préfère les solutions entièrement utilisées lorsqu’elles existent, puis minimise
+la somme des écarts au carré des proportions de **contribution** demandées ; le
+nombre de bateaux départage les égalités. À E=150 et 60/25/15 %, elle sélectionne
+2 grandes, 1 moyenne et 1 petite. Sinon, une catégorie peut être partiellement
+utilisée : par exemple E=157 est représenté exactement, sans arrondir la demande.
+Le mode minimum emploie ceil(E/50) grandes avec leur taux d’utilisation exact.
+Le mode manuel permet les trois nombres et taux ; une discordance avec E bloque
+l’application. Les capacités 50/30/20 et proportions initiales sont illustratives.
+
+Le Canvas dessine chaque pirogue, selon sa catégorie, et conserve 1 poisson-symbole
+par tonne arrondie. Pluie proportionnelle à P, eau selon S, saison et flotte suivent
+les conditions au curseur ; les métriques et alertes suivent N/C natifs. Pause et
+mouvement réduit figent les pixels. Aucun lissage visuel ne change les sorties.
+
+Le graphique mensuel montre C(m)−C(m−1), avec une barre par mois entier de l’horizon.
+Les deux bornes doivent exister, à l’arrondi machine près ; aucune interpolation
+ou intégration du débit. Une borne absente, une valeur non finie ou un cumul
+décroissant donne une valeur indisponible. Les mois incomplets/futurs enregistrés
+sont estompés. La courbe de biomasse porte des repères verticaux d’intervention.
+La comparaison conserve la trajectoire initiale en bleu et les captures mensuelles
+initiales en contour. Un projet chargé avec historique recalcule sa référence sans
+interventions une fois, dans le moteur ; un échec de référence est signalé.
+Les graphiques scientifiques, tableaux, événements et exports existants sont conservés.
+
+### Étude séparée : restauration complète QSS3
+
+Restaurer seulement N(X) et C(X) ne restaure pas les polynômes quantifiés, dérivées,
+dates internes et sorties déjà planifiées. Cette itération **ne revendique aucune
+restauration exacte à partir de ces deux valeurs** et ne les réinjecte pas comme X
+dans une simulation partielle.
+
+Il existe déjà `simulation_snapshot` (`lib/include/irritator/core.hpp`) et ses copies
+dans `lib/src/timeline.cpp`, ainsi que `simulation::operator=(snapshot)`. Ils copient
+les modèles/dynamiques, ordonnanceur, messages, connexions, états événementiels,
+observateurs, sous-simulations et temps courant. En revanche, la structure snapshot
+n’embarque pas explicitement paramètres, limites, sources externes et machines à
+états hiérarchiques comme le fait une simulation complète. Ce mécanisme mémoire
+constitue une piste, pas un format de checkpoint HTTP portable et validé.
+
+Un chantier séparé devrait : fixer une frontière après tous les sacs d’une date,
+inventorier et versionner toutes les ressources/identifiants, capturer les sources
+et générateurs aléatoires éventuels, définir les règles de remplacement des futurs
+événements, puis comparer une continuation à une exécution ininterrompue pour chaque
+dynamique et pour les wrappers. Aucune nouvelle route de restauration n’est exposée.
+
+### Validation, preuves et fichiers
+
+Recette finale sous Node 24.22.1, avec le runner Release C++ réel :
+
+| Vérification | Résultat |
+| --- | --- |
+| Vitest frontend complet | 274 tests passent, 26 fichiers |
+| API : backend, processus, intégration, unités et interventions | 51 tests passent |
+| Chrome de production : interventions + ateliers existants | 10 parcours passent en 53,2 s |
+| TypeScript frontend (`--noEmit --incremental false`) | Sans erreur |
+| Compilation API et build Next de production | Sans erreur |
+| `git diff --check` | Sans erreur |
+
+Les tests couvrent calendrier sur plusieurs cycles et frontières, formules r/q et
+βp signé, domaines des indices, E=150, efforts non multiples de 10, utilisation et
+proportions, composition manuelle incohérente, historique simultané/réordonné,
+insertion dans le passé, import/export v3, isolation de la cible et anciens projets.
+La recette Chrome vérifie l’application à t=10, la reprise, les observations avant X,
+la flotte/pluie/salinité au curseur, les barres mensuelles, les repères et la référence,
+l’export exact de l’historique, les coefficients scientifiques, le mobile et un refus
+HTTP conservant la pause. Elle vérifie aussi la préparation d’un vrai scénario E=260,
+q0=0,0008 sans inférer ses facteurs de son numéro, et les sept parcours des itérations
+précédentes (lecture, densité, son, plein écran, exports et décisions natives).
+
+Les suites navigateur historiques hors atelier ne sont pas toutes rejouées. Aucun
+lint séparé n’est revendiqué : aucun script lint n’est défini. Les temporisations
+du contrôle automatique au lancement de la recette ont été résolues par une relance ;
+aucune validation requise ne reste bloquée. Le fichier `next-env.d.ts` généré pendant
+le build a été remis à son état initial. Le code C++ et ses binaires ne sont pas modifiés.
+
+La preuve native `reports/iteration3-evidence/engine-interventions.json`
+contient requête, graphe développé, référence et résultat modifié. Pour l’intervention
+à 10 mois (P=8, S=6, a=0,7, E=80, βp=0,4), le maximum des écarts sur tout le préfixe
+N/C est **0** sur ce runner ; à X : N=156,00885297694796 t et C=246,09054322672847 t,
+identiques avant/après. Les pentes discrètes autour de X changent de −5,09449 à
+−0,31349 t/mois pour N, et de 23,43681 à 12,01180 t/mois pour C. Ce sont des différences
+d’observations espacées de 0,1 mois, pas des valeurs prétendues des dérivées exactes.
+
+Captures locales : `reports/iteration3-evidence/01-edit-conditions.png`,
+`02-after-intervention.png`, `03-fullscreen-intervention.png`,
+`04-scientific-conditions.png`, `05-mobile-interventions.png`. Les preuves restent
+ignorées par Git ; aucun commit ni push n’est effectué.
+
+Fichiers nouveaux ou modifiés pour cette itération :
+
+- Contrats : `web/packages/contracts/{temporal.ts,index.ts,units.ts,request-v3.schema.json}`.
+- API : `web/apps/api/src/services/engine.ts`, `web/apps/api/tests/interventions.test.ts`.
+- Exemple : `web/examples/atelier-interventions-month-v3.json`.
+- Frontend : `app/workshop.css`, `components/editor/model-editor.tsx`,
+  `components/simulation/{simulation-workspace.tsx,conditions-editor.tsx,monthly-catch-chart.tsx,biomass-lake.tsx,workshop-chart.tsx}`,
+  `lib/modeling/model.ts`, `lib/simulation/{interactive.ts,monthly.ts}`,
+  `tests/interventions.test.ts`, `tests/e2e/interventions.spec.ts`.
+- Documentation : ce rapport et `README.md` du frontend.
+
+Périmètre de cette première version : une occurrence couplée Schaefer racine isolée
+par expérience temporelle, début 0, horizon ≤120 mois, et budgets de graphe 128
+composants/512 connexions. Le compilateur refuse un dépassement sans tronquer
+l’historique. Une situation prospective peut être isolée depuis les six scénarios
+existants ; l’édition simultanée de plusieurs branches prospectives avec des
+historiques distincts n’est pas exposée. Aucune calibration écologique, météo réelle,
+répartition spatiale des poissons ou restauration QSS3 n’est revendiquée.
+
+## Référence conservée — itération 2
 
 L’itération 2 prolonge le frontend existant sur `two-modes`. Au début de cette
 intervention, `git status --short` était vide. Le présent document remplace la

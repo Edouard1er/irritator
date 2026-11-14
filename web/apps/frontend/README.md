@@ -298,3 +298,24 @@ pour l’atelier explicitement défini en tonnes et mois. Cette nouvelle convent
 pédagogique ne calibre pas les anciens modèles, dont les unités restent inconnues.
 Le rapport décrit les fenêtres de 12 mois, les symboles proportionnels, les alarmes,
 la jauge et le mode Grand écran.
+
+## Interventions temporelles (itération 3)
+
+Ouvrir `web/examples/atelier-interventions-month-v3.json` depuis la racine du dépôt,
+exécuter, parcourir le temps et choisir **Modifier les conditions**. L’application
+recalcule avec Irritator C++ depuis l’origine, puis reprend au même instant sans
+réinitialiser la biomasse ou la capture cumulée. Pluie, salinité, accessibilité,
+effort exact et composition des pirogues sont éditables ; les coefficients des
+réponses environnementales et des saisons sont accessibles en lecture Scientifique.
+
+Une situation du modèle mensuel existant peut être isolée avec **Activer les
+interventions · nouveau départ** dans les réglages du lecteur. Cette préparation
+crée un nouveau calcul à t=0 avec un calendrier pédagogique explicite.
+
+La sauvegarde inclut l’historique. Le panneau d’historique exporte aussi le graphe
+DEVS compilé, exécutable par le runner historique. Les courbes N/C restent natives.
+Le calendrier, les indices environnementaux et les capacités des pirogues sont
+illustratifs, sans calibration écologique du lac de Guiers.
+
+Voir [ATELIER_NIVEAU1.md](ATELIER_NIVEAU1.md) pour le contrat JSON, l’architecture
+des événements, les tests, les captures et l’étude de restauration complète QSS3.

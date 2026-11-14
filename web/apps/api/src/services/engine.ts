@@ -104,7 +104,9 @@ export class ProcessEngine implements Engine {
     }
     validateRequest(effective);
     if (effective.schemaVersion === 3) await this.capabilities(signal);
-    const { value, exitCode } = await this.invoke([],JSON.stringify(nativeRequest(effective)),signal);
+    const compiled = nativeRequest(effective);
+    validateRequest(compiled);
+    const { value, exitCode } = await this.invoke([],JSON.stringify(compiled),signal);
     if(exitCode!==0) {
       const failure = value as { schemaVersion?: unknown; status?: unknown; error?: { code?: unknown; message?: unknown; engineCategory?: unknown; engineCode?: unknown; diagnostics?: import('../../../../packages/contracts/index.js').StructuralDiagnostic[] } } | null;
       if(!failure || failure.schemaVersion!==1 || failure.status!=='failed' || typeof failure.error?.code!=='string' || typeof failure.error.message!=='string') throw new ApiError('RUNNER_PROTOCOL_ERROR','Runner failed without a valid error envelope',502);

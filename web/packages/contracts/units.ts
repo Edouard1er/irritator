@@ -1,5 +1,6 @@
 import type { Component, RunRequest, RunResult } from './index.js';
 import type { RunResultV2 } from './wrapper-v3.js';
+import { compileTemporal } from './temporal.js';
 
 export type TimeUnit = 'month' | 'year';
 export type Unit = 't' | 'kg' | 'month' | 'year' | 't/month' | 't/year' | 'kg/month' | 'kg/year' | '1/month' | '1/year' | '1/t' | '1/kg' | 'ratio' | 'effort' | '1/(effort*month)' | '1/(effort*year)';
@@ -78,9 +79,9 @@ export function scopeForPath(request: RunRequest, path: string, initial: UnitSco
   return { scope, ...(component ? { component } : {}) };
 }
 
-/** The compiled native runner retains its historical schema. Strip metadata only. */
+/** Compile optional timed signals, then strip unit metadata for the historical native protocol. */
 export function nativeRequest(request: RunRequest): RunRequest {
-  const copy = structuredClone(request);
+  const copy = compileTemporal(request);
   const strip = (scope: UnitScope) => { delete scope.units; scope.components.forEach(c => { delete c.units; }); };
   strip(copy.model); copy.model.definitions?.forEach(strip); return copy;
 }

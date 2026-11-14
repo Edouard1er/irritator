@@ -1,0 +1,455 @@
+{
+  "schemaVersion": 3,
+  "model": {
+    "id": "atelier-interventions-month",
+    "definitions": [
+      {
+        "id": "Schaefer",
+        "name": "Schaefer",
+        "inputs": [],
+        "outputs": [],
+        "components": [
+          {
+            "id": "N",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 150,
+              "dQ": 0.01
+            },
+            "units": {
+              "output": "t",
+              "parameters": {
+                "X": "t",
+                "dQ": "t"
+              }
+            }
+          },
+          {
+            "id": "r",
+            "type": "constant",
+            "parameters": {
+              "value": 0.35,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/month",
+              "parameters": {
+                "value": "1/month",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "rN",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "InvK",
+            "type": "constant",
+            "parameters": {
+              "value": 0.0033333333333333335,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/t",
+              "parameters": {
+                "value": "1/t",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "NSqrOverK",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "sum",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "q",
+            "type": "constant",
+            "parameters": {
+              "value": 0.001,
+              "offset": 0
+            },
+            "units": {
+              "output": "1/(effort*month)",
+              "parameters": {
+                "value": "1/(effort*month)",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "E",
+            "type": "constant",
+            "parameters": {
+              "value": 150,
+              "offset": 0
+            },
+            "units": {
+              "output": "effort",
+              "parameters": {
+                "value": "effort",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "qaE",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "qaEN",
+            "type": "qss3_multiplier",
+            "parameters": {},
+            "units": {
+              "output": "t/month",
+              "parameters": {}
+            }
+          },
+          {
+            "id": "a",
+            "type": "constant",
+            "parameters": {
+              "value": 1,
+              "offset": 0
+            },
+            "units": {
+              "output": "ratio",
+              "parameters": {
+                "value": "ratio",
+                "offset": "month"
+              }
+            }
+          },
+          {
+            "id": "qa",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "modelHalieutique",
+            "type": "qss3_wsum_2",
+            "parameters": {
+              "coeff-0": 1,
+              "coeff-1": -1
+            }
+          },
+          {
+            "id": "rNpower2",
+            "type": "qss3_multiplier",
+            "parameters": {}
+          },
+          {
+            "id": "C",
+            "type": "qss3_integrator",
+            "parameters": {
+              "X": 0,
+              "dQ": 0.01
+            },
+            "units": {
+              "output": "t",
+              "parameters": {
+                "X": "t",
+                "dQ": "t"
+              }
+            }
+          }
+        ],
+        "connections": [
+          {
+            "from": {
+              "component": "r",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "InvK",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "NSqrOverK",
+              "port": 0
+            },
+            "to": {
+              "component": "sum",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "E",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaE",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "qaEN",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "a",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "q",
+              "port": 0
+            },
+            "to": {
+              "component": "qa",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qa",
+              "port": 0
+            },
+            "to": {
+              "component": "qaE",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "sum",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "modelHalieutique",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "modelHalieutique",
+              "port": 0
+            },
+            "to": {
+              "component": "N",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "rN",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 0
+            }
+          },
+          {
+            "from": {
+              "component": "N",
+              "port": 0
+            },
+            "to": {
+              "component": "rNpower2",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "rNpower2",
+              "port": 0
+            },
+            "to": {
+              "component": "NSqrOverK",
+              "port": 1
+            }
+          },
+          {
+            "from": {
+              "component": "qaEN",
+              "port": 0
+            },
+            "to": {
+              "component": "C",
+              "port": 0
+            }
+          }
+        ],
+        "units": {
+          "time": "month",
+          "biomass": "t",
+          "cumulativeCatch": "t",
+          "catchRate": "t/month",
+          "growthRate": "1/month",
+          "accessibility": "ratio",
+          "effort": "effort",
+          "catchability": "1/(effort*month)",
+          "provenance": {
+            "basis": "workshop-convention",
+            "note": "Modèle pédagogique en tonnes et mois : N0=150 t, K=300 t, r0=0.35/mois, q0=0.001/(unité effort.mois). Saisons et réponses à la pluie et à la salinité : hypothèses illustratives non calibrées pour le lac de Guiers. Aucune conversion d’échelle historique n’est revendiquée."
+          }
+        }
+      }
+    ],
+    "components": [
+      {
+        "id": "lake",
+        "type": "coupled",
+        "definition": "Schaefer",
+        "parameters": {}
+      }
+    ],
+    "connections": [],
+    "observations": [
+      {
+        "component": "lake/N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "lake/C",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "lake/r",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "lake/q",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "lake/a",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "lake/E",
+        "samplingInterval": 0.1
+      }
+    ],
+    "units": {
+      "time": "month",
+      "provenance": {
+        "basis": "workshop-convention",
+        "note": "Horloge principale de démonstration en mois. Les horloges prospectives sont locales et indépendantes."
+      }
+    }
+  },
+  "simulation": {
+    "start": 0,
+    "end": 24
+  },
+  "temporal": {
+    "target": "lake",
+    "scenario": "atelier:lake",
+    "parameters": {
+      "r0": 0.35,
+      "q0": 0.001,
+      "S": 3,
+      "Sopt": 3,
+      "ks": 0.05,
+      "P": 0,
+      "betaP": 0.3,
+      "a": 1,
+      "E": 150,
+      "spring": 1.15,
+      "summer": 1,
+      "autumn": 0.85,
+      "winter": 0.7
+    },
+    "fleet": {
+      "mode": "balanced",
+      "shares": [
+        0.6,
+        0.25,
+        0.15
+      ],
+      "initial": {
+        "counts": [
+          2,
+          1,
+          1
+        ],
+        "utilization": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    "fleetHistory": [],
+    "interventions": [],
+    "provenance": "Calendrier et réponses environnementales pédagogiques configurables, non calibrés pour le lac de Guiers. Indices pluie et salinité illustratifs. Recalcul DEVS/QSS3 depuis l’origine."
+  }
+}

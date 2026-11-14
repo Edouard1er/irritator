@@ -4,8 +4,8 @@ import type * as Plotly from 'plotly.js';
 import { loadPlotly } from '@/components/charts/trajectory-plot';
 import { statusInfo, type AlertConfig, type BiomassStatus, type Series } from '@/lib/simulation/trajectory';
 
-export default function WorkshopChart({ series, timeUnit, index, time, statuses, config, biomass = false }: {
-  series: Series; timeUnit: string; index: number; time?: number; statuses: BiomassStatus[]; config: AlertConfig; biomass?: boolean;
+export default function WorkshopChart({ series, timeUnit, index, time, statuses, config, biomass = false, baseline, interventions=[] }: {
+  series: Series; timeUnit: string; index: number; time?: number; statuses: BiomassStatus[]; config: AlertConfig; biomass?: boolean; baseline?:Series; interventions?:number[];
 }) {
   const target = useRef<HTMLDivElement>(null);
   const [error, setError] = useState(false);
@@ -19,6 +19,7 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
       const finiteValue = (n: number) => Number.isFinite(n) ? n : null;
       const visible = series.points.filter((p, i) => biomass ? i <= index : time !== undefined && p.time <= time);
       const traces: Plotly.Data[] = [];
+      if(baseline)traces.push({type:'scatter',mode:'lines',name:'Trajectoire initiale',x:baseline.points.map(p=>p.time),y:baseline.points.map(p=>finiteValue(p.value)),line:{color:'#657eaa',dash:'dash',width:2},hovertemplate:'Initiale : %{y} t à %{x} mois<extra></extra>'});
       if (biomass) {
         traces.push({ type: 'scatter', name: 'Suite enregistrée (non lue)', mode: 'lines', x: series.points.map(p => p.time), y: series.points.map(p => finiteValue(p.value)), line: { color: '#b1bdc8', dash: 'dot', width: 1, shape: 'hv' }, hoverinfo: 'skip', connectgaps: false });
         for (const status of Object.keys(statusInfo) as BiomassStatus[]) {
@@ -29,6 +30,7 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
       } else traces.push({ type: 'scatter', mode: 'lines+markers', name: series.id, x: visible.map(p => p.time), y: visible.map(p => finiteValue(p.value)), line: { color: '#117d78', width: 3, shape: 'hv' }, marker: { size: 3 }, connectgaps: false, hovertemplate: `t = %{x} (${timeUnit})<br>%{y} (${series.unit})<extra>${series.id}</extra>` });
       const shapes: Partial<Plotly.Shape>[] = [];
       const annotations: Partial<Plotly.Annotations>[] = [];
+      for(const at of [...new Set(interventions)]){shapes.push({type:'line',x0:at,x1:at,yref:'paper',y0:0,y1:1,line:{color:'#8c4089',dash:'dash',width:2}});annotations.push({x:at,y:1,xref:'x',yref:'paper',text:`Intervention ${Number(at.toFixed(4))}`,showarrow:false,yanchor:'bottom',font:{color:'#8c4089',size:10}});}
       if (biomass && config.bCrit !== undefined && config.bCrit > 0 && Number.isFinite(config.bCrit)) {
         const upper = config.bCrit * (1 + config.proximityRatio);
         shapes.push({ type: 'rect', xref: 'paper', x0: 0, x1: 1, y0: config.bCrit, y1: upper, fillcolor: '#fff0d9', opacity: 0.7, line: { width: 0 }, layer: 'below' }, { type: 'line', xref: 'paper', x0: 0, x1: 1, y0: config.bCrit, y1: config.bCrit, line: { color: '#b52b3b', dash: 'dash', width: 2 } });
@@ -46,6 +48,6 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
       resize = new ResizeObserver(() => { if (!disposed) void plot.Plots.resize(element); }); resize.observe(element);
     }).catch(() => { if (!disposed) setError(true); });
     return () => { disposed = true; resize?.disconnect(); module?.purge(element); };
-  }, [series, index, time, timeUnit, statuses, config, biomass]);
+  }, [series, index, time, timeUnit, statuses, config, biomass, baseline, interventions]);
   return error ? <p role="alert">Graphique indisponible. Consultez les observations dans la lecture scientifique.</p> : <div ref={target} className="workshop-plot" role="img" aria-label={`${biomass ? 'Biomasse totale' : 'Capture'} ; utilisez le curseur temporel au clavier pour consulter les observations exactes.`} />;
 }

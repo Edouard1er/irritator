@@ -332,6 +332,291 @@
           "maximum": 20000
         }
       }
+    },
+    "temporal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "scenario",
+        "parameters",
+        "fleet",
+        "fleetHistory",
+        "interventions",
+        "provenance"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/id"
+        },
+        "scenario": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "r0",
+            "q0",
+            "S",
+            "Sopt",
+            "ks",
+            "P",
+            "betaP",
+            "a",
+            "E",
+            "spring",
+            "summer",
+            "autumn",
+            "winter"
+          ],
+          "properties": {
+            "r0": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "q0": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "S": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "Sopt": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "ks": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "P": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "betaP": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "a": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "E": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "spring": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "summer": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "autumn": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            "winter": {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            }
+          }
+        },
+        "fleet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "shares",
+            "initial"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "balanced",
+                "minimum",
+                "manual"
+              ]
+            },
+            "shares": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "initial": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "counts",
+                "utilization"
+              ],
+              "properties": {
+                "counts": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 500
+                  }
+                },
+                "utilization": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "fleetHistory": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "time",
+              "fleet"
+            ],
+            "properties": {
+              "time": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fleet": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "counts",
+                  "utilization"
+                ],
+                "properties": {
+                  "counts": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 500
+                    }
+                  },
+                  "utilization": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "interventions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "time",
+              "parameter",
+              "oldValue",
+              "newValue",
+              "unit",
+              "scenario",
+              "provenance"
+            ],
+            "properties": {
+              "time": {
+                "type": "number",
+                "minimum": 0
+              },
+              "parameter": {
+                "enum": [
+                  "r0",
+                  "q0",
+                  "S",
+                  "Sopt",
+                  "ks",
+                  "P",
+                  "betaP",
+                  "a",
+                  "E",
+                  "spring",
+                  "summer",
+                  "autumn",
+                  "winter"
+                ]
+              },
+              "oldValue": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "newValue": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "scenario": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "provenance": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            }
+          }
+        },
+        "provenance": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
     }
   },
   "definitions": {

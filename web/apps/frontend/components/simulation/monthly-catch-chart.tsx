@@ -1,0 +1,10 @@
+'use client';
+import {monthlyCatches} from '@/lib/simulation/monthly';
+import type {Series} from '@/lib/simulation/trajectory';
+import {calendarTime} from '@contracts';
+export function MonthlyCatchChart({series,time,end,baseline}:{series:Series;time:number;end:number;baseline?:Series}) {
+  time=calendarTime(time);
+  const months=monthlyCatches(series.points,end),initial=baseline?monthlyCatches(baseline.points,end):[],max=Math.max(1,...months.map(m=>m.value??0),...initial.map(m=>m.value??0));
+  const width=760,height=153,left=42,bottom=126,plotWidth=705,w=plotWidth/Math.max(1,months.length);
+  return <div className="monthly-catch-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Captures mensuelles en tonnes, différence de capture cumulée aux bornes mensuelles"><text x="2" y="15" fontSize="12">t</text>{[0,.5,1].map(r=><g key={r}><line x1={left} x2={750} y1={bottom-r*105} y2={bottom-r*105} stroke="#dfe8ed"/><text x={left-5} y={bottom-r*105+4} textAnchor="end" fontSize="10">{(r*max).toFixed(1)}</text></g>)}{months.map((m,i)=><g key={m.month} data-month={m.month} data-catch={m.value} opacity={m.month<=time?1:.28}>{initial[i]?.value!==undefined&&<rect x={left+i*w+w*.1} y={bottom-initial[i]!.value!/max*105} width={w*.8} height={initial[i]!.value!/max*105} fill="none" stroke="#657eaa" strokeWidth="1.5" strokeDasharray="3 2"/>}{m.value!==undefined?<rect x={left+i*w+w*.23} y={bottom-m.value/max*105} width={w*.54} height={m.value/max*105} fill="#117d78"><title>Mois {m.month} : {m.value} t{m.month>time?' (futur enregistré)':''}</title></rect>:<text x={left+(i+.5)*w} y={bottom-3} textAnchor="middle">?</text>}<text x={left+(i+.5)*w} y={142} textAnchor="middle" fontSize="9">{m.month}</text></g>)}<text x={748} y="152" textAnchor="end" fontSize="10">Mois simulé</text></svg><p>C(m) − C(m−1), observations aux bornes uniquement. ? = borne absente. Gris clair : mois encore incomplet ou futur enregistré.{baseline?' Contour bleu : trajectoire initiale.':''}</p></div>;
+}
