@@ -25,7 +25,8 @@ test('independent levels retain model, scenario, playback, draft geography and n
   await switchLevel(page, 2);
   const frozen = await one.getByLabel('Position temporelle').inputValue(); await page.waitForTimeout(400);
   expect(await one.getByLabel('Position temporelle').inputValue()).toBe(frozen);
-  await expect(two.getByText('Les zones restent à renseigner')).toBeVisible();
+  await expect(two.getByText(/≈ Contour du lac : HydroLAKES/)).toBeVisible();
+  await expect(two.locator('.geo-area')).toHaveCount(0); // A sourced water outline never invents fishing zones.
   await expect(two.getByLabel('Charger un GeoJSON local')).toHaveCount(0);
   await expect(two.getByRole('button', { name: 'Essayer la démonstration fictive' })).toHaveCount(0);
   await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();

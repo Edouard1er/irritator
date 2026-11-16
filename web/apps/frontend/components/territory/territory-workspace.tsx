@@ -7,10 +7,12 @@ import { errorText, type HttpResult } from '@/lib/api/client';
 import { normalizeRun } from '@/lib/simulation/trajectory';
 import { TerritoryMap } from './territory-map';
 import { FishingActivityEditor } from './fishing-activity-editor';
+import { GeoAtlasWorkspace } from './geo-atlas-workspace';
+import type { AtlasController } from '@/lib/workshop/geo-atlas';
 
 const fmt = (value?: number) => value !== undefined && Number.isFinite(value) ? new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(value) : 'Non disponible';
 const exactRatio = (value?: number) => value === undefined ? 'Non disponible' : String(value).replace('.', ',');
-export function TerritoryWorkspace({ request, result, resultRequest, busy, onApply, onSimulation, documentError, journeyStep, journeyScientific }: { journeyStep?: 'zone' | 'activity'; journeyScientific?: boolean; request: RunRequest; result?: HttpResult; resultRequest?: RunRequest; busy: boolean; onApply: (request: RunRequest) => void; onSimulation: () => void; documentError?: string }) {
+export function TerritoryWorkspace({ request, result, resultRequest, busy, onApply, onSimulation, documentError, journeyStep, journeyScientific, atlasController }: { atlasController?: AtlasController; journeyStep?: 'zone' | 'activity'; journeyScientific?: boolean; request: RunRequest; result?: HttpResult; resultRequest?: RunRequest; busy: boolean; onApply: (request: RunRequest) => void; onSimulation: () => void; documentError?: string }) {
   const [geography, setGeography] = useState<TerritoryGeography | undefined>(request.territory?.geography);
   const [selection, setSelection] = useState(request.territory?.zoneId);
   const [localScientific, setScientific] = useState(false), [error, setError] = useState('');
@@ -41,11 +43,13 @@ export function TerritoryWorkspace({ request, result, resultRequest, busy, onApp
     {documentError && <p className="error-banner" role="alert">{scientific ? documentError : documentError.startsWith('Import impossible') ? 'Import impossible. Votre document précédent est conservé.' : 'L’opération n’a pas abouti. Vos données sont conservées.'}</p>}
     {!journeyStep && <nav className="activity-steps" aria-label="Préparation de la pêche"><button aria-current={step === 'zone' ? 'step' : undefined} onClick={() => setStep('zone')}>1 · Sélection de zone</button><button disabled={!applied} aria-current={step === 'activity' ? 'step' : undefined} onClick={() => setStep('activity')}>2 · Décrire l’activité</button><button disabled={!applied} aria-current={step === 'summary' ? 'step' : undefined} onClick={() => setStep('summary')}>3 · Résumé</button></nav>}
     <div hidden={step !== 'zone'}>
+    {atlasController && <GeoAtlasWorkspace controller={atlasController} scientific={scientific} request={request} onApply={onApply} busy={busy}/>}
+    {atlasController && (scientific || geography) && <h2 className="geo-legacy-heading">Espace séparé : {geography?.demonstration ? 'carte fictive pour le modèle' : 'géographie territoriale historique fournie, non certifiée'}</h2>}
     {scientific && <div className="territory-files"><label className="geography-upload">Charger un GeoJSON local<input type="file" accept=".geojson,.json,application/geo+json,application/json" aria-label="Charger un GeoJSON local" onChange={e => void load(e)} disabled={busy}/></label><button disabled={busy} onClick={() => { setGeography(structuredClone(territoryDemo)); setSelection(undefined); setError(''); }}>Essayer la démonstration fictive</button></div>}
     {geography?.demonstration && <p className="territory-demo" role="status">Carte de démonstration — zones fictives.{journeyStep && <> Exemple fictif — ce ne sont pas les limites du lac.</>}</p>}
     {geography && !geography.demonstration && <p className="territory-source">Contours fournis par l’animateur — limites non certifiées.{scientific && <> Source déclarée : {geography.source}.</>}</p>}
     {error && <p className="error-banner" role="alert">{scientific ? error : 'La carte n’a pas pu être mise à jour. Votre choix précédent est conservé.'}</p>}
-    <div className="territory-layout"><article className="territory-map-card">
+    <div className="territory-layout" hidden={!!atlasController && !scientific && !geography}><article className="territory-map-card">
       {geography?.features.length ? <TerritoryMap key={geography.id} geography={geography} selected={selection} onSelect={setSelection} scientific={scientific}/> : <div className="territory-empty"><h2>Les zones restent à renseigner</h2>{scientific ? <><p>Aucun contour ni zone validés ne sont fournis pour le lac.</p><p>Chargez vos données locales ou ouvrez la démonstration fictive.</p></> : <p>La carte sera préparée pour l’atelier.</p>}</div>}
       <div className="territory-zone-list" role="group" aria-label="Zones de pêche">{geography?.features.filter(f => f.properties.role === 'zone').map(f => <button key={f.properties.id} aria-pressed={selection === f.properties.id} onClick={() => setSelection(f.properties.id)}>{selection === f.properties.id ? '✓ ' : ''}{f.properties.name}</button>)}</div>
       {geography && !geography.features.some(f => f.properties.role === 'zone') && <p className="unavailable">{scientific ? 'Aucune zone de pêche dans ce fichier.' : 'Aucune zone de pêche disponible pour le moment.'}</p>}

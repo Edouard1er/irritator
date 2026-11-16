@@ -10,15 +10,18 @@ import { scientificFingerprint } from '@/lib/modeling/model';
 import { normalizeRun } from '@/lib/simulation/trajectory';
 import { errorText, type HttpResult } from '@/lib/api/client';
 import { DecisionForm } from './decision-form';
-import { TerritoryMap } from '@/components/territory/territory-map';
+import { GeoAtlasMap } from '@/components/territory/geo-atlas-map';
+import { geoSupportVersion, visibleGeoFeatures } from '@/components/territory/geo-atlas-workspace';
+import { useGeoAtlas, type AtlasController } from '@/lib/workshop/geo-atlas';
 
 const steps = ['Notre lac', 'Nos sorties', 'Votre premier choix', 'Voyons ce qui se passe', 'Votre choix maintenant', "Ce qu'on en retient"];
 type Props = {
   request: RunRequest; resultRequest?: RunRequest; result?: HttpResult; busy: boolean; error?: string;
-  territory: (step: 'zone' | 'activity', scientific: boolean, next: () => void, showResults: boolean) => ReactNode;
+  territory: (step: 'zone' | 'activity', scientific: boolean, next: () => void, showResults: boolean, atlas: AtlasController) => ReactNode;
   simulation: (active: boolean) => ReactNode; onRun: () => void; onAudience: (scientific: boolean) => void;
 };
 export function LevelTwoJourney({ request, result, resultRequest, busy, error: engineError, territory, simulation, onRun, onAudience }: Props) {
+  const atlasController = useGeoAtlas();
   const [step, setStep] = useState(0), [scientific, setScientific] = useState(false), [authorized, setAuthorized] = useState(false);
   const [session, setSession] = useState<WorkshopSessionV1>(() => createSession());
   const [recordId, setRecordId] = useState<string>(), [scenarioId, setScenarioId] = useState<ScenarioId>('S1-captures');
@@ -27,6 +30,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
   const [support, setSupport] = useState<Presentation['kind']>('discussion-card'), [note, setNote] = useState('');
   const [message, setMessage] = useState('Démonstration sans collecte : aucune réponse personnelle enregistrée.'), [error, setError] = useState('');
   const [restoreAvailable, setRestoreAvailable] = useState(false);
+  const mapSource = atlasController.atlas.sources.find(s => s.id === atlasController.atlas.features.find(f => f.properties.kind === 'water-outline' && f.properties.evidence === 'reference-outline')?.properties.sourceId);
   const storageBlocked = useRef(false), heading = useRef<HTMLHeadingElement>(null);
   const record = session.records.find(r => r.id === recordId), scenario = scenarios[record?.scenarioId ?? scenarioId];
   const permitted = !authorized || !!record?.before;
@@ -66,7 +70,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
       if (support === 'native-simulation') {
         if (scenario.id !== 'S1-captures' || !actualNative || !result || !resultRequest) throw new Error('Aucun résultat du moteur ne peut être attesté. Choisissez une discussion.');
         presentation = { kind: support, presentedAt, runId: result.runId, modelId: resultRequest.model.id, requestSchemaVersion: 3, modelFingerprint: scientificFingerprint(resultRequest), assumptionsNote: note || 'Modèle pédagogique non calibré pour le lac. Biomasse globale unique ; activités déclarées non converties en effort.' };
-      } else presentation = { kind: support, presentedAt, supportId: `${scenario.id}-${support}-v1`, note };
+      } else presentation = { kind: support, presentedAt, supportId: `${scenario.id}-${support}-v1`, note: support === 'discussion-map' && atlasController ? `${geoSupportVersion}; atlas=${atlasController.atlas.id}; revision=${atlasController.atlas.revision}; vue=${atlasController.privateView ? 'privee' : 'publique-protegee'}; ${note}`.slice(0,500) : note };
       commit(updateRecord(session, record.id, { presentation }, authorized)); go(4, true);
     } catch (e) { setError(errorText(e)); }
   };
@@ -108,7 +112,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
     </details>}
     {message && scientific && <p role="status">{message}</p>}{error && <p role="alert" className="error-banner">{scientific ? error : 'L’enregistrement n’a pas abouti. L’animateur peut vérifier ; vos choix sont conservés.'}</p>}
     <h2 className="journey-step-title" ref={heading} tabIndex={-1}>{steps[step]}</h2>
-    <div hidden={step > 1}>{territory(step === 1 ? 'activity' : 'zone', scientific, () => go(3), !authorized || !!record?.presentation)}</div>
+    <div hidden={step > 1}>{territory(step === 1 ? 'activity' : 'zone', scientific, () => go(3), !authorized || !!record?.presentation, atlasController)}</div>
     <div hidden={step !== 2} className="journey-card"><span className="workshop-eyebrow">{scenario.id.slice(0, 2)} · SITUATION DE DISCUSSION · VERSION {scenario.version}</span><h3>{scenario.title}</h3><p className="scenario-question">{scenario.question}</p><p>{scenario.note}</p>
       {authorized ? <><p>Vous pouvez répondre avec l’aide de l’animateur.</p>{!participant && <p role="status">L’animateur doit renseigner un code participant dans la préparation.</p>}
       <DecisionForm key={`before-${revision}-${recordId ?? 'new'}-${scenario.id}`} scenarioId={scenario.id} initial={record?.before} disabled={!participant || !!record?.presentation} onSave={first}/>
@@ -117,7 +121,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
     </div>
     <div hidden={step !== 3} className="journey-presentation">
       {permitted && <><div className="journey-card"><h3>{scenario.title}</h3><p>{scenario.question}</p><p>{scenario.note}</p><label>Support à présenter<select aria-label="Support à présenter" disabled={!!record?.presentation && authorized} value={support} onChange={e => setSupport(e.target.value as Presentation['kind'])}>{scenario.supports.map(kind => <option key={kind} value={kind}>{{ 'native-simulation': 'Simulation calculée par Irritator', 'discussion-map': 'Carte et discussion — limites non certifiées', 'discussion-card': 'Carte de discussion — aucun calcul' }[kind]}</option>)}</select></label>
-      {support === 'discussion-map' && (request.territory ? <><p>{request.territory.geography.demonstration ? 'Exemple fictif — ce ne sont pas les limites du lac.' : 'Contours fournis par l’animateur — limites non certifiées.'}</p><TerritoryMap geography={request.territory.geography} selected={request.territory.zoneId} onSelect={() => {}} scientific={scientific}/></> : <p>Carte non fournie : discussion sur les lieux, sans tracer de limites inconnues.</p>)}
+      {support === 'discussion-map' && <><p>Le plan CLPA demande une étude et un balisage près de Témeye-Toucouleur. Leur réalisation et la limite sud restent à vérifier. Aucun contour de réserve n’est tracé.</p>{atlasController ? <><p>{mapSource ? `Contour de référence : ${mapSource.title} · ${mapSource.geometryValidAt}` : 'Fond géographique réel manquant.'}</p><GeoAtlasMap features={visibleGeoFeatures(atlasController.atlas, atlasController.privateView)} onSelect={() => {}}/>{mapSource && <p className="geo-attribution">{mapSource.attribution} · {mapSource.license}</p>}<p>{atlasController.privateView ? 'Travail privé : ne pas projeter les lieux sensibles.' : 'Projection protégée : lieux privés masqués.'} Support {geoSupportVersion} · atlas {atlasController.atlas.id} · révision {atlasController.atlas.revision}</p></> : <p>Carte non fournie : discussion sur les lieux, sans tracer de limites inconnues.</p>}</>}
       {support !== 'native-simulation' && <article className="discussion-support"><h3>Support de discussion</h3><p>{scenario.id === 'S2-reserve' ? 'Où pensez-vous que passent les limites ? Quelles informations faudrait-il demander au CLPA ? Aucun contour officiel de réserve n’est fourni.' : scenario.id === 'S3-couts' ? 'Quelles dépenses augmentent ? Que faudrait-il connaître sur les prix, le carburant et le temps de recherche avant de choisir ?' : 'Quelles observations permettraient de discuter les témoignages contradictoires sur les prises ?'}</p><p>Ce support ne représente ni une prévision ni une règle applicable.</p><small>Support versionné : {scenario.id}-{support}-v1</small></article>}
       {support === 'native-simulation' && <><p>Modèle illustratif : les valeurs ne sont pas une estimation du lac. Les sorties déclarées ne sont pas utilisées pour calculer les prises.</p><button className="primary" disabled={busy || !request.temporal || !request.territory} onClick={onRun}>{busy ? 'Calcul en cours…' : 'Lancer la simulation Irritator'}</button>{!request.territory && <p>Confirmez une zone pour calculer ce modèle territorial. La discussion reste possible.</p>}{engineError && <p role="alert">La simulation n’a pas abouti. Le premier choix est conservé ; choisissez un support de discussion.</p>}</>}
       {scientific && authorized && <><label>Notes sur le support et les hypothèses (facultatif)<textarea aria-label="Notes sur le support et les hypothèses (facultatif)" maxLength={500} value={note} disabled={!!record?.presentation} onChange={e => setNote(e.target.value)}/></label><p>Un calcul terminé ne signifie pas que le résultat a été présenté.</p><button className="primary" disabled={busy || !record || !!record.presentation || support === 'native-simulation' && !actualNative} onClick={acknowledge}>Confirmer que ce support a été présenté</button>{record?.presentation?.kind === 'native-simulation' && <p>Exécution présentée : {record.presentation.runId}</p>}</>}
