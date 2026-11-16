@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 
-const evidence = path.resolve('../../../reports/niveau2-2.1.1');
+const evidence = path.resolve('../../../reports/niveau2-2.3.A/regression-territoire');
 test.use({ hasTouch: true });
 const captureStyle = 'html,body,.level-application,.level-workspace,.workbench,.modeling-workspace{height:auto!important;max-height:none!important;overflow:visible!important}nextjs-portal{display:none!important}';
 async function switchLevel(page: Page, level: 1 | 2) { await page.getByRole('button', { name: level === 1 ? 'Niveau 1 — Atelier actuel' : 'Niveau 2 — Lac de Guiers', exact: true }).click(); }
@@ -28,20 +28,20 @@ test('independent levels retain model, scenario, playback, draft geography and n
   await expect(two.getByText('Les zones restent à renseigner')).toBeVisible();
   await expect(two.getByLabel('Charger un GeoJSON local')).toHaveCount(0);
   await expect(two.getByRole('button', { name: 'Essayer la démonstration fictive' })).toHaveCount(0);
-  await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   await two.getByRole('button', { name: 'Essayer la démonstration fictive' }).click();
-  await two.getByRole('button', { name: 'Pêcheur', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click();
   const zone = two.getByRole('button', { name: 'Sur la carte : Zone fictive A' }); await zone.focus(); await page.keyboard.press('Enter');
   await expect(two.getByText('10 %', { exact: true })).toBeVisible(); expect(calls).toBe(1);
-  await two.getByRole('button', { name: 'Éditeur scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click(); await two.getByRole('button', { name: 'Éditeur scientifique', exact: true }).click();
   await expect(two.getByLabel('Éditeur graphique')).toBeVisible();
-  await two.getByRole('button', { name: 'Territoire', exact: true }).click(); await expect(zone).toHaveAttribute('aria-pressed', 'true');
+  await two.getByRole('button', { name: 'Territoire', exact: true }).click(); await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click(); await expect(zone).toHaveAttribute('aria-pressed', 'true');
   await switchLevel(page, 1); await switchLevel(page, 2); await expect(zone).toHaveAttribute('aria-pressed', 'true');
-  await expect(two.getByText('Carte de démonstration — zones fictives.', { exact: true })).toHaveCount(1);
+  await expect(two.locator('.territory-demo')).toHaveCount(1); await expect(two.locator('.territory-demo')).toContainText('Exemple fictif — ce ne sont pas les limites du lac');
   await expect(two.locator('.territory-workspace')).not.toContainText(/GeoJSON|WGS84|N\(t\)|a_z|contrat|paramètres|provenance|non calibr/i);
   await mkdir(evidence, { recursive: true }); await page.screenshot({ path: path.join(evidence, 'territoire-pecheur.png'), fullPage: true });
   await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, 'territoire-pecheur-complet.png'), style: captureStyle });
-  await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   await expect(two.getByText('demo-A', { exact: true })).toBeVisible(); await page.screenshot({ path: path.join(evidence, 'territoire-scientifique.png'), fullPage: true });
   await two.getByText('Paramètres transmis au modèle', { exact: true }).click(); await expect(two.getByText('r0', { exact: true })).toBeVisible();
   await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, 'territoire-scientifique-complet.png'), style: captureStyle });
@@ -52,15 +52,15 @@ test('independent levels retain model, scenario, playback, draft geography and n
   await one.getByRole('button', { name: 'Modélisation', exact: true }).click(); await expect(one.getByLabel('Nom du modèle', { exact: true })).toHaveValue('niveau1-conserve');
   await switchLevel(page, 2); await expect(two.getByText('✓ Configuration appliquée')).toBeVisible();
   const second = page.waitForResponse(r => r.url().endsWith('/api/v1/simulations/run') && r.request().method() === 'POST');
-  await two.getByRole('button', { name: 'Simuler', exact: true }).click(); const response = await second;
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Voyons/ }).click(); await two.getByLabel('Support à présenter', { exact: true }).selectOption('native-simulation'); await two.getByRole('button', { name: 'Lancer la simulation Irritator' }).click(); const response = await second;
   expect(response.status()).toBe(200); expect(response.request().postDataJSON().territory.zoneId).toBe('demo-A'); expect(response.request().postDataJSON().temporal.parameters.a).toBe(.1);
   await expect(two.getByLabel('Zone appliquée aux observations')).toContainText('10 %');
   await two.getByLabel('Position temporelle').fill('30'); await switchLevel(page, 1); await switchLevel(page, 2); await expect(two.getByLabel('Position temporelle')).toHaveValue('30');
-  await two.getByRole('button', { name: 'Modélisation', exact: true }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
   const download = page.waitForEvent('download'); await two.getByRole('button', { name: 'Enregistrer', exact: true }).click(); const file = await download;
   const exported = path.join(evidence, 'zone-confirmee.json'); await file.saveAs(exported);
   await two.getByRole('button', { name: 'Nouveau', exact: true }).click(); await two.getByLabel('Ouvrir un modèle JSON', { exact: true }).setInputFiles(exported);
-  await expect(two.getByText('✓ Zone confirmée')).toBeVisible();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click(); await expect(two.getByText('✓ Zone confirmée')).toBeVisible();
   for (const width of [1024, 390]) {
     await page.setViewportSize({ width, height: 900 }); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await two.locator('.territory-workspace').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -73,12 +73,12 @@ test('independent levels retain model, scenario, playback, draft geography and n
     await two.locator('.modeling-workspace').evaluate(el => { el.scrollTop = 0; });
     await page.screenshot({ path: path.join(evidence, `territoire-pecheur-${width}.png`), fullPage: true });
     await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, `territoire-pecheur-${width}-complet.png`), style: captureStyle });
-    await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+    await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
     await expect(two.getByLabel('Charger un GeoJSON local')).toBeVisible();
     await expect(two.getByText('demo-A', { exact: true })).toBeVisible();
     expect(await two.locator('.territory-workspace').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, `territoire-scientifique-${width}-complet.png`), style: captureStyle });
-    await two.getByRole('button', { name: 'Pêcheur', exact: true }).click();
+    await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click();
   }
   await page.reload(); await switchLevel(page, 2); await expect(two.getByText('✓ Zone confirmée')).toBeVisible();
   await switchLevel(page, 1); await expect(one.getByLabel('Nom du modèle', { exact: true })).toHaveValue('niveau1-conserve');

@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 import { mkdir, readFile } from 'node:fs/promises';
 
-const evidence = path.resolve('../../../reports/niveau2-2.2.A');
+const evidence = path.resolve('../../../reports/niveau2-2.3.A/regression-activites');
 const captureStyle = 'html,body,.level-application,.level-workspace,.workbench,.modeling-workspace{height:auto!important;max-height:none!important;overflow:visible!important}nextjs-portal{display:none!important}';
 test.use({ hasTouch: true, actionTimeout: 15000 });
 const level = (page: Page, n: 1 | 2) => page.getByRole('button', { name: n === 1 ? 'Niveau 1 — Atelier actuel' : 'Niveau 2 — Lac de Guiers', exact: true }).click();
@@ -15,7 +15,7 @@ test('describes, saves and roundtrips fishing activities while preserving both l
   const one = page.locator('#level-one'), two = page.locator('#level-two');
   await one.getByLabel('Nom du modèle', { exact: true }).fill('niveau1-preserve-2-2-a');
   await level(page, 2);
-  await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   await two.getByRole('button', { name: 'Essayer la démonstration fictive' }).click();
   await two.getByRole('button', { name: 'Zone fictive A', exact: true }).click();
   await two.getByRole('button', { name: 'Confirmer cette zone' }).click();
@@ -29,16 +29,16 @@ test('describes, saves and roundtrips fishing activities while preserving both l
   await expect(two.getByRole('button', { name: /Moteur connecté/ })).toBeVisible();
   const nativeRun = async () => {
     const response = page.waitForResponse(r => r.url().endsWith('/api/v1/simulations/run') && r.request().method() === 'POST');
-    await two.getByRole('button', { name: 'Simuler', exact: true }).click();
+    await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Voyons/ }).click(); await two.getByLabel('Support à présenter', { exact: true }).selectOption('native-simulation'); await two.getByRole('button', { name: 'Lancer la simulation Irritator' }).click();
     const result = await response; expect(result.status()).toBe(200);
     return { request: result.request().postDataJSON(), result: await result.json() };
   };
   const baseline = await nativeRun();
-  await two.getByRole('button', { name: 'Modélisation', exact: true }).click();
-  await two.getByRole('button', { name: 'Pêcheur', exact: true }).click();
-  const describe = two.getByRole('button', { name: '2 · Décrire l’activité' });
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click();
+  const describe = two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Nos sorties/ });
   await describe.focus(); await page.keyboard.press('Enter');
-  await expect(two.getByRole('heading', { name: 'Comment allez-vous pêcher ?' })).toBeVisible();
+  await expect(two.getByRole('heading', { name: 'Nos sorties' })).toBeVisible();
   const add = two.getByRole('button', { name: '+ Ajouter un groupe' });
   await add.focus(); await page.keyboard.press('Enter');
   await expect(two.getByRole('heading', { name: 'Nouveau groupe' })).toBeFocused();
@@ -46,10 +46,10 @@ test('describes, saves and roundtrips fishing activities while preserving both l
   await two.getByLabel('Pêcheurs mobilisés', { exact: true }).fill('4');
   await two.getByLabel('Sorties par pirogue et par mois', { exact: true }).fill('12');
   await two.getByLabel('Durée moyenne d’une sortie (h)', { exact: true }).fill('6');
-  await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   await expect(two.getByLabel('Nombre de pirogues', { exact: true })).toHaveValue('2');
-  await two.getByRole('button', { name: 'Pêcheur', exact: true }).click();
-  await two.getByRole('button', { name: '1 · Sélection de zone' }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
   await describe.click(); await expect(two.getByLabel('Sorties par pirogue et par mois', { exact: true })).toHaveValue('12');
   await level(page, 1); await expect(one.getByLabel('Nom du modèle', { exact: true })).toHaveValue('niveau1-preserve-2-2-a');
   await level(page, 2); await expect(two.getByLabel('Nombre de pirogues', { exact: true })).toHaveValue('2');
@@ -85,13 +85,13 @@ test('describes, saves and roundtrips fishing activities while preserving both l
   await two.getByRole('button', { name: 'Enregistrer le groupe', exact: true }).click();
   await two.getByRole('button', { name: 'Consulter le résumé', exact: true }).click();
   await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, 'resume-pecheur-bureau.png'), style: captureStyle });
-  await two.getByRole('button', { name: 'Scientifique', exact: true }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   await expect(summary).toContainText('T_m = Σ P_i S_i,m'); await expect(summary).toContainText('Données absentes');
   await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, 'activite-scientifique-bureau.png'), style: captureStyle });
   for (const width of [1024, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const reading of ['Pêcheur', 'Scientifique']) {
-      await two.getByRole('button', { name: reading, exact: true }).tap();
+      await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: reading, exact: true }).tap();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await two.locator('.fishing-activity').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
       await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, `activite-${reading === 'Pêcheur' ? 'pecheur' : 'scientifique'}-${width}.png`), style: captureStyle });
@@ -100,19 +100,20 @@ test('describes, saves and roundtrips fishing activities while preserving both l
     await two.getByRole('button', { name: 'Modifier le groupe 1', exact: true }).tap();
     await two.getByLabel('Durée moyenne d’une sortie (h)', { exact: true }).fill('6');
     expect(await two.locator('.fishing-activity').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-    await two.getByRole('button', { name: 'Pêcheur', exact: true }).tap();
+    await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Pêcheur', exact: true }).tap();
     await two.locator('.territory-workspace').screenshot({ path: path.join(evidence, `saisie-pecheur-${width}.png`), style: captureStyle });
     await two.getByRole('button', { name: 'Enregistrer le groupe', exact: true }).tap();
     await two.getByRole('button', { name: 'Consulter le résumé', exact: true }).tap();
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await two.getByRole('button', { name: 'Simulation', exact: true }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Voyons/ }).click();
   await expect(two.locator('.stale-banner')).toHaveCount(0);
-  await two.getByRole('button', { name: 'Modélisation', exact: true }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
   const after = await nativeRun();
   expect(after.request.temporal).toEqual(baseline.request.temporal); expect(after.request.model).toEqual(baseline.request.model);
   expect(after.result.observations).toEqual(baseline.result.observations);
-  await two.getByRole('button', { name: 'Modélisation', exact: true }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
+  await two.getByRole('group', { name: 'Lecture de l’atelier' }).getByRole('button', { name: 'Scientifique', exact: true }).click();
   const download = page.waitForEvent('download'); await two.getByRole('button', { name: 'Enregistrer', exact: true }).click();
   const file = await download, exported = path.join(evidence, 'activite-exportee-reimportee.json'); await file.saveAs(exported);
   const json = JSON.parse(await readFile(exported, 'utf8'));
@@ -120,12 +121,12 @@ test('describes, saves and roundtrips fishing activities while preserving both l
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('irritator.level2.workspace.v2')!).request.fishingActivities)).toEqual(json.fishingActivities);
   await two.getByRole('button', { name: 'Nouveau', exact: true }).click();
   await two.getByLabel('Ouvrir un modèle JSON', { exact: true }).setInputFiles(exported);
-  await two.getByRole('button', { name: '2 · Décrire l’activité' }).click();
+  await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Nos sorties/ }).click();
   await expect(two.getByLabel('Résumé de l’activité', { exact: true }).locator('.activity-totals')).toContainText('144');
   await two.getByLabel('Ouvrir un modèle JSON', { exact: true }).setInputFiles({ name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{broken') });
   await expect(two.locator('.territory-workspace').getByRole('alert')).toContainText('Import impossible');
   await expect(two.getByLabel('Résumé de l’activité', { exact: true }).locator('.activity-totals')).toContainText('144');
-  await page.reload(); await level(page, 2); await two.getByRole('button', { name: '2 · Décrire l’activité' }).click();
+  await page.reload(); await level(page, 2); await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Nos sorties/ }).click();
   await expect(two.getByRole('article', { name: 'Groupe 1', exact: true })).toContainText('4');
   await level(page, 1); await expect(one.getByLabel('Nom du modèle', { exact: true })).toHaveValue('niveau1-preserve-2-2-a');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('irritator.workspace.v2')!).request.fishingActivities)).toBeUndefined();

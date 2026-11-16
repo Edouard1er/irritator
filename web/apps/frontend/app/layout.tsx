@@ -3,6 +3,7 @@ import '@xyflow/react/dist/style.css';
 import './globals.css';
 import './workshop.css';
 import './territory.css';
+import './level-two-workshop.css';
 
 export const metadata: Metadata = {
   title: 'Irritator Web · Atelier de modélisation',

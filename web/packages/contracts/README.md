@@ -766,3 +766,21 @@ La validation de `start + horizonApplied` utilise une marge limitée à huit
 unités d’arrondi à l’échelle de l’horloge, pour les origines fractionnaires ;
 les temps restent strictement croissants et les valeurs ne sont pas corrigées.
 La borne HTTP de 4 Mio inclut également le `runId` ajouté par Fastify.
+
+## Séances participatives du niveau 2 (2.3.A)
+
+`workshop-session.ts` définit et valide un document autonome `WorkshopSessionV1`.
+Il décrit D1, le support effectivement présenté et D2, pour les situations S1/S2/S3
+versionnées. Il ne fait partie d’aucun `RunRequest` et n’est jamais transmis au
+runner. Les objets sont fermés ; les choix sont issus du catalogue et les dates UTC
+sont ordonnées. Une réponse après exposition doit conserver sa fiche d’origine et
+chaîner tout nouvel essai. S2/S3 n’acceptent aucune présentation de simulation native.
+
+Le frontend utilise uniquement `irritator.level2.decisions.v1` pour ces données,
+après confirmation de l’autorisation de collecte par l’animateur. Les documents
+scientifiques et leurs clés historiques restent distincts. L’empreinte d’une
+présentation native reprend la chaîne `scientificFingerprint` de la requête
+effectivement exécutée ; ce n’est ni une signature ni une certification de l’import.
+Les limites techniques sont 2 000 fiches, 500 caractères par texte libre et 8 Mio
+par fichier de séance. Le quota du navigateur peut être inférieur : l’export reste
+nécessaire pour constituer une archive durable.
