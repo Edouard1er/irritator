@@ -1,5 +1,64 @@
 # Contrats scientifiques v1, v2 et v3
 
+## Activités de pêche descriptives facultatives (niveau 2, incrément 2.2.A)
+
+`fishingActivities: { version: 1, units, activities }` est une extension du
+document v3 territorial. Chaque activité possède un identifiant, une référence
+de zone figée (`geographyId`, `zoneId`, `name`), un scénario, une période
+`{start,end,unit:"month"}` (fin exclue, origine relative de l’expérience), une
+provenance déclarative et des groupes. Le projet est le document contenant ces
+données. Les anciennes périodes, zones et scénarios sont conservés ; une
+référence à une carte remplacée est un instantané déclaré, pas une validation
+géographique. Une zone présente sur la carte courante doit être cohérente avec
+celle-ci. Les périodes d’une même zone/carte/scénario ne se chevauchent pas.
+
+Un groupe conserve `id`, `canoe:{category,description?,count}`, `fishers`,
+`tripsPerBoatPerMonth`, `tripDurationHours`, `gear:{category,description?,count?,
+netLengthM?,meshSizeMm?,effectiveFishingHours?,soakHours?,notes?}`.
+Pirogues : `small|medium|large|other` ; engins : `net|line|trap|other`.
+`other` exige une description. Les dimensions de filet ne s’appliquent qu’à
+`net`, sans seuil réglementaire. Pêche effective (par sortie) et durée de pose
+restent deux grandeurs distinctes de la durée de sortie ; une pose peut durer
+plusieurs sorties. Aucune valeur facultative absente n’est imputée à zéro.
+
+Indicateurs mensuels : `Σ count × tripsPerBoatPerMonth` sorties-pirogue/mois et
+`Σ count × tripsPerBoatPerMonth × tripDurationHours` heures-pirogue/mois de
+sortie. Le nombre de pêcheurs n’est jamais multiplicateur. Ces taux sont
+constants sur chaque période, sans compilation d’événement et sans
+interprétation d’effort effectif. Les groupes vides représentent un repos
+déclaré, distinct d’une absence d’extension.
+
+`request-v3.schema.json` valide formes fermées, unités, catégories et champs
+facultatifs ; `fishing-activity.ts` valide unicité, cohérence, chevauchements et
+totaux finis. Le service, l’import, l’export et la sauvegarde locale partagent
+ces contrôles. Limites techniques : 120 activités, 100 groupes par activité,
+500 caractères par texte (taille/temps de validation dans la limite HTTP de
+1 Mio), entiers jusqu’à `Number.MAX_SAFE_INTEGER` et total des sorties entier
+exact. Les heures sont des nombres IEEE-754 finis ; les débordements sont
+refusés. Aucune borne écologique ni limite de 24 heures n’est introduite.
+
+`nativeRequest` retire **entièrement** `fishingActivities` avant le runner,
+comme les métadonnées territoriales. Le protocole natif, E, q, a, Schaefer,
+les interventions et l’animation demeurent indépendants de la description.
+Les documents v1/v2 et les documents v3 sans extension gardent leurs contrats.
+Le compte rendu et les preuves se trouvent dans
+`web/apps/frontend/NIVEAU2_INCREMENT_2_2_A.md` et `reports/niveau2-2.2.A/`.
+
+## Sélection territoriale facultative (niveau 2, incrément 2.1)
+
+Le JSON v3 accepte `territory: { geography, zoneId, accessibility, provenance,
+parameter: "a" }`. `geography` embarque une collection GeoJSON locale
+Polygon/MultiPolygon avec `id`, `name`, `source`, `demonstration` et des éléments
+portant `properties: { id, name, role: "lake"|"zone", accessibility?, provenance? }`.
+Les schémas restent fermés. `territory.ts` valide les géométries, les identifiants
+uniques, la provenance et la cohérence exacte de l'accès avec le graphe Schaefer
+temporel. Une seule zone et un accès constant sont admis. Les anciens documents
+sans extension restent inchangés. `nativeRequest` retire `territory` avant le
+runner natif ; seule la configuration temporelle commune est compilée en DEVS.
+La biomasse accessible affichée est `a_z × N(t)` ; aucun état biologique local
+n'est introduit. Le contrat détaillé, les limites et la validation sont décrits
+dans `web/apps/frontend/NIVEAU2_INCREMENT_2_1.md`.
+
 Les schémas JSON draft-04 sont exécutés par RapidJSON dans le runner et par Ajv
 dans le service et l’éditeur. `request.schema.json` reste le schéma v1.
 `request-v2.schema.json` ajoute la composition. Le catalogue global reste une

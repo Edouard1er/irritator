@@ -12,6 +12,10 @@ import { validateUnits } from './units.js';
 export * from './units.js';
 import { validateTemporal } from './temporal.js';
 export * from './temporal.js';
+import { validateTerritory } from './territory.js';
+export * from './territory.js';
+import { validateFishingActivities } from './fishing-activity.js';
+export * from './fishing-activity.js';
 
 export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
 export interface ComponentSpec { sourceContracts?: { port: number; types: string[]; maximum: number }[]; type: string; name: string; description?: string; parameters: Record<string, ParameterSpec>; required: string[]; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[] }
@@ -31,6 +35,8 @@ export interface Endpoint { component: string; port: number }
 export interface CoupledDefinition { id: string; name: string; units?: import('./units.js').ModelUnits; inputs: { port: number; name: string }[]; outputs: { port: number; name: string }[]; components: Component[]; connections: { from: Endpoint; to: Endpoint }[] }
 export interface ForecastContract { pair: string; planId: string; planVersion: number; quantity: string; unit: string; cohort: string; mode: 'operational' | 'diagnostic'; stateFactors: string[]; commandFactor: string; contextFactors: string[] }
 export interface RunRequest {
+  fishingActivities?: import('./fishing-activity.js').FishingActivities;
+  territory?: import('./territory.js').TerritorialSelection;
   temporal?: import('./temporal.js').TemporalExperiment;
   schemaVersion: 1 | 2 | 3;
   model: { id: string; units?: import('./units.js').ModelUnits; components: Component[]; connections: { from: Endpoint; to: Endpoint }[]; observations: { component: string; samplingInterval: number; eventPorts?: number[] }[]; definitions?: CoupledDefinition[]; forecastContracts?: ForecastContract[] };
@@ -76,6 +82,8 @@ export function validateRequest(input: unknown): asserts input is RunRequest {
   validateGraph(input);
 }
 export function validateGraph(request: RunRequest): void {
+  try { validateFishingActivities(request); } catch (e) { throw new ApiError('INVALID_FISHING_ACTIVITY', (e as Error).message); }
+  try { validateTerritory(request); } catch (e) { throw new ApiError('INVALID_TERRITORY', (e as Error).message); }
   try { validateTemporal(request); } catch (e) { throw new ApiError('INVALID_TEMPORAL', (e as Error).message); }
   try { validateUnits(request); } catch (e) { throw new ApiError('INVALID_UNITS', (e as Error).message); }
   validateStructure(request, false);

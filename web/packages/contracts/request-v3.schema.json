@@ -8,6 +8,18 @@
     "simulation"
   ],
   "properties": {
+    "fishingActivities": { "$ref": "#/definitions/fishingActivities" },
+    "territory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["geography", "zoneId", "accessibility", "provenance", "parameter"],
+      "properties": {
+        "geography": { "$ref": "#/definitions/territoryGeography" },
+        "zoneId": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "accessibility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "provenance": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "parameter": { "enum": ["a"] }
+      }
+    },
     "schemaVersion": {
       "enum": [
         3
@@ -620,6 +632,109 @@
     }
   },
   "definitions": {
+    "activityText": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S" },
+    "activityInteger": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+    "fishingActivities": {
+      "type": "object", "additionalProperties": false, "required": ["version", "units", "activities"],
+      "properties": {
+        "version": { "enum": [1] },
+        "units": {
+          "type": "object", "additionalProperties": false,
+          "required": ["boats", "fishers", "tripsPerBoatPerMonth", "tripDurationHours", "gearCount", "netLengthM", "meshSizeMm", "effectiveFishingHours", "soakHours"],
+          "properties": {
+            "boats": { "enum": ["canoe"] }, "fishers": { "enum": ["person"] },
+            "tripsPerBoatPerMonth": { "enum": ["trip/(canoe*month)"] }, "tripDurationHours": { "enum": ["h"] },
+            "gearCount": { "enum": ["gear"] }, "netLengthM": { "enum": ["m"] }, "meshSizeMm": { "enum": ["mm"] },
+            "effectiveFishingHours": { "enum": ["h"] }, "soakHours": { "enum": ["h"] }
+          }
+        },
+        "activities": { "type": "array", "maxItems": 120, "items": { "$ref": "#/definitions/fishingActivity" } }
+      }
+    },
+    "fishingActivity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "zone", "scenario", "period", "provenance", "groups"],
+      "properties": {
+        "id": { "$ref": "#/definitions/activityText" }, "scenario": { "$ref": "#/definitions/activityText" },
+        "zone": {
+          "type": "object", "additionalProperties": false, "required": ["geographyId", "zoneId", "name"],
+          "properties": { "geographyId": { "$ref": "#/definitions/activityText" }, "zoneId": { "$ref": "#/definitions/activityText" }, "name": { "$ref": "#/definitions/activityText" } }
+        },
+        "period": {
+          "type": "object", "additionalProperties": false, "required": ["start", "end", "unit"],
+          "properties": { "start": { "type": "number", "minimum": 0 }, "end": { "type": "number", "minimum": 0 }, "unit": { "enum": ["month"] } }
+        },
+        "provenance": {
+          "type": "object", "additionalProperties": false, "required": ["basis", "note"],
+          "properties": { "basis": { "enum": ["declared"] }, "note": { "$ref": "#/definitions/activityText" } }
+        },
+        "groups": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/fishingGroup" } }
+      }
+    },
+    "fishingGroup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "canoe", "fishers", "tripsPerBoatPerMonth", "tripDurationHours", "gear"],
+      "properties": {
+        "id": { "$ref": "#/definitions/activityText" },
+        "canoe": {
+          "type": "object", "additionalProperties": false, "required": ["category", "count"],
+          "properties": { "category": { "enum": ["small", "medium", "large", "other"] }, "description": { "$ref": "#/definitions/activityText" }, "count": { "$ref": "#/definitions/activityInteger" } }
+        },
+        "fishers": { "$ref": "#/definitions/activityInteger" }, "tripsPerBoatPerMonth": { "$ref": "#/definitions/activityInteger" },
+        "tripDurationHours": { "type": "number", "minimum": 0 },
+        "gear": {
+          "type": "object", "additionalProperties": false, "required": ["category"],
+          "properties": {
+            "category": { "enum": ["net", "line", "trap", "other"] }, "description": { "$ref": "#/definitions/activityText" },
+            "count": { "$ref": "#/definitions/activityInteger" },
+            "netLengthM": { "type": "number", "minimum": 0 }, "meshSizeMm": { "type": "number", "minimum": 0 },
+            "effectiveFishingHours": { "type": "number", "minimum": 0 }, "soakHours": { "type": "number", "minimum": 0 },
+            "notes": { "$ref": "#/definitions/activityText" }
+          }
+        }
+      }
+    },
+    "territoryPoint": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } },
+    "territoryPolygon": {
+      "type": "array", "minItems": 1, "maxItems": 128,
+      "items": { "type": "array", "minItems": 4, "maxItems": 20000, "items": { "$ref": "#/definitions/territoryPoint" } }
+    },
+    "territoryGeography": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "id", "name", "source", "demonstration", "features"],
+      "properties": {
+        "type": { "enum": ["FeatureCollection"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "demonstration": { "type": "boolean" },
+        "features": {
+          "type": "array", "maxItems": 128,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["type", "properties", "geometry"],
+            "properties": {
+              "type": { "enum": ["Feature"] },
+              "properties": {
+                "type": "object", "additionalProperties": false, "required": ["id", "name", "role"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 500 },
+                  "role": { "enum": ["lake", "zone"] },
+                  "accessibility": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "provenance": { "type": "string", "minLength": 1, "maxLength": 500 }
+                }
+              },
+              "geometry": {
+                "oneOf": [
+                  { "type": "object", "additionalProperties": false, "required": ["type", "coordinates"], "properties": { "type": { "enum": ["Polygon"] }, "coordinates": { "$ref": "#/definitions/territoryPolygon" } } },
+                  { "type": "object", "additionalProperties": false, "required": ["type", "coordinates"], "properties": { "type": { "enum": ["MultiPolygon"] }, "coordinates": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/definitions/territoryPolygon" } } } }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "id": {
       "type": "string",
       "minLength": 1,

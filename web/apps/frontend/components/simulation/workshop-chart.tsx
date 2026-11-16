@@ -45,7 +45,12 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
         shapes, annotations, showlegend: false, hovermode: 'closest', uirevision: series.id,
       }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'], toImageButtonOptions: { filename: 'irritator-atelier', format: 'png', scale: 2 } });
       if (disposed) { plot.purge(element); return; }
-      resize = new ResizeObserver(() => { if (!disposed) void plot.Plots.resize(element); }); resize.observe(element);
+      resize = new ResizeObserver(() => {
+        // Levels and modeling steps keep charts mounted while their parents are hidden.
+        if (!disposed && element.getClientRects().length && element.clientWidth > 0) {
+          void Promise.resolve(plot.Plots.resize(element)).catch(() => { if (!disposed && element.getClientRects().length) setError(true); });
+        }
+      }); resize.observe(element);
     }).catch(() => { if (!disposed) setError(true); });
     return () => { disposed = true; resize?.disconnect(); module?.purge(element); };
   }, [series, index, time, timeUnit, statuses, config, biomass, baseline, interventions]);

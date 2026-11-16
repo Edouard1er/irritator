@@ -1,2 +1,2 @@
-import { ModelEditor } from '@/components/editor/model-editor';
-export default function Page() { return <ModelEditor />; }
+import { LevelNavigation } from '@/components/navigation/level-navigation';
+export default function Page() { return <LevelNavigation />; }

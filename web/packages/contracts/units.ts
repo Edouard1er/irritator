@@ -82,6 +82,8 @@ export function scopeForPath(request: RunRequest, path: string, initial: UnitSco
 /** Compile optional timed signals, then strip unit metadata for the historical native protocol. */
 export function nativeRequest(request: RunRequest): RunRequest {
   const copy = compileTemporal(request);
+  delete copy.territory;
+  delete copy.fishingActivities;
   const strip = (scope: UnitScope) => { delete scope.units; scope.components.forEach(c => { delete c.units; }); };
   strip(copy.model); copy.model.definitions?.forEach(strip); return copy;
 }

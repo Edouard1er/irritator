@@ -13,12 +13,14 @@ import { applyMapping, classifyBiomassStatus, modelUnit, normalizeRun, observati
 import { rollingCatch, scenarioLabel } from '@/lib/simulation/indicators';
 import { AlertAudio } from '@/lib/simulation/alert-audio';
 import { BiomassLake } from './biomass-lake';
+import { accessibleBiomass } from '@contracts';
 
 const Chart = dynamic(() => import('./workshop-chart'), { ssr: false, loading: () => <p>Chargement du graphique…</p> });
 const fmt = (value?: number) => value !== undefined && Number.isFinite(value) ? new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(value) : 'Non disponible';
 const defaultConfig: AlertConfig = { proximityRatio: .2, slopeTolerance: 0 };
 
-export function SimulationWorkspace({ result, request, stale, status, error, active,sessionId,onIntervention }: { result?: HttpResult; request?: RunRequest; stale: boolean; status: string; error?: string; active: boolean;sessionId?:string;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+export function SimulationWorkspace({ result, request, stale, status, error, active,sessionId,onIntervention,preferenceScope }: { result?: HttpResult; request?: RunRequest; stale: boolean; status: string; error?: string; active: boolean;sessionId?:string;preferenceScope?:string;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+  const audienceKey = preferenceScope ? `irritator-${preferenceScope}-audience` : 'irritator-audience';
   const runs = useMemo(() => result && request ? normalizeRun(result, request) : [], [result, request]);
   const [selection, setSelection] = useState('');
   const run = runs.find(r => r.id === selection) ?? runs.find(r => r.series.some(s => s.kind === 'biomass_total')) ?? runs[0];
@@ -32,8 +34,8 @@ export function SimulationWorkspace({ result, request, stale, status, error, act
     const previous=Array.from(items??[]).map(el=>({el,inert:el.inert}));previous.forEach(({el})=>{el.inert=true;});
     return()=>previous.forEach(({el,inert})=>{el.inert=inert;});
   },[presentation]);
-  useEffect(() => { try { if (localStorage.getItem('irritator-audience') === 'scientific') setAudience('scientific'); } catch { /* Optional preference. */ } }, []);
-  const chooseAudience = (value: string) => { setAudience(value); try { localStorage.setItem('irritator-audience', value); } catch { /* Optional preference. */ } };
+  useEffect(() => { try { if (localStorage.getItem(audienceKey) === 'scientific') setAudience('scientific'); } catch { /* Optional preference. */ } }, [audienceKey]);
+  const chooseAudience = (value: string) => { setAudience(value); try { localStorage.setItem(audienceKey, value); } catch { /* Optional preference. */ } };
   useEffect(() => {
     const fullscreen = () => { if (!document.fullscreenElement) setPresentation(false); };
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPresentation(false); if(document.fullscreenElement)void document.exitFullscreen().catch(()=>{}); } };
@@ -57,11 +59,12 @@ export function SimulationWorkspace({ result, request, stale, status, error, act
     {error && <p className="error-banner" role="alert">{error}{result?' · L’exécution précédente reste affichée.':''}</p>}
     {(status==='Validation'||status==='Exécution') && <p className="notice" role="status">Calcul en cours dans Irritator… {result?'Les données affichées sont celles de l’exécution précédente.':''}</p>}
     {stale && result && <p className="stale-banner" role="status">Modèle modifié : les résultats affichés proviennent de l’exécution précédente.</p>}
-    {!result ? <div className="workshop-empty"><Waves size={42}/><h2>Aucune simulation pour le moment</h2><p>Ouvrez votre modèle dans Modélisation, sélectionnez ses observations, puis lancez la simulation.</p><p>Aucune donnée de démonstration n’est substituée aux sorties du moteur.</p></div> : run ? <Playback key={`${sessionId??result.runId}:${run.id}`} request={request} onIntervention={onIntervention} run={run} active={active && status!=='Exécution' && status!=='Validation'} fisher={audience==='fisher'} scientific={<ResultsPanel result={result} request={request} stale={false} status={status}/>} /> : <><p hidden={audience!=='fisher'} className="workshop-empty">Cette exécution ne contient aucune observation de trajectoire. Activez les observateurs dans le constructeur, ou consultez les décisions et événements dans la lecture Scientifique.</p><div className="scientific-workspace" hidden={audience!=='scientific'}><ResultsPanel result={result} request={request} stale={false} status={status}/></div></>}
+    {!result ? <div className="workshop-empty"><Waves size={42}/><h2>Aucune simulation pour le moment</h2><p>Ouvrez votre modèle dans Modélisation, sélectionnez ses observations, puis lancez la simulation.</p><p>Aucune donnée de démonstration n’est substituée aux sorties du moteur.</p></div> : run ? <Playback key={`${sessionId??result.runId}:${run.id}`} preferenceScope={preferenceScope} request={request} onIntervention={onIntervention} run={run} active={active && status!=='Exécution' && status!=='Validation'} fisher={audience==='fisher'} scientific={<ResultsPanel result={result} request={request} stale={false} status={status}/>} /> : <><p hidden={audience!=='fisher'} className="workshop-empty">Cette exécution ne contient aucune observation de trajectoire. Activez les observateurs dans le constructeur, ou consultez les décisions et événements dans la lecture Scientifique.</p><div className="scientific-workspace" hidden={audience!=='scientific'}><ResultsPanel result={result} request={request} stale={false} status={status}/></div></>}
   </section>;
 }
 
-function Playback({ run: original, active, fisher, scientific,request,onIntervention }: { run: Trajectory; active: boolean; fisher: boolean; scientific: React.ReactNode;request?:RunRequest;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+function Playback({ run: original, active, fisher, scientific,request,onIntervention,preferenceScope }: { run: Trajectory; active: boolean; fisher: boolean; scientific: React.ReactNode;request?:RunRequest;preferenceScope?:string;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+  const soundKey = preferenceScope ? `irritator-${preferenceScope}-alert-sound` : 'irritator-alert-sound';
   const initial=useRef(original);
   const [comparisonInitial,setComparisonInitial]=useState(original);
   const activity=useRef(active);activity.current=active;
@@ -77,7 +80,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const [index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1);
   const [systemReduced,setSystemReduced]=useState(false),[manualReduced,setManualReduced]=useState(false);
   const reduced=systemReduced||manualReduced;
-  const [sound,setSound]=useState(()=>{try{return localStorage.getItem('irritator-alert-sound')!=='off';}catch{return true;}}),[volume,setVolume]=useState(.25),[audioReady,setAudioReady]=useState(false);
+  const [sound,setSound]=useState(()=>{try{return localStorage.getItem(soundKey)!=='off';}catch{return true;}}),[volume,setVolume]=useState(.25),[audioReady,setAudioReady]=useState(false);
   const [audioError,setAudioError]=useState(''),[configError,setConfigError]=useState('');
   const audio=useRef<AlertAudio|null>(null),mounted=useRef(true),activation=useRef(0);
   const selectedIndex=Math.min(index,Math.max(0,timeline.length-1));
@@ -137,7 +140,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     catch { if(mounted.current&&activation.current===token){audio.current?.stop();setAudioReady(false);setAudioError('Le navigateur ne permet pas le son. Réactivez le son pour réessayer ; les alertes visuelles restent actives.');} }
   };
   const enableAudio=(enabled:boolean)=>{
-    setSound(enabled);try{localStorage.setItem('irritator-alert-sound',enabled?'on':'off');}catch{/* Optional preference. */}
+    setSound(enabled);try{localStorage.setItem(soundKey,enabled?'on':'off');}catch{/* Optional preference. */}
     if(!enabled){activation.current++;audio.current?.stop();return;}
     void prepareAudio();
   };
@@ -164,11 +167,12 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   };
   const accessibility=environment?.a??run.parameters.a;
   return <>
+    {request?.territory && <article className="workshop-card territory-observation" aria-label="Zone appliquée aux observations"><h2>{request.territory.geography.features.find(f => f.properties.id === request.territory!.zoneId)?.properties.name}</h2><p>{fisher ? 'Accès aux poissons' : 'a_z'} : {fisher ? fmt(request.territory.accessibility * 100) : String(request.territory.accessibility).replace('.', ',')}{fisher ? ' %' : ' (sans dimension)'} · {fisher ? 'Poissons accessibles dans cette zone' : 'a_z × N(t)'} : {fmt(accessibleBiomass(value, request.territory.accessibility))} {unit} · t = {fmt(time)} {run.timeUnit}</p></article>}
     {run.status!=='completed'&&<p className="stale-banner" role="status">Résultats partiels ou indisponibles ({run.status}). La lecture s’arrête au dernier point effectivement fourni.</p>}
     {run.warnings.map(w=><p key={w} className="stale-banner" role="status">{w}</p>)}
     {configError&&<p className="error-banner" role="alert">{configError}</p>}
     {experiment&&<div className="environment-strip"><strong>{season?.name} · mois {season?.month}/12</strong><span>Pluie {fmt(environment?.P)}/10</span><span>Salinité {fmt(environment?.S)}/10</span><span>Accessibilité {fmt((environment?.a??0)*100)} %</span><span>Effort {fmt(environment?.E)}</span><button disabled={editing!==undefined||recalculating||time===undefined||calendarTime(time)>=request!.simulation.end||!onIntervention} onClick={()=>{audio.current?.stop();setPlaying(false);setEditing(time===undefined?undefined:calendarTime(time));setInterventionError('');}}>Modifier les conditions</button>{experiment.interventions.length>0&&<label><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/> Comparer à la trajectoire initiale (bleu)</label>}</div>}
-    {editing!==undefined&&experiment&&<ConditionsEditor key={editing} experiment={experiment} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,f,m,s)=>void applyIntervention(p,f,m,s)} onCancel={()=>setEditing(undefined)}/>}
+    {editing!==undefined&&experiment&&<ConditionsEditor key={editing} lockAccessibility={!!request?.territory} experiment={experiment} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,f,m,s)=>void applyIntervention(p,f,m,s)} onCancel={()=>setEditing(undefined)}/>}
     {interventionError&&<p role="alert" className="error-banner">{interventionError} · La trajectoire précédente reste affichée ; aucune intervention n’est enregistrée.</p>}
     {resumedAt!==undefined&&<p className="intervention-confirmation" role="status" data-resume-time={resumedAt}>Recalcul terminé — reprise au mois {fmt(resumedAt)} sans réinitialiser N ni C.</p>}
     <div className="fisher-dashboard" hidden={!fisher}>

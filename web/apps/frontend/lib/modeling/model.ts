@@ -1,6 +1,6 @@
 import { Ajv } from 'ajv';
 import { ApiError, catalog, requestSchema, requestV2Schema, requestV3Schema, validateGraph, validateRequest, type Component, type RunRequest } from '@contracts';
-import { validateHierarchy, validateUnits, validateTemporal } from '@contracts';
+import { validateHierarchy, validateUnits, validateTemporal, validateTerritory, validateFishingActivities } from '@contracts';
 import { componentSpec, validateDependencies } from './wrapper';
 
 export interface ParameterSpec { type: string; minimum: number; maximum: number; default?: number; description?: string; choices?: string[] }
@@ -47,6 +47,8 @@ export function validateEditorDocument(input: unknown): asserts input is RunRequ
   if (!check(input)) throw new ApiError('INVALID_MODEL', `JSON : ${check.errors?.[0]?.instancePath ?? ''} ${check.errors?.[0]?.message ?? ''}`);
   validateUnits(input);
   validateTemporal(input);
+  validateTerritory(input);
+  validateFishingActivities(input);
   if (input.schemaVersion >= 2) { validateHierarchy(input, true); if (input.schemaVersion === 3) validateDependencies(input, true); }
   else {
     try { validateGraph(input); } catch (e) {
@@ -153,6 +155,11 @@ export function parameterError(value: number, bounds: { minimum: number; maximum
   if (value < bounds.minimum || value > bounds.maximum) return `Valeur attendue entre ${bounds.minimum} et ${bounds.maximum}.`;
 }
 export function fingerprint(request: RunRequest): string { return JSON.stringify(request); }
+/** The descriptive extension is saved/exported but cannot make native results stale. */
+export function scientificFingerprint(request: RunRequest): string {
+  const { fishingActivities: _activities, ...scientific } = request;
+  return JSON.stringify(scientific);
+}
 
 export function renameComponent(state: EditorState, previous: string, next: string): EditorState {
   if (!new RegExp(requestSchema.definitions.id.pattern).test(next) || next.length > 64) throw new Error('Identifiant : 1 à 64 lettres, chiffres, tirets ou soulignés.');

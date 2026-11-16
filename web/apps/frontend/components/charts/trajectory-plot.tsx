@@ -45,7 +45,11 @@ export default function TrajectoryPlot({ observations, childClock = false }: { o
         hovermode: 'closest', uirevision: 'trajectory',
       }, { responsive: true, displaylogo: false, scrollZoom: true, toImageButtonOptions: { filename: 'irritator-trajectoires', format: 'png', scale: 2 }, modeBarButtonsToRemove: ['lasso2d', 'select2d'] });
       if (disposed) { plot.purge(target); return; }
-      resize = new ResizeObserver(() => { if (!disposed) void plot?.Plots.resize(target); });
+      resize = new ResizeObserver(() => {
+        if (!disposed && target.getClientRects().length && target.clientWidth > 0) {
+          void Promise.resolve(plot?.Plots.resize(target)).catch(() => { if (!disposed && target.getClientRects().length) setError('Redimensionnement du graphique impossible.'); });
+        }
+      });
       resize.observe(target);
     }).catch(e => { if (!disposed) setError(e instanceof Error ? e.message : 'Chargement du graphique impossible.'); });
     return () => { disposed = true; resize?.disconnect(); plot?.purge(target); };
