@@ -1,0 +1,13 @@
+.native-briefing{background:#fbfdfb;border:1px solid #d5e3df;border-radius:18px;padding:clamp(16px,3vw,30px);color:#203e44;min-width:0;container-type:inline-size}
+.native-briefing h2{font-size:clamp(1.5rem,3vw,2rem);margin:.4em 0}.native-briefing h3{font-size:1rem}.native-briefing p{line-height:1.55}
+.native-briefing .briefing-warning{padding:12px 18px;background:#fff0ce;border-left:4px solid #92702d;font-weight:700;border-radius:4px}
+.native-briefing .briefing-time{font-size:1.35rem}.native-briefing .briefing-visuals{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.native-briefing .briefing-map,.native-briefing .briefing-symbol{min-width:0;border:1px solid #dce6e3;border-radius:12px;padding:16px;background:#fff}
+.native-briefing .geo-map svg{height:300px}.native-briefing .symbolic-lake{width:100%;max-height:260px}
+.native-briefing .briefing-numbers{display:grid;grid-template-columns:1.2fr 1fr 1.2fr;gap:16px;margin:20px 0}.native-briefing .briefing-numbers section{min-width:0;padding:16px;background:#eef5f1;border-radius:12px}
+.native-briefing output[aria-label="Quantité totale observée"]{font-size:clamp(1.7rem,4vw,2.4rem);font-weight:750;overflow-wrap:anywhere}.native-briefing output span{font-size:1rem}
+.native-briefing meter{display:block;width:100%;height:22px;margin-top:12px}.native-briefing .briefing-graph{margin:20px 0;background:white;padding:12px;border-radius:12px}.native-briefing .briefing-graph svg{width:100%;max-height:240px}
+.native-briefing .briefing-question{font-size:1.2rem;font-weight:650}.native-briefing .briefing-trace{overflow-wrap:anywhere;padding:16px;background:#edf2f4;border-radius:8px}.native-briefing .briefing-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.native-briefing .briefing-controls button{min-height:44px}.native-briefing .timeline-slider{display:block;margin:18px 0}.native-briefing .timeline-slider input{width:100%}
+.native-briefing .symbolic-waves{animation:none}.native-briefing .symbolic-moving .symbolic-waves{animation:briefing-ripple 4s ease-in-out infinite alternate}@keyframes briefing-ripple{to{transform:translateX(7px)}}
+@container (max-width:760px){.native-briefing .briefing-visuals,.native-briefing .briefing-numbers{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.native-briefing .symbolic-moving .symbolic-waves{animation:none!important}}

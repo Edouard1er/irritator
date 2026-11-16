@@ -11,8 +11,8 @@ const requiredNumber = (value: string) => value.trim() ? Number(value) : NaN;
 const shown = (n?: number) => n !== undefined && Number.isFinite(n) ? n : '';
 
 /** Kept mounted by TerritoryWorkspace while navigating; only explicit saves enter the project. */
-export function FishingActivityEditor({ request, scientific, summary, busy, onApply, onSummary, onEdit, onSimulation, guided }: {
-  request: RunRequest; scientific: boolean; summary: boolean; busy: boolean; guided?: boolean;
+export function FishingActivityEditor({ request, scientific, summary, busy, onApply, onSummary, onEdit, onSimulation, guided, privateNames = false }: {
+  request: RunRequest; scientific: boolean; summary: boolean; busy: boolean; guided?: boolean; privateNames?: boolean;
   onApply: (request: RunRequest) => void; onSummary: () => void; onEdit: () => void; onSimulation: () => void;
 }) {
   const territory = request.territory!;
@@ -48,7 +48,7 @@ export function FishingActivityEditor({ request, scientific, summary, busy, onAp
   const update = (field: 'fishers' | 'tripsPerBoatPerMonth' | 'tripDurationHours', value: string) => setDraft(g => g && { ...g, [field]: requiredNumber(value) });
   const otherActivities = activities.filter(a => !matching.includes(a));
   return <div className="fishing-activity" aria-label="Activité de pêche">
-    <div className="activity-context"><span className="activity-zone">✓ {zone.name}</span><p>Décrivez la pêche prévue pour cette période.</p></div>
+    <div className="activity-context"><span className="activity-zone">✓ {privateNames?'Secteur confidentiel du modèle':zone.name}</span><p>Décrivez la pêche prévue pour cette période.</p></div>
     {notice && <p className="activity-notice" role="status">{notice}</p>}
     {error && <p className="error-banner" role="alert">{error}</p>}
     <div className="activity-layout"><div>
@@ -98,6 +98,6 @@ export function FishingActivityEditor({ request, scientific, summary, busy, onAp
       <div className="activity-actions">{summary ? <button onClick={onEdit}>Modifier l’activité</button> : <button onClick={onSummary}>Consulter le résumé</button>}<button className="primary" disabled={busy} onClick={onSimulation}>Préparer la simulation existante</button></div>
       {scientific && <div className="territory-science"><h3>Conventions descriptives</h3><p>T_m = Σ P_i S_i,m · sorties-pirogue/mois.<br/>H_m sortie = Σ P_i S_i,m D_i,m · heures-pirogue/mois.</p><p>P_i : pirogues ; S_i,m : sorties par pirogue et par mois ; D_i,m : durée totale d’une sortie (h). Les pêcheurs sont un effectif mobilisé, sans facteur multiplicatif.</p><dl><dt>Activité</dt><dd>{selected?.id ?? 'Non enregistrée'}</dd><dt>Zone / carte</dt><dd>{zone.id} / {territory.geography.id}</dd><dt>Scénario</dt><dd>{selected?.scenario ?? scenario}</dd><dt>Provenance</dt><dd>{selected?.provenance.note ?? provenance}</dd></dl><p>Hypothèse : pratiques constantes sur [début, fin[ en mois relatifs, sans calendrier civil implicite. Les unités sont déclarées dans l’extension v1.</p><p>Données absentes : {selected?.groups.length ? selected.groups.map((g, i) => `groupe ${i + 1} : ${(['count', ...(g.gear.category === 'net' ? ['netLengthM', 'meshSizeMm'] as const : []), 'effectiveFishingHours', 'soakHours', 'notes'] as const).filter(k => g.gear[k] === undefined).map(k => ({ count: 'nombre d’engins', netLengthM: 'longueur', meshSizeMm: 'maillage', effectiveFishingHours: 'pêche effective', soakHours: 'pose', notes: 'notes' })[k]).join(', ') || 'aucune caractéristique applicable'}`).join(' ; ') : 'aucun groupe déclaré'}.</p><p>Limites : déclarations non calibrées ; aucune conversion vers E(t), q(t) ou a(t). E = 50 G u_G + 30 M u_M + 20 P u_P demeure inchangé. Ni Schaefer, ni les interventions, ni l’animation ne consomment cette extension. Pêche effective et pose restent séparées ; aucun total de pêche effective n’est déduit des données manquantes.</p></div>}
     </aside></div>
-    {otherActivities.length > 0 && <details className="activity-card"><summary>Autres activités conservées dans ce projet ({otherActivities.length})</summary>{otherActivities.map(a => <p key={a.id}>{a.zone.name} · mois {fmt(a.period.start)} à {fmt(a.period.end)} (exclu) · {a.groups.length} groupe(s){scientific ? ` · scénario ${a.scenario} · carte ${a.zone.geographyId} · ${a.id}` : ''}</p>)}</details>}
+    {otherActivities.length > 0 && <details className="activity-card"><summary>Autres activités conservées dans ce projet ({otherActivities.length})</summary>{otherActivities.map(a => <p key={a.id}>{privateNames?'Secteur confidentiel':a.zone.name} · mois {fmt(a.period.start)} à {fmt(a.period.end)} (exclu) · {a.groups.length} groupe(s){scientific ? ` · scénario ${a.scenario} · carte ${a.zone.geographyId} · ${a.id}` : ''}</p>)}</details>}
   </div>;
 }

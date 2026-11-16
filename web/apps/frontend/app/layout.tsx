@@ -5,6 +5,7 @@ import './workshop.css';
 import './territory.css';
 import './level-two-workshop.css';
 import './geo-atlas.css';
+import './native-briefing.css';
 
 export const metadata: Metadata = {
   title: 'Irritator Web · Atelier de modélisation',

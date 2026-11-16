@@ -6,7 +6,11 @@ import { errorText } from '@/lib/api/client';
 import initialAtlas from '@/data/geography/lac-de-guiers.atlas.json';
 export function useGeoAtlas() {
   const [atlas,setAtlas]=useState<GeoAtlasV1>(()=>{ const a=structuredClone(initialAtlas); validateGeoAtlas(a); return a; });
-  const [authorized,setAuthorized]=useState(false), [privateView,setPrivateView]=useState(false);
+  const [authorized,setCollectionAuthorized]=useState(false), [privateView,setPrivateView]=useState(false);
+  const [privacyEpoch,setPrivacyEpoch]=useState(0), [projection,setProjectionState]=useState(false);
+  const suspendPrivateView=()=>{setPrivateView(false);setPrivacyEpoch(n=>n+1);};
+  const setProjection=(value:boolean)=>{suspendPrivateView();setProjectionState(value);};
+  const setAuthorized=(value:boolean)=>{if(!value)suspendPrivateView();setCollectionAuthorized(value);};
   const [error,setError]=useState(''), [message,setMessage]=useState('Exercice éphémère : les lieux restent en mémoire jusqu’à la fermeture de la page.');
   const [restoreAvailable,setRestoreAvailable]=useState(false), [pending,setPending]=useState<GeoAtlasV1>();
   const blocked=useRef(false);
@@ -17,7 +21,7 @@ export function useGeoAtlas() {
   });
   const save=()=>attempt(()=>{ if(blocked.current) throw new Error('Restaurez la carte locale avant de sauvegarder ; l’archive existante est conservée.'); saveGeoAtlas(localStorage,atlas,authorized); setRestoreAvailable(true); setMessage('Carte sauvegardée dans ce navigateur ; aucune transmission réseau.'); });
   const restore=()=>attempt(()=>{ const raw=localStorage.getItem(geoAtlasStorageKey); if(!raw) throw new Error('Aucune carte locale.'); const next=parseGeoAtlas(raw); if(next.features.some(f=>next.sources.find(s=>s.id===f.properties.sourceId)?.classification==='workshop-declaration')&&!authorized) throw new Error('Confirmez l’autorisation cartographique avant de restaurer les lieux privés.'); setPending(next); });
-  const replace=()=>attempt(()=>{ if(!pending) return; if(!window.confirm('Remplacer la carte en mémoire ? Exportez d’abord les versions à conserver. Le modèle et les décisions restent séparés.')) return; if(pending.features.some(f=>pending.sources.find(s=>s.id===f.properties.sourceId)?.classification==='workshop-declaration')&&!authorized) throw new Error('Autorisation cartographique requise pour importer des déclarations.'); setAtlas(pending); setPending(undefined); blocked.current=false; setPrivateView(false); setMessage('Carte chargée en mémoire. Vérifiez les lieux avant projection ; sauvegarde séparée.'); });
-  return {atlas,authorized,setAuthorized,privateView,setPrivateView,error,setError,message,setMessage,restoreAvailable,pending,setPending,update,save,restore,replace};
+  const replace=()=>attempt(()=>{ if(!pending) return; if(!window.confirm('Remplacer la carte en mémoire ? Exportez d’abord les versions à conserver. Le modèle et les décisions restent séparés.')) return; if(pending.features.some(f=>pending.sources.find(s=>s.id===f.properties.sourceId)?.classification==='workshop-declaration')&&!authorized) throw new Error('Autorisation cartographique requise pour importer des déclarations.'); suspendPrivateView(); setAtlas(pending); setPending(undefined); blocked.current=false; setPrivateView(false); setMessage('Carte chargée en mémoire. Vérifiez les lieux avant projection ; sauvegarde séparée.'); });
+  return {atlas,authorized,setAuthorized,privateView,setPrivateView,privacyEpoch,projection,setProjection,suspendPrivateView,error,setError,message,setMessage,restoreAvailable,pending,setPending,update,save,restore,replace};
 }
 export type AtlasController=ReturnType<typeof useGeoAtlas>;

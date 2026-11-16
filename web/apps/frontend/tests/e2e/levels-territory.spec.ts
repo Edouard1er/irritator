@@ -55,7 +55,7 @@ test('independent levels retain model, scenario, playback, draft geography and n
   const second = page.waitForResponse(r => r.url().endsWith('/api/v1/simulations/run') && r.request().method() === 'POST');
   await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Voyons/ }).click(); await two.getByLabel('Support à présenter', { exact: true }).selectOption('native-simulation'); await two.getByRole('button', { name: 'Lancer la simulation Irritator' }).click(); const response = await second;
   expect(response.status()).toBe(200); expect(response.request().postDataJSON().territory.zoneId).toBe('demo-A'); expect(response.request().postDataJSON().temporal.parameters.a).toBe(.1);
-  await expect(two.getByLabel('Zone appliquée aux observations')).toContainText('10 %');
+  await two.getByRole('button',{name:'Prévisualiser sans enregistrer'}).click(); await expect(two.getByLabel('Zone appliquée aux observations')).toContainText('10 %');
   await two.getByLabel('Position temporelle').fill('30'); await switchLevel(page, 1); await switchLevel(page, 2); await expect(two.getByLabel('Position temporelle')).toHaveValue('30');
   await two.getByRole('navigation', { name: 'Étapes de l’atelier' }).getByRole('button', { name: /Notre lac/ }).click();
   const download = page.waitForEvent('download'); await two.getByRole('button', { name: 'Enregistrer', exact: true }).click(); const file = await download;

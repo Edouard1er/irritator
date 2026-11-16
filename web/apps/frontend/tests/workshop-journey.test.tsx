@@ -5,6 +5,7 @@ import { LevelTwoJourney } from '@/components/workshop/level-two-journey';
 import { decisionsStorageKey, parseSession } from '@/lib/serialization/workshop-session';
 import model from '../../../examples/atelier-interventions-month-v3.json';
 import type { RunRequest } from '@contracts';
+import type { HttpResult } from '@/lib/api/client';
 const request = model as unknown as RunRequest;
 function mount() { return render(<LevelTwoJourney request={request} busy={false} territory={() => <p>Carte existante</p>} simulation={active => active && <p>Résultat du moteur</p>} onRun={vi.fn()} onAudience={vi.fn()}/>); }
 const click = (name: string | RegExp) => fireEvent.click(screen.getByRole('button', { name }));
@@ -47,4 +48,12 @@ it('keeps a quota error visible after moving to presentation and keeps the in-me
   fireEvent.click(screen.getByRole('radio', { name: 'Je ne sais pas' })); click('Enregistrer mon premier choix');
   expect(screen.getByRole('alert')).toHaveTextContent('Sauvegarde locale impossible');
   expect(screen.getByRole('button', { name: 'Confirmer que ce support a été présenté' })).toBeEnabled();
+});
+
+it('UI native requires begin, finish, current result and explicit attestation, while preview is not presentation',()=>{
+  const result:HttpResult={schemaVersion:2,runId:'fictitious-unit-run',status:'completed',modelId:request.model.id,simulation:{start:0,end:1,finalTime:1,runCalls:1},observations:[{component:request.temporal!.target+'/N',samplingInterval:1,samples:[{time:0,value:150},{time:1,value:120}]}],resultEvents:[],wrappers:[],diagnostics:{engineVersion:'unit-test',adapterVersion:'unit-test',observationPolicy:'native'}};
+  const props={request,result,resultRequest:request,busy:false,territory:()=>null,simulation:()=>null,onRun:vi.fn(),onAudience:vi.fn()};
+  const view=render(<LevelTwoJourney {...props}/>);prepare();fireEvent.click(screen.getByRole('radio',{name:'Je ne sais pas'}));click('Enregistrer mon premier choix');fireEvent.change(screen.getByLabelText('Support à présenter'),{target:{value:'native-simulation'}});
+  click('Prévisualiser sans enregistrer');expect(screen.getByRole('button',{name:'Confirmer que ce support a été présenté'})).toBeDisabled();click('Commencer la présentation');expect(screen.getByRole('button',{name:'Pêcheur'})).toHaveAttribute('aria-pressed','true');click('Terminer la présentation');click('Scientifique');expect(screen.getByRole('button',{name:'Confirmer que ce support a été présenté'})).toBeEnabled();
+  const changed=structuredClone(request);changed.simulation.end++;view.rerender(<LevelTwoJourney {...props} request={changed} stale/>);expect(screen.getByRole('button',{name:'Confirmer que ce support a été présenté'})).toBeDisabled();expect(parseSession(localStorage.getItem(decisionsStorageKey)!).records[0]!.presentation).toBeUndefined();
 });

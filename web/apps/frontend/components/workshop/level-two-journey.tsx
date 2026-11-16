@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import type { RunRequest } from '@contracts';
 import type { DecisionSnapshot, Presentation, ScenarioId, WorkshopDecisionRecord, WorkshopSessionV1 } from '../../../../packages/contracts/workshop-session';
 import { addRecord, compareDecisions, createSession, updateRecord } from '@/lib/workshop/session';
@@ -7,20 +7,22 @@ import { choiceLabel, scenarios, sourceLabels, confidenceLabels } from '@/lib/wo
 import { decisionsStorageKey, maxSessionBytes, parseSession, saveSession, serializeSession } from '@/lib/serialization/workshop-session';
 import { downloadFile } from '@/lib/serialization/workspace';
 import { scientificFingerprint } from '@/lib/modeling/model';
-import { normalizeRun } from '@/lib/simulation/trajectory';
+import { nativeResultCurrent } from '@/lib/simulation/native-reading';
+import type { GuidedBriefing } from './fisher-animated-briefing';
 import { errorText, type HttpResult } from '@/lib/api/client';
 import { DecisionForm } from './decision-form';
 import { GeoAtlasMap } from '@/components/territory/geo-atlas-map';
-import { geoSupportVersion, visibleGeoFeatures } from '@/components/territory/geo-atlas-workspace';
+import { geoSupportVersion } from '@/components/territory/geo-atlas-workspace';
+import { visibleFeaturesForContext } from '@/lib/workshop/atlas-visibility';
 import { useGeoAtlas, type AtlasController } from '@/lib/workshop/geo-atlas';
 
 const steps = ['Notre lac', 'Nos sorties', 'Votre premier choix', 'Voyons ce qui se passe', 'Votre choix maintenant', "Ce qu'on en retient"];
 type Props = {
-  request: RunRequest; resultRequest?: RunRequest; result?: HttpResult; busy: boolean; error?: string;
+  active?: boolean; stale?: boolean; request: RunRequest; resultRequest?: RunRequest; result?: HttpResult; busy: boolean; error?: string;
   territory: (step: 'zone' | 'activity', scientific: boolean, next: () => void, showResults: boolean, atlas: AtlasController) => ReactNode;
-  simulation: (active: boolean) => ReactNode; onRun: () => void; onAudience: (scientific: boolean) => void;
+  simulation: (active: boolean, guided: GuidedBriefing) => ReactNode; onRun: () => void; onAudience: (scientific: boolean) => void;
 };
-export function LevelTwoJourney({ request, result, resultRequest, busy, error: engineError, territory, simulation, onRun, onAudience }: Props) {
+export function LevelTwoJourney({ active = true, stale = false, request, result, resultRequest, busy, error: engineError, territory, simulation, onRun, onAudience }: Props) {
   const atlasController = useGeoAtlas();
   const [step, setStep] = useState(0), [scientific, setScientific] = useState(false), [authorized, setAuthorized] = useState(false);
   const [session, setSession] = useState<WorkshopSessionV1>(() => createSession());
@@ -35,14 +37,24 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
   const record = session.records.find(r => r.id === recordId), scenario = scenarios[record?.scenarioId ?? scenarioId];
   const permitted = !authorized || !!record?.before;
   const presented = !authorized || !!record?.presentation;
-  const actualNative = !!result && !engineError && !!resultRequest && resultRequest.schemaVersion === 3 && !!resultRequest.temporal && normalizeRun(result, resultRequest).some(r => r.series.some(s => s.kind === 'biomass_total' && s.points.length));
+  const actualNative = useMemo(()=>nativeResultCurrent(result,resultRequest,request,busy||stale||!!engineError),[result,resultRequest,request,busy,stale,engineError]);
+  const [nativePhase,setNativePhase]=useState<'closed'|'preview'|'presenting'|'finished'>('closed');
+  const [shown,setShown]=useState<{runId:string;fingerprint:string}>();
+  const beginButton=useRef<HTMLButtonElement>(null);
+  const nativePresented = actualNative && nativePhase==='finished' && shown?.runId===result?.runId && !!resultRequest && shown?.fingerprint===scientificFingerprint(resultRequest);
+  const publicFeatures=useMemo(()=>visibleFeaturesForContext(atlasController.atlas,{audience:'fisher',projection:true,privateWorkspaceOptIn:false}),[atlasController.atlas]);
+  const reference=<><GeoAtlasMap features={publicFeatures} onSelect={()=>{}}/>{mapSource&&<p className="geo-attribution">{mapSource.attribution} · {mapSource.license} · {mapSource.geometryValidAt}</p>}<p>Projection protégée : lieux privés masqués.</p></>;
+  useEffect(()=>{if(!active){setNativePhase(p=>p==='closed'?'closed':'preview');setShown(undefined);atlasController.setProjection(false);}},[active]);
+  useEffect(()=>{setShown(undefined);setNativePhase('closed');},[actualNative,result?.runId]);
+
   useEffect(() => { try { const exists = !!localStorage.getItem(decisionsStorageKey); setRestoreAvailable(exists); storageBlocked.current = exists; if (exists) setMessage('Une séance locale est disponible. Restaurez-la avant de sauvegarder de nouvelles réponses.'); } catch { storageBlocked.current = true; setError('Le stockage de ce navigateur est indisponible.'); } }, []);
   const go = (next: number, saved = false) => {
     if (!saved && authorized && (next >= 3 && !record || next >= 4 && !record?.presentation)) { setError('Enregistrez le premier choix, puis faites confirmer le support présenté.'); return; }
     if (next !== 5) setProject(false);
+    atlasController.setProjection(false);setNativePhase('closed');
     setStep(next); setTimeout(() => heading.current?.focus(), 0);
   };
-  const audience = (value: boolean) => { setScientific(value); onAudience(value); };
+  const audience = (value: boolean) => { atlasController.suspendPrivateView(); if(value&&nativePhase==='presenting'){setNativePhase('preview');atlasController.setProjection(false);} setScientific(value); onAudience(value); };
   const commit = (next: WorkshopSessionV1) => {
     // Keep valid in-memory work even when a quota fails, but do not overwrite a corrupt archive.
     setSession(next); setError('');
@@ -68,9 +80,9 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
       const presentedAt = new Date().toISOString();
       let presentation: Presentation;
       if (support === 'native-simulation') {
-        if (scenario.id !== 'S1-captures' || !actualNative || !result || !resultRequest) throw new Error('Aucun résultat du moteur ne peut être attesté. Choisissez une discussion.');
+        if (scenario.id !== 'S1-captures' || !nativePresented || !result || !resultRequest) throw new Error('Aucun résultat du moteur ne peut être attesté. Choisissez une discussion.');
         presentation = { kind: support, presentedAt, runId: result.runId, modelId: resultRequest.model.id, requestSchemaVersion: 3, modelFingerprint: scientificFingerprint(resultRequest), assumptionsNote: note || 'Modèle pédagogique non calibré pour le lac. Biomasse globale unique ; activités déclarées non converties en effort.' };
-      } else presentation = { kind: support, presentedAt, supportId: `${scenario.id}-${support}-v1`, note: support === 'discussion-map' && atlasController ? `${geoSupportVersion}; atlas=${atlasController.atlas.id}; revision=${atlasController.atlas.revision}; vue=${atlasController.privateView ? 'privee' : 'publique-protegee'}; ${note}`.slice(0,500) : note };
+      } else presentation = { kind: support, presentedAt, supportId: `${scenario.id}-${support}-v1`, note: support === 'discussion-map' && atlasController ? `${geoSupportVersion}; atlas=${atlasController.atlas.id}; revision=${atlasController.atlas.revision}; vue=${scientific && !project && atlasController.privateView ? 'privee' : 'publique-protegee'}; ${note}`.slice(0,500) : note };
       commit(updateRecord(session, record.id, { presentation }, authorized)); go(4, true);
     } catch (e) { setError(errorText(e)); }
   };
@@ -100,7 +112,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
     <div className="journey-heading"><div><span className="workshop-eyebrow">ENSEMBLE AUTOUR DU LAC</span><h1>Observer, choisir, en parler</h1><p>Votre avis compte. Il n’y a pas de bonne réponse attendue.</p></div><div className="audience-toggle" role="group" aria-label="Lecture de l’atelier"><button aria-pressed={!scientific} onClick={() => audience(false)}>Pêcheur</button><button aria-pressed={scientific} onClick={() => audience(true)}>Scientifique</button></div></div>
     <nav className="journey-steps" aria-label="Étapes de l’atelier">{steps.map((label, i) => <button key={label} aria-current={step === i ? 'step' : undefined} disabled={i === 3 && !permitted || i >= 4 && !presented} onClick={() => go(i)}><span>{i + 1}</span>{label}<small>{completed[i] ? 'Renseigné' : 'Non renseigné'}</small></button>)}</nav>
     <div className="journey-status" role="status">{authorized ? `${record?.before ? 'Premier choix enregistré' : 'Premier choix non renseigné'} · ${record?.presentation ? 'Support présenté' : 'Présentation non confirmée'} · ${record?.after ? 'Second choix enregistré' : 'Second choix non renseigné'}` : 'Démonstration sans collecte'}</div>
-    {scientific && <details className="session-controls" open><summary>Préparation de l’animateur et séance</summary>
+    {scientific && !project && <details className="session-controls" open><summary>Préparation de l’animateur et séance</summary>
       <p>Codes pseudonymes uniquement, sans nom ni téléphone, y compris dans les textes libres. L’information des personnes et l’autorisation de collecte relèvent du protocole institutionnel ; cette confirmation ne suffit pas à elle seule.</p>
       <label><input type="checkbox" checked={authorized} onChange={e => { setAuthorized(e.target.checked); setProject(false); setMessage(e.target.checked ? 'Collecte activée par l’animateur pour cette utilisation.' : 'Démonstration sans collecte. Les fiches déjà autorisées restent conservées localement.'); }}/>Je confirme que la collecte est autorisée dans le cadre du protocole de recherche</label>
       <div className="session-fields"><label>Situation de discussion<select aria-label="Situation de discussion" disabled={!!record} value={scenarioId} onChange={e => fresh(e.target.value as ScenarioId)}>{Object.values(scenarios).map(s => <option key={s.id} value={s.id}>{s.id.slice(0, 2)} · {s.title}</option>)}</select></label>
@@ -112,7 +124,7 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
     </details>}
     {message && scientific && <p role="status">{message}</p>}{error && <p role="alert" className="error-banner">{scientific ? error : 'L’enregistrement n’a pas abouti. L’animateur peut vérifier ; vos choix sont conservés.'}</p>}
     <h2 className="journey-step-title" ref={heading} tabIndex={-1}>{steps[step]}</h2>
-    <div hidden={step > 1}>{territory(step === 1 ? 'activity' : 'zone', scientific, () => go(3), !authorized || !!record?.presentation, atlasController)}</div>
+    <div hidden={step > 1}>{territory(step === 1 ? 'activity' : 'zone', scientific && !project, () => go(3), !authorized || !!record?.presentation, atlasController)}</div>
     <div hidden={step !== 2} className="journey-card"><span className="workshop-eyebrow">{scenario.id.slice(0, 2)} · SITUATION DE DISCUSSION · VERSION {scenario.version}</span><h3>{scenario.title}</h3><p className="scenario-question">{scenario.question}</p><p>{scenario.note}</p>
       {authorized ? <><p>Vous pouvez répondre avec l’aide de l’animateur.</p>{!participant && <p role="status">L’animateur doit renseigner un code participant dans la préparation.</p>}
       <DecisionForm key={`before-${revision}-${recordId ?? 'new'}-${scenario.id}`} scenarioId={scenario.id} initial={record?.before} disabled={!participant || !!record?.presentation} onSave={first}/>
@@ -120,18 +132,26 @@ export function LevelTwoJourney({ request, result, resultRequest, busy, error: e
       <button onClick={() => { setAuthorized(false); setProject(false); go(3, true); }}>Je ne souhaite pas répondre</button>
     </div>
     <div hidden={step !== 3} className="journey-presentation">
-      {permitted && <><div className="journey-card"><h3>{scenario.title}</h3><p>{scenario.question}</p><p>{scenario.note}</p><label>Support à présenter<select aria-label="Support à présenter" disabled={!!record?.presentation && authorized} value={support} onChange={e => setSupport(e.target.value as Presentation['kind'])}>{scenario.supports.map(kind => <option key={kind} value={kind}>{{ 'native-simulation': 'Simulation calculée par Irritator', 'discussion-map': 'Carte et discussion — limites non certifiées', 'discussion-card': 'Carte de discussion — aucun calcul' }[kind]}</option>)}</select></label>
-      {support === 'discussion-map' && <><p>Le plan CLPA demande une étude et un balisage près de Témeye-Toucouleur. Leur réalisation et la limite sud restent à vérifier. Aucun contour de réserve n’est tracé.</p>{atlasController ? <><p>{mapSource ? `Contour de référence : ${mapSource.title} · ${mapSource.geometryValidAt}` : 'Fond géographique réel manquant.'}</p><GeoAtlasMap features={visibleGeoFeatures(atlasController.atlas, atlasController.privateView)} onSelect={() => {}}/>{mapSource && <p className="geo-attribution">{mapSource.attribution} · {mapSource.license}</p>}<p>{atlasController.privateView ? 'Travail privé : ne pas projeter les lieux sensibles.' : 'Projection protégée : lieux privés masqués.'} Support {geoSupportVersion} · atlas {atlasController.atlas.id} · révision {atlasController.atlas.revision}</p></> : <p>Carte non fournie : discussion sur les lieux, sans tracer de limites inconnues.</p>}</>}
+      {permitted && <><div className="journey-card"><h3>{scenario.title}</h3><p>{scenario.question}</p><p>{scenario.note}</p><label>Support à présenter<select aria-label="Support à présenter" disabled={!!record?.presentation && authorized} value={support} onChange={e => {setSupport(e.target.value as Presentation['kind']);setNativePhase('closed');setShown(undefined);atlasController.setProjection(false);}}>{scenario.supports.map(kind => <option key={kind} value={kind}>{{ 'native-simulation': 'Simulation calculée par Irritator', 'discussion-map': 'Carte et discussion — limites non certifiées', 'discussion-card': 'Carte de discussion — aucun calcul' }[kind]}</option>)}</select></label>
+      {support === 'discussion-map' && <><p>Le plan CLPA demande une étude et un balisage près de Témeye-Toucouleur. Leur réalisation et la limite sud restent à vérifier. Aucun contour de réserve n’est tracé.</p>{atlasController ? <><p>{mapSource ? `Contour de référence : ${mapSource.title} · ${mapSource.geometryValidAt}` : 'Fond géographique réel manquant.'}</p><GeoAtlasMap features={visibleFeaturesForContext(atlasController.atlas, {audience:scientific?'scientific':'fisher',projection:project,privateWorkspaceOptIn:atlasController.privateView})} onSelect={() => {}}/>{mapSource && <p className="geo-attribution">{mapSource.attribution} · {mapSource.license}</p>}<p>{scientific && !project && atlasController.privateView ? 'Travail privé : ne pas projeter les lieux sensibles.' : 'Projection protégée : lieux privés masqués.'} Support {geoSupportVersion} · atlas {atlasController.atlas.id} · révision {atlasController.atlas.revision}</p></> : <p>Carte non fournie : discussion sur les lieux, sans tracer de limites inconnues.</p>}</>}
       {support !== 'native-simulation' && <article className="discussion-support"><h3>Support de discussion</h3><p>{scenario.id === 'S2-reserve' ? 'Où pensez-vous que passent les limites ? Quelles informations faudrait-il demander au CLPA ? Aucun contour officiel de réserve n’est fourni.' : scenario.id === 'S3-couts' ? 'Quelles dépenses augmentent ? Que faudrait-il connaître sur les prix, le carburant et le temps de recherche avant de choisir ?' : 'Quelles observations permettraient de discuter les témoignages contradictoires sur les prises ?'}</p><p>Ce support ne représente ni une prévision ni une règle applicable.</p><small>Support versionné : {scenario.id}-{support}-v1</small></article>}
-      {support === 'native-simulation' && <><p>Modèle illustratif : les valeurs ne sont pas une estimation du lac. Les sorties déclarées ne sont pas utilisées pour calculer les prises.</p><button className="primary" disabled={busy || !request.temporal || !request.territory} onClick={onRun}>{busy ? 'Calcul en cours…' : 'Lancer la simulation Irritator'}</button>{!request.territory && <p>Confirmez une zone pour calculer ce modèle territorial. La discussion reste possible.</p>}{engineError && <p role="alert">La simulation n’a pas abouti. Le premier choix est conservé ; choisissez un support de discussion.</p>}</>}
-      {scientific && authorized && <><label>Notes sur le support et les hypothèses (facultatif)<textarea aria-label="Notes sur le support et les hypothèses (facultatif)" maxLength={500} value={note} disabled={!!record?.presentation} onChange={e => setNote(e.target.value)}/></label><p>Un calcul terminé ne signifie pas que le résultat a été présenté.</p><button className="primary" disabled={busy || !record || !!record.presentation || support === 'native-simulation' && !actualNative} onClick={acknowledge}>Confirmer que ce support a été présenté</button>{record?.presentation?.kind === 'native-simulation' && <p>Exécution présentée : {record.presentation.runId}</p>}</>}
+      {support === 'native-simulation' && <><p>Modèle illustratif : les valeurs ne sont pas une estimation du lac. Les sorties déclarées ne sont pas utilisées pour calculer les prises.</p><button className="primary" disabled={busy || !request.temporal || !request.territory} onClick={onRun}>{busy ? 'Calcul en cours…' : 'Lancer la simulation Irritator'}</button>{!request.territory && <p>Confirmez une zone pour calculer ce modèle territorial. La discussion reste possible.</p>}{engineError && <p role="alert">La simulation n’a pas abouti. Le premier choix est conservé ; choisissez un support de discussion.</p>}
+        {!result&&<p>En attente du calcul. Nous n’avons pas encore de résultat à montrer. Nous pouvons en parler sans calcul.</p>}
+        {stale&&result&&<p role="status" className="stale-banner">Modèle modifié : relancez le calcul pour présenter ses résultats.</p>}
+        {result&&!actualNative&&!stale&&!busy&&!engineError&&<p>Pas de biomasse native exploitable pour cette requête. Choisissez une discussion.</p>}
+        <div className="journey-actions"><button disabled={!actualNative} onClick={()=>{atlasController.setProjection(false);setNativePhase('preview');setShown(undefined);}}>Prévisualiser sans enregistrer</button>
+          <button ref={beginButton} disabled={!actualNative} onClick={()=>{if(!nativeResultCurrent(result,resultRequest,request,busy||stale||!!engineError)||!result||!resultRequest)return;audience(false);atlasController.setProjection(true);setShown({runId:result.runId,fingerprint:scientificFingerprint(resultRequest)});setNativePhase('presenting');}}>Commencer la présentation</button>
+          {nativePhase==='presenting'&&<button onClick={()=>{setNativePhase('finished');atlasController.setProjection(false);setTimeout(()=>beginButton.current?.focus(),0);}}>Terminer la présentation</button>}
+        </div><p>{nativePhase==='presenting'?'Présentation publique protégée en cours.':nativePhase==='finished'?'Présentation terminée ; l’animateur peut maintenant attester le support réellement montré.':'Prévisualiser ou calculer ne confirme jamais une présentation.'}</p>
+        </>}
+      {scientific && !project && authorized && <><label>Notes sur le support et les hypothèses (facultatif)<textarea aria-label="Notes sur le support et les hypothèses (facultatif)" maxLength={500} value={note} disabled={!!record?.presentation} onChange={e => setNote(e.target.value)}/></label><p>Un calcul terminé ne signifie pas que le résultat a été présenté.</p><button className="primary" disabled={busy || !record || !!record.presentation || support === 'native-simulation' && !nativePresented} onClick={acknowledge}>Confirmer que ce support a été présenté</button>{record?.presentation?.kind === 'native-simulation' && <p>Exécution présentée : {record.presentation.runId}</p>}</>}
       {!scientific && authorized && !record?.presentation && <p>L’animateur confirme la présentation avant votre second choix.</p>}</div>
       </>}
-      {simulation(step === 3 && support === 'native-simulation' && permitted)}
+      {simulation(active && step === 3 && support === 'native-simulation' && permitted && (nativePhase==='preview'||nativePhase==='presenting'), {scientific,reference,onScientific:()=>audience(true)})}
     </div>
     <div hidden={step !== 4} className="journey-card">{authorized && record?.presentation ? <><h3>{record.presentation.kind === 'native-simulation' ? 'Après la simulation' : 'Après la discussion'}</h3><p>Avant : {choiceLabel(record.scenarioId, record.before.choiceId)}{record.before.otherChoice ? ` — ${record.before.otherChoice}` : ''}</p><DecisionForm key={`after-${revision}-${recordId}`} after scenarioId={record.scenarioId} initial={record.after} disabled={!!record.after} onSave={after => { try { commit(updateRecord(session, record.id, { after }, authorized)); go(5); } catch (e) { setError(errorText(e)); } }}/></> : <p>{authorized ? 'Enregistrez le premier choix, puis faites confirmer le support présenté.' : 'Démonstration : discutez de ce que vous maintiendriez ou changeriez, sans conservation de réponse.'}</p>}</div>
     <div hidden={step !== 5} className="journey-card">
-      {authorized && record?.after ? <>{scientific && <button aria-pressed={project} onClick={() => setProject(v => !v)}>{project ? 'Masquer la restitution projetable' : 'Afficher la restitution anonyme'}</button>}
+      {authorized && record?.after ? <>{scientific && <button aria-pressed={project} onClick={() => { atlasController.setProjection(!project); setProject(v => !v); }}>{project ? 'Masquer la restitution projetable' : 'Afficher la restitution anonyme'}</button>}
       {project ? <p>Restitution anonyme choisie par l’animateur. Vérifier aussi les textes libres avec les participants avant projection.</p> : <p>Restitution individuelle. Activez explicitement l’affichage anonyme pour projeter.</p>}
       {(!scientific || project) && <div className="decision-review"><p className="review-badge">{reviewLabels[compareDecisions(record)]}</p><div className="review-pair"><article><h3>Avant</h3><p>{choiceLabel(record.scenarioId, record.before.choiceId)}</p>{!project && <p>{record.before.otherChoice}</p>}<h4>Pourquoi</h4><p>{project ? 'Justification masquée pour la projection.' : record.before.reasons || 'Non renseigné'}</p>{!project && <><p>Sources : {record.before.sources.map(s => sourceLabels[s]).join(', ') || 'Non renseigné'}</p><p>Confiance : {confidenceLabels[record.before.confidence]}</p><p>À vérifier : {record.before.missingInformation || 'Non renseigné'}</p></>}</article><article><h3>Maintenant</h3><p>{choiceLabel(record.scenarioId, record.after.choiceId)}</p>{!project && <p>{record.after.otherChoice}</p>}<h4>Pourquoi</h4><p>{project ? 'Justification masquée pour la projection.' : record.after.reasons || 'Non renseigné'}</p>{!project && <><p>Sources : {record.after.sources.map(s => sourceLabels[s]).join(', ') || 'Non renseigné'}</p><p>Confiance : {confidenceLabels[record.after.confidence]}</p></>}</article></div><h3>À vérifier</h3><p>{project ? 'Questions individuelles masquées pour la projection.' : record.after.missingInformation || record.before.missingInformation || 'Non renseigné'}</p><p>{record.presentation?.kind === 'native-simulation' ? 'Modèle illustratif — hypothèses non calibrées.' : 'Support de discussion — aucun effet biologique ou économique calculé.'}</p></div>}
       {scientific && !project && <p>Les réponses restent privées. Passez en lecture Pêcheur pour la restitution individuelle ou choisissez explicitement la restitution anonyme.</p>}</> : <p>Aucune paire de choix à comparer. Il n’y a ni note ni classement.</p>}

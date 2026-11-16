@@ -13,18 +13,21 @@ import { applyMapping, classifyBiomassStatus, modelUnit, normalizeRun, observati
 import { rollingCatch, scenarioLabel } from '@/lib/simulation/indicators';
 import { AlertAudio } from '@/lib/simulation/alert-audio';
 import { BiomassLake } from './biomass-lake';
+import { FisherAnimatedBriefing, type GuidedBriefing } from '@/components/workshop/fisher-animated-briefing';
+import { nativeReadingAt } from '@/lib/simulation/native-reading';
 import { accessibleBiomass } from '@contracts';
 
 const Chart = dynamic(() => import('./workshop-chart'), { ssr: false, loading: () => <p>Chargement du graphique…</p> });
 const fmt = (value?: number) => value !== undefined && Number.isFinite(value) ? new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(value) : 'Non disponible';
 const defaultConfig: AlertConfig = { proximityRatio: .2, slopeTolerance: 0 };
 
-export function SimulationWorkspace({ result, request, stale, status, error, active,sessionId,onIntervention,preferenceScope }: { result?: HttpResult; request?: RunRequest; stale: boolean; status: string; error?: string; active: boolean;sessionId?:string;preferenceScope?:string;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+export function SimulationWorkspace({ result, request, stale, status, error, active,sessionId,onIntervention,preferenceScope,guided }: { result?: HttpResult; request?: RunRequest; stale: boolean; status: string; error?: string; active: boolean;sessionId?:string;preferenceScope?:string;guided?:GuidedBriefing;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
   const audienceKey = preferenceScope ? `irritator-${preferenceScope}-audience` : 'irritator-audience';
   const runs = useMemo(() => result && request ? normalizeRun(result, request) : [], [result, request]);
   const [selection, setSelection] = useState('');
-  const run = runs.find(r => r.id === selection) ?? runs.find(r => r.series.some(s => s.kind === 'biomass_total')) ?? runs[0];
-  const [audience, setAudience] = useState('fisher');
+  const run = guided ? runs.find(r=>r.series.some(s=>s.kind==='biomass_total'&&s.points.some((_,i)=>nativeReadingAt(r,i).kind==='ready'))) : runs.find(r => r.id === selection) ?? runs.find(r => r.series.some(s => s.kind === 'biomass_total')) ?? runs[0];
+  const [audiencePreference, setAudience] = useState('fisher');
+  const audience = guided ? guided.scientific?'scientific':'fisher' : audiencePreference;
   const [presentation, setPresentation] = useState(false);
   const [fullscreenNote, setFullscreenNote] = useState('');
   const section = useRef<HTMLElement>(null);
@@ -51,19 +54,19 @@ export function SimulationWorkspace({ result, request, stale, status, error, act
   };
   return <section ref={section} className={`simulation-workspace${presentation ? ' presentation-mode' : ''}`} hidden={!active} aria-label="Espace Simulation">
     <div className="workshop-topline"><div className="workshop-heading"><span className="workshop-eyebrow">LAC DE GUIERS · ATELIER</span><h1>La ressource au fil du temps</h1><span className="run-badge">{result ? 'SORTIES DU MOTEUR' : 'EN ATTENTE'}</span></div>
-      <label className="scenario-picker">Situation simulée<select aria-label="Situation simulée" disabled={!runs.length} value={run?.id ?? ''} onChange={e => setSelection(e.target.value)}>{!runs.length && <option value="">Aucune trajectoire disponible</option>}{runs.map(r => <option key={r.id} value={r.id}>{scenarioLabel(r,runs,audience==='fisher')}{r.status !== 'completed' ? ` · ${r.status}` : ''}</option>)}</select></label>
-      <div className="audience-toggle" role="group" aria-label="Public de la lecture"><button aria-pressed={audience==='fisher'} onClick={()=>chooseAudience('fisher')}>Lecture pêcheur</button><button aria-pressed={audience==='scientific'} onClick={()=>chooseAudience('scientific')}>Scientifique</button></div>
+      <label className="scenario-picker">Situation simulée<select aria-label="Situation simulée" disabled={!!guided||!runs.length} value={run?.id ?? ''} onChange={e => setSelection(e.target.value)}>{!runs.length && <option value="">Aucune trajectoire disponible</option>}{runs.map(r => <option key={r.id} value={r.id}>{scenarioLabel(r,runs,audience==='fisher')}{r.status !== 'completed' ? ` · ${r.status}` : ''}</option>)}</select></label>
+      {!guided&&<div className="audience-toggle" role="group" aria-label="Public de la lecture"><button aria-pressed={audience==='fisher'} onClick={()=>chooseAudience('fisher')}>Lecture pêcheur</button><button aria-pressed={audience==='scientific'} onClick={()=>chooseAudience('scientific')}>Scientifique</button></div>}
       <button className="presentation-button" aria-pressed={presentation} onClick={()=>void togglePresentation()}>{presentation?<Minimize size={16}/>:<Maximize size={16}/>} {presentation?'Quitter le grand écran':'Grand écran'}</button>
     </div>
     {fullscreenNote && presentation && <p className="fullscreen-note" role="status">{fullscreenNote}</p>}
-    {error && <p className="error-banner" role="alert">{error}{result?' · L’exécution précédente reste affichée.':''}</p>}
+    {error && <p className="error-banner" role="alert">{guided&&!guided.scientific?'Le calcul n’a pas abouti. Votre premier choix est conservé.':error}{result?' · L’exécution précédente reste affichée.':''}</p>}
     {(status==='Validation'||status==='Exécution') && <p className="notice" role="status">Calcul en cours dans Irritator… {result?'Les données affichées sont celles de l’exécution précédente.':''}</p>}
     {stale && result && <p className="stale-banner" role="status">Modèle modifié : les résultats affichés proviennent de l’exécution précédente.</p>}
-    {!result ? <div className="workshop-empty"><Waves size={42}/><h2>Aucune simulation pour le moment</h2><p>Ouvrez votre modèle dans Modélisation, sélectionnez ses observations, puis lancez la simulation.</p><p>Aucune donnée de démonstration n’est substituée aux sorties du moteur.</p></div> : run ? <Playback key={`${sessionId??result.runId}:${run.id}`} preferenceScope={preferenceScope} request={request} onIntervention={onIntervention} run={run} active={active && status!=='Exécution' && status!=='Validation'} fisher={audience==='fisher'} scientific={<ResultsPanel result={result} request={request} stale={false} status={status}/>} /> : <><p hidden={audience!=='fisher'} className="workshop-empty">Cette exécution ne contient aucune observation de trajectoire. Activez les observateurs dans le constructeur, ou consultez les décisions et événements dans la lecture Scientifique.</p><div className="scientific-workspace" hidden={audience!=='scientific'}><ResultsPanel result={result} request={request} stale={false} status={status}/></div></>}
+    {!result ? <div className="workshop-empty"><Waves size={42}/><h2>Aucune simulation pour le moment</h2><p>Ouvrez votre modèle dans Modélisation, sélectionnez ses observations, puis lancez la simulation.</p><p>Aucune donnée de démonstration n’est substituée aux sorties du moteur.</p></div> : run ? <Playback key={`${sessionId??result.runId}:${run.id}`} preferenceScope={preferenceScope} guided={guided} presentationOpen={presentation} request={request} onIntervention={onIntervention} run={run} active={active && (!guided||!stale&&!error) && status!=='Exécution' && status!=='Validation'} fisher={audience==='fisher'} scientific={<ResultsPanel result={result} request={request} stale={false} status={status}/>} /> : <><p hidden={audience!=='fisher'} className="workshop-empty">Cette exécution ne contient aucune observation de trajectoire. Activez les observateurs dans le constructeur, ou consultez les décisions et événements dans la lecture Scientifique.</p><div className="scientific-workspace" hidden={audience!=='scientific'}><ResultsPanel result={result} request={request} stale={false} status={status}/></div></>}
   </section>;
 }
 
-function Playback({ run: original, active, fisher, scientific,request,onIntervention,preferenceScope }: { run: Trajectory; active: boolean; fisher: boolean; scientific: React.ReactNode;request?:RunRequest;preferenceScope?:string;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
+function Playback({ run: original, active, fisher, scientific,request,onIntervention,preferenceScope,guided,presentationOpen }: { run: Trajectory; active: boolean; fisher: boolean; scientific: React.ReactNode;presentationOpen?:boolean;request?:RunRequest;preferenceScope?:string;guided?:GuidedBriefing;onIntervention?:(request:RunRequest,result:HttpResult)=>void }) {
   const soundKey = preferenceScope ? `irritator-${preferenceScope}-alert-sound` : 'irritator-alert-sound';
   const initial=useRef(original);
   const [comparisonInitial,setComparisonInitial]=useState(original);
@@ -77,7 +80,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const biomass=run.series.find(s=>s.kind==='biomass_total');
   const capture=run.series.find(s=>s.kind==='catch_cumulative')??run.series.find(s=>s.kind.startsWith('catch_'));
   const timeline=biomass?.points??capture?.points??run.series[0]?.points??[];
-  const [index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1);
+  const [index,setIndex]=useState(()=>guided?Math.max(0,timeline.findIndex(p=>Number.isFinite(p.time)&&Number.isFinite(p.value))):0),[playing,setPlaying]=useState(false),[speed,setSpeed]=useState(1);
   const [systemReduced,setSystemReduced]=useState(false),[manualReduced,setManualReduced]=useState(false);
   const reduced=systemReduced||manualReduced;
   const [sound,setSound]=useState(()=>{try{return localStorage.getItem(soundKey)!=='off';}catch{return true;}}),[volume,setVolume]=useState(.25),[audioReady,setAudioReady]=useState(false);
@@ -92,7 +95,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const baseline=compare&&comparisonInitial!==original?comparisonInitial.series.find(s=>s.kind==='biomass_total'):undefined;
   const initialCapture=compare&&comparisonInitial!==original?comparisonInitial.series.find(s=>s.kind==='catch_cumulative'):undefined;
   useEffect(()=>{
-    if(!request?.temporal?.interventions.length)return;
+    if(guided||!request?.temporal?.interventions.length)return;
     let disposed=false;const base=structuredClone(request);base.temporal!.interventions=[];base.temporal!.fleetHistory=[];
     void runSimulation(base).then(data=>{if(!disposed){const run=normalizeRun(data,base).find(r=>r.id===initial.current.id);if(run)setComparisonInitial(run);}}).catch(()=>{if(!disposed)setInterventionError('Comparaison initiale indisponible : le moteur n’a pas répondu au calcul sans interventions.');});
     return()=>{disposed=true;};
@@ -116,6 +119,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   },[]);
   useEffect(()=>{ mounted.current=true;return()=>{mounted.current=false;activation.current++;void audio.current?.close();}; },[]);
   useEffect(()=>{ if(!active){audio.current?.stop();setPlaying(false);} },[active]);
+  useEffect(()=>{if(guided){audio.current?.stop();setPlaying(false);}},[guided?.scientific,presentationOpen]);
   useEffect(()=>{ const hidden=()=>{if(document.hidden){audio.current?.stop();setPlaying(false);}};document.addEventListener('visibilitychange',hidden);return()=>document.removeEventListener('visibilitychange',hidden); },[]);
   useEffect(()=>{
     if(!playing||!active||selectedIndex>=timeline.length-1)return;
@@ -166,6 +170,20 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     setConfigError('');setConfig(next);
   };
   const accessibility=environment?.a??run.parameters.a;
+  if(guided) return <>{guided.scientific&&request?.territory&&<p aria-label="Zone appliquée aux observations">Hypothèse d’accès a_z : {fmt(request.territory.accessibility*100)} % · indépendante de la superficie ; biomasse globale unique.</p>}<FisherAnimatedBriefing run={original} index={selectedIndex} moving={playing&&active} reduced={reduced} guided={guided} controls={<div className="timeline-player" aria-label="Lecture des observations">
+    <div className="briefing-controls">
+      <button className="primary" disabled={!active||timeline.length<2} onClick={()=>{if(playing)setPlaying(false);else{if(selectedIndex===timeline.length-1)setIndex(0);setPlaying(true);}}}>{playing&&active?'Pause':selectedIndex>0?'Reprendre':'Lancer l’animation'}</button>
+      <button disabled={!timeline.length} onClick={()=>move(0)}>Recommencer</button>
+      <button disabled={selectedIndex<=0} onClick={()=>move(selectedIndex-1)}>Observation précédente</button>
+      <button disabled={selectedIndex>=timeline.length-1} onClick={()=>move(selectedIndex+1)}>Observation suivante</button>
+      <label>Vitesse<select aria-label="Vitesse de lecture" value={speed} onChange={e=>setSpeed(Number(e.target.value))}>{[.5,1,2].map(v=><option key={v} value={v}>{String(v).replace('.',',')}×</option>)}</select></label>
+      <output aria-label="Temps courant" aria-live="off">t = {fmt(time)} / {fmt(timeline.at(-1)?.time)} ({run.timeUnit})</output>
+      <label><input type="checkbox" checked={reduced} disabled={systemReduced} onChange={e=>setManualReduced(e.target.checked)}/> Mouvement réduit</label>
+    </div>
+    <label className="timeline-slider">Parcourir les observations réelles<input aria-label="Position temporelle" type="range" min={0} max={Math.max(0,timeline.length-1)} value={selectedIndex} disabled={!timeline.length} aria-valuetext={`Observation ${selectedIndex+1}, temps ${time} ${run.timeUnit}, quantité ${value??'indisponible'} ${unit}`} onChange={e=>move(Number(e.target.value))}/></label>
+    <p>Un seul temps pour la courbe, les chiffres et la jauge. Aucun son automatique.</p>
+  </div>}/></>;
+
   return <>
     {request?.territory && <article className="workshop-card territory-observation" aria-label="Zone appliquée aux observations"><h2>{request.territory.geography.features.find(f => f.properties.id === request.territory!.zoneId)?.properties.name}</h2><p>{fisher ? 'Accès aux poissons' : 'a_z'} : {fisher ? fmt(request.territory.accessibility * 100) : String(request.territory.accessibility).replace('.', ',')}{fisher ? ' %' : ' (sans dimension)'} · {fisher ? 'Poissons accessibles dans cette zone' : 'a_z × N(t)'} : {fmt(accessibleBiomass(value, request.territory.accessibility))} {unit} · t = {fmt(time)} {run.timeUnit}</p></article>}
     {run.status!=='completed'&&<p className="stale-banner" role="status">Résultats partiels ou indisponibles ({run.status}). La lecture s’arrête au dernier point effectivement fourni.</p>}
