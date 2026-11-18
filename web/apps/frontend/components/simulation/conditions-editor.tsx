@@ -14,6 +14,8 @@ export function ConditionsEditor({experiment,request,history:initialHistory,time
   const [history,setHistory]=useState(initialHistory);
   const [practice,setPractice]=useState<FishingPractice>(()=>practiceAt(initialHistory,experiment,time)??{...initialReferencePractice});
   const [fileError,setFileError]=useState('');
+  const [confirmHabit,setConfirmHabit]=useState(true);
+  const needsHabit=!history.habitualPractice||history.habitualPractice.tripsPerWeek===0;
   const computed=useMemo(()=>{
     try {validateConditions(p);return {effort:normalizeFishingEffort(practice,history.reference,p,history.configuration),error:''};}
     catch(e){return {effort:undefined,error:(e as Error).message};}
@@ -24,11 +26,12 @@ export function ConditionsEditor({experiment,request,history:initialHistory,time
   const numberField=(key:keyof FishingPractice,label:string,min:number,integer=false)=><label>{label}<input aria-label={label} type="number" min={min} step={integer?1:'any'} required value={typeof practice[key]==='number'&&Number.isFinite(practice[key])?(key==='tripsPerWeek'?Number((practice[key] as number).toFixed(6)):practice[key]):''} onChange={e=>setPractice(prev=>({...prev,[key]:e.target.value===''?NaN:Number(e.target.value)}))}/></label>;
   const selectField=(key:keyof FishingPractice,label:string,options:[string,string][])=><label>{label}<select aria-label={label} value={String(practice[key]??'')} onChange={e=>setPractice(prev=>({...prev,[key]:e.target.value}))}>{options.map(([value,text])=><option key={value} value={value}>{text}</option>)}</select></label>;
 
-  return <form className="conditions-editor" aria-label="Conditions de l’intervention" onSubmit={e=>{e.preventDefault();if(!busy&&computed.effort&&!computed.error&&!fileError)onApply({...p,E:computed.effort.modelEffort},practice,history);}}>
+  return <form className="conditions-editor" aria-label="Conditions de l’intervention" onSubmit={e=>{e.preventDefault();if(!busy&&computed.effort&&!computed.error&&!fileError)onApply({...p,E:computed.effort.modelEffort},practice,needsHabit&&confirmHabit?{...history,habitualPractice:structuredClone(practice)}:history);}}>
     <div className="conditions-title"><div><h2>Modifier les conditions au mois {Number(time.toFixed(8))}</h2>{scientific&&<p>Lecture en pause. N et C restent des états continus du moteur ; recalcul depuis l’origine.</p>}</div><button type="button" onClick={onCancel} disabled={busy}>Annuler</button></div>
     <fieldset disabled={busy}><legend>Conditions du lac</legend><div className="condition-controls">{(['P','S','a'] as const).map(key=><label key={key} htmlFor={'condition-'+key}>{labels[key]} <span className="condition-value" aria-hidden="true">{key==='a'?Math.round(p[key]*100):p[key]}{key==='a'?' %':' / 10'}</span><input id={'condition-'+key} aria-label={labels[key]} type="range" min="0" max={key==='a'?100:10} step={key==='a'?1:.1} value={key==='a'?p[key]*100:p[key]} onChange={e=>update(key,String(Number(e.target.value)/(key==='a'?100:1)))}/></label>)}</div>
     {scientific&&<p className="pedagogy-note">Pluie et salinité : indices pédagogiques de 0 à 10. La couleur de l’eau et les saisons sont illustratives, sans validation climatique ou écologique du lac de Guiers.</p>}</fieldset>
     <h3>Ma pratique de pêche</h3>
+    {needsHabit&&<label className="practice-habit-confirmation"><input type="checkbox" checked={confirmHabit} disabled={busy} onChange={e=>setConfirmHabit(e.target.checked)}/> Je confirme la pratique ci-dessous comme ma pratique habituelle de départ.<small>Elle servira de repère fixe pour les réglages rapides, même après une décision ou un retour dans le temps.</small></label>}
     {!practiceAt(history,experiment,time)&&<p role="status">La pratique correspondant à l’effort courant n’est pas enregistrée. Les valeurs proposées par défaut incluent 4 sorties par semaine ; elles restent modifiables. Vous pouvez aussi importer le fichier de pratiques associé.</p>}
     <fieldset disabled={busy}><legend>Mes pirogues et mes sorties</legend><div className="practice-controls">
       {numberField('boats','Nombre de pirogues',1,true)}

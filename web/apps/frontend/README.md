@@ -1,4 +1,4 @@
-# Irritator Web — éditeur graphique et hiérarchique (Tests 5–7F)
+# Irritator — éditeur graphique et hiérarchique (Tests 5–7F)
 
 Éditeur local Next.js / React Flow connecté au **véritable runner C++ Irritator**.
 Les composants, paramètres et ports viennent de `GET /api/v1/components`.

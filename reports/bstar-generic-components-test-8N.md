@@ -8,7 +8,7 @@ La sélection prospective est une composition d'atomes DEVS existants. Aucun
 changement de primitive, de solveur QSS, de bibliothèque scientifique, de plafond
 de ressources ou de code applicatif de décision n'est nécessaire.
 
-Documents scientifiques v3 importables dans Irritator Web :
+Documents scientifiques v3 importables dans Irritator :
 
 - `web/examples/decision-adaptive-prospect-selection-v3.json` : Plant intégrateur,
   diagnostic apparié M1/M2, démarrage M2, puis minimisation de MAE.

@@ -25,7 +25,7 @@ export type ComputedFishingEffort = NominalEffort & {
 type LegacyConfiguration = {id:'legacy-practices-v1';version:1;source:'Annexe V1 : motorisation et mailles descriptives'};
 type AppliedConfiguration = EffortConfiguration|LegacyConfiguration;
 export type PracticeRecord = {time:number; practice:FishingPractice; effortDerivation:ComputedFishingEffort; configuration:AppliedConfiguration};
-export type PracticeHistory = {reference:EffortReference; configuration:EffortConfiguration; records:PracticeRecord[]};
+export type PracticeHistory = {reference:EffortReference; configuration:EffortConfiguration; records:PracticeRecord[]; habitualPractice?:FishingPractice};
 /** Explicit workshop convention, not a measured practice or a scientific calibration. */
 export const initialReferencePractice:Readonly<FishingPractice> = {
   boats:1,motor:'no',tripScope:'total',tripsPerWeek:4,tripHours:6,gearType:'gillnet',gearCountPerTrip:2,
@@ -130,7 +130,7 @@ export function applyFishingPractice(request:RunRequest,time:number,p:Conditions
   for(const row of next.temporal!.interventions)if(row.time===time&&row.parameter==='E')row.provenance=`atelier: effort calculé depuis les pratiques de pêche ; ${history.configuration.id} v${history.configuration.version}`;
   validateRequest(next);
   const record:PracticeRecord={time,practice:structuredClone(practice),effortDerivation,configuration:structuredClone(history.configuration)};
-  return {request:next,history:{reference:structuredClone(history.reference),configuration:structuredClone(history.configuration),records:[...history.records.filter(r=>r.time!==time),record].sort((a,b)=>a.time-b.time)}};
+  return {request:next,history:{...structuredClone(history),records:[...history.records.filter(r=>r.time!==time),record].sort((a,b)=>a.time-b.time)}};
 }
 /** Separate versioned envelope: never add unknown properties to native v3 JSON. */
 export function exportPracticeHistory(request:RunRequest,history:PracticeHistory):string {
@@ -143,6 +143,8 @@ export function importPracticeHistory(text:string,request:RunRequest):PracticeHi
   if(!t||!history?.reference||!Array.isArray(history.records)||history.reference.modelEffort!==t.parameters.E||history.reference.id!==initializePracticeHistory(t).reference.id)throw new Error('Référence incompatible avec le scénario initial.');
   if(data.version===1)history.configuration=structuredClone(defaultEffortConfiguration);
   validateEffortConfiguration(history.configuration);
+  // Optional interface metadata in the existing V1/V2 envelope, never in native JSON.
+  if(history.habitualPractice!==undefined)validatePractice(history.habitualPractice);
   // A legacy reference remains valid for its old records; V2 conversion checks its own normalization on Apply.
   normalizeFishingEffort(history.reference.practice,history.reference,t.parameters,legacyConfiguration);
   let previous=-Infinity;

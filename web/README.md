@@ -1,4 +1,4 @@
-# Irritator Web : modèles DEVS atomiques et hiérarchiques
+# Irritator : modèles DEVS atomiques et hiérarchiques
 
 Le Test 8C fournit les exemples v3 `decision-8c-aggregation-v3.json`,
 `decision-8c-normalization-v3.json`, `decision-8c-fallback-v3.json` et

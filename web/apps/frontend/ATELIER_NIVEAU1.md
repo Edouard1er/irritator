@@ -1,4 +1,4 @@
-# Irritator Web — atelier participatif, niveau 1
+# Irritator — atelier participatif, niveau 1
 
 ## État actuel : itération 3.1 — lecture Pêcheur
 

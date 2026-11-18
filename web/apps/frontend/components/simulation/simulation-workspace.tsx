@@ -1,12 +1,14 @@
 'use client';
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Maximize, Minimize, Pause, Play, RotateCcw, VolumeX, Waves } from 'lucide-react';
 import {calendarTime,conditionsAt,fleetAt,nativeRequest,ratesAt,seasonAt,validateRequest,type RunRequest,type Conditions} from '@contracts';
 import {applyFishingPractice,initializePracticeHistory,practiceAt,type FishingPractice,type PracticeHistory} from '@/lib/simulation/fishing-effort';
 import {errorText,runSimulation,type HttpResult} from '@/lib/api/client';
 import {downloadFile} from '@/lib/serialization/workspace';
 import {ConditionsEditor} from './conditions-editor';
+import {FishingPracticeSidebar} from './fishing-practice-sidebar';
+import {QuickFishingTrips} from './quick-fishing-trips';
 import {MonthlyCatchChart} from './monthly-catch-chart';
 import {interactiveRequest} from '@/lib/simulation/interactive';
 import { ResultsPanel } from '@/components/panels/results-panel';
@@ -70,6 +72,9 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const [compare,setCompare]=useState(true),[monthly,setMonthly]=useState(!!request?.temporal);
   const experiment=request?.temporal&&original.id===`root:${request.temporal.target}`?request.temporal:undefined;
   const [practiceHistory,setPracticeHistory]=useState<PracticeHistory>();
+  const interventionPending=useRef(false);
+  const editorRegion=useRef<HTMLDivElement>(null),editorTrigger=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{if(editing!==undefined)editorRegion.current?.focus();else if(!recalculating)editorTrigger.current?.focus();},[editing,recalculating]);
   const fishingHistory=experiment?(practiceHistory??initializePracticeHistory(experiment)):undefined;
   const [mapping,setMapping]=useState<Mapping>();
   const run=useMemo(()=>applyMapping(original,mapping),[original,mapping]);
@@ -87,6 +92,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const time=timeline[selectedIndex]?.time;
   const environment=experiment&&time!==undefined?conditionsAt(experiment,calendarTime(time)):undefined;
   const season=time!==undefined?seasonAt(calendarTime(time)):undefined;
+  // Share the editor's default practice and its time-aware applied history.
   const currentPractice=experiment&&fishingHistory&&time!==undefined?practiceAt(fishingHistory,experiment,calendarTime(time)):undefined;
   const fleet=experiment&&time!==undefined?fleetAt(experiment,calendarTime(time)):undefined;
   const interventionTimes=useMemo(()=>experiment?.interventions.map(r=>r.time)??[],[experiment]);
@@ -146,16 +152,27 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     void prepareAudio();
   };
   const move=(next:number)=>{audio.current?.stop();setPlaying(false);setIndex(next);};
-  const applyIntervention=async(p:Conditions,practice:FishingPractice,history:PracticeHistory)=>{
-    if(!request||editing===undefined||recalculating||!onIntervention)return;
-    if(sound)void prepareAudio();const at=editing;setRecalculating(true);setInterventionError('');audio.current?.stop();setPlaying(false);
+  const pauseForQuickDecision=()=>{audio.current?.stop();setPlaying(false);};
+  const editDisabled=recalculating||time===undefined||!experiment||calendarTime(time)>=request!.simulation.end||!onIntervention;
+  const openConditions=(event:MouseEvent<HTMLButtonElement>)=>{
+    if(editDisabled)return;
+    if(editing!==undefined){editorRegion.current?.focus();return;}
+    editorTrigger.current=event.currentTarget;
+    audio.current?.stop();setPlaying(false);setEditing(calendarTime(time!));setInterventionError('');
+  };
+  const closeConditions=()=>setEditing(undefined);
+  const applyIntervention=async(at:number,p:Conditions,practice:FishingPractice,history:PracticeHistory):Promise<boolean>=>{
+    if(!request||interventionPending.current||editDisabled||!onIntervention||at!==calendarTime(time!))return false;
+    interventionPending.current=true;
+    if(sound)void prepareAudio();setRecalculating(true);setInterventionError('');audio.current?.stop();setPlaying(false);
     try {const applied=applyFishingPractice(request,at,p,practice,history),next=applied.request;validateRequest(next);const data=await runSimulation(next);
-      if(!mounted.current)return;
+      if(!mounted.current)return false;
       const points=normalizeRun(data,next).find(r=>r.id===original.id)?.series.find(s=>s.kind==='biomass_total')?.points;
       const position=points?.findIndex(p=>Math.abs(p.time-at)<=32*Number.EPSILON*Math.max(1,Math.abs(at)));
       if(position===undefined||position<0)throw new Error('Le moteur ne fournit pas le point de reprise ; les résultats précédents sont conservés.');
-      onIntervention(next,data);setPracticeHistory(applied.history);setIndex(position);setEditing(undefined);setResumedAt(at);setPlaying(activity.current&&!document.hidden);
-    }catch(e){if(mounted.current)setInterventionError(errorText(e));}finally{if(mounted.current)setRecalculating(false);}
+      onIntervention(next,data);setPracticeHistory(applied.history);setIndex(position);closeConditions();setResumedAt(at);setPlaying(activity.current&&!document.hidden);
+      return true;
+    }catch(e){if(mounted.current)setInterventionError(errorText(e));return false;}finally{interventionPending.current=false;if(mounted.current)setRecalculating(false);}
   };
   const activateInteractive=async()=>{
     if(!request||!onIntervention||recalculating)return;audio.current?.stop();setPlaying(false);setRecalculating(true);setInterventionError('');
@@ -167,12 +184,15 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     setConfigError('');setConfig(next);
   };
   const accessibility=environment?.a??run.parameters.a;
-  return <>
+  return <div className={`simulation-practice-layout${experiment?' has-fishing-practice':''}`}>
+    {experiment&&<FishingPracticeSidebar practice={currentPractice} effort={environment?.E} referenceEffort={practiceHistory?.reference.modelEffort} onEdit={openConditions} disabled={editDisabled} editing={editing!==undefined}/>}
+    <div className="simulation-playback-main">
     {run.status!=='completed'&&<p className="stale-banner" role="status">Résultats partiels ou indisponibles ({run.status}). La lecture s’arrête au dernier point effectivement fourni.</p>}
     {run.warnings.map(w=><p key={w} className="stale-banner" role="status">{w}</p>)}
     {configError&&<p className="error-banner" role="alert">{configError}</p>}
-    {experiment&&<div className="environment-strip"><strong>{season?.name} · mois {season?.month}/12</strong><span>Pluie {fmt(environment?.P)}/10</span><span>Salinité {fmt(environment?.S)}/10</span><span>Accessibilité {fmt((environment?.a??0)*100)} %</span>{fisher&&currentPractice&&fishingHistory?.records.length!==0&&<span>Ma pratique : {currentPractice.boats} pirogue(s), {fmt(currentPractice.tripsPerWeek)} sorties/semaine {currentPractice.tripScope==='total'?'pour le groupe':'par pirogue'}</span>}<span>Effort du modèle : {fmt(environment?.E)}{fishingHistory?.records.some(r=>r.time<=(time??0))?' (calculé à partir des pratiques)':''}</span><button disabled={editing!==undefined||recalculating||time===undefined||calendarTime(time)>=request!.simulation.end||!onIntervention} onClick={()=>{audio.current?.stop();setPlaying(false);setEditing(time===undefined?undefined:calendarTime(time));setInterventionError('');}}>Modifier les conditions</button>{experiment.interventions.length>0&&<label><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/> Comparer à la trajectoire initiale (bleu)</label>}</div>}
-    {editing!==undefined&&experiment&&request&&fishingHistory&&<ConditionsEditor key={editing} experiment={experiment} request={request} history={fishingHistory} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,practice,history)=>void applyIntervention(p,practice,history)} onCancel={()=>setEditing(undefined)}/>}
+    {experiment&&<div className="environment-strip"><strong>{season?.name} · mois {season?.month}/12</strong><span>Pluie {fmt(environment?.P)}/10</span><span>Salinité {fmt(environment?.S)}/10</span><span>Accessibilité {fmt((environment?.a??0)*100)} %</span>{fisher&&currentPractice&&<span>Ma pratique : {currentPractice.boats} pirogue(s), {fmt(currentPractice.tripsPerWeek)} sorties/semaine {currentPractice.tripScope==='total'?'pour le groupe':'par pirogue'}</span>}<span>Effort du modèle : {fmt(environment?.E)}{currentPractice?' (calculé à partir des pratiques)':''}</span><button disabled={editDisabled} onClick={openConditions} aria-controls="simulation-conditions-editor" aria-expanded={editing!==undefined}>Personnaliser</button>{experiment.interventions.length>0&&<label><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/> Comparer à la trajectoire initiale (bleu)</label>}</div>}
+    {experiment&&environment&&fishingHistory&&time!==undefined&&<QuickFishingTrips time={calendarTime(time)} practice={currentPractice} history={fishingHistory} conditions={environment} disabled={editDisabled} busy={recalculating} editing={editing!==undefined} hidden={!fisher||editing!==undefined} onPrepare={pauseForQuickDecision} onCustomize={openConditions} onApply={applyIntervention}/>}
+    {editing!==undefined&&experiment&&request&&fishingHistory&&<div id="simulation-conditions-editor" ref={editorRegion} tabIndex={-1} role="region" aria-label={`Modifier les conditions au mois ${Number(editing.toFixed(8))}`}><ConditionsEditor key={editing} experiment={experiment} request={request} history={fishingHistory} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,practice,history)=>void applyIntervention(editing,p,practice,history)} onCancel={closeConditions}/></div>}
     {interventionError&&<p role="alert" className="error-banner">{interventionError} · La trajectoire précédente reste affichée ; aucune intervention n’est enregistrée.</p>}
     {resumedAt!==undefined&&<p className="intervention-confirmation" role="status" data-resume-time={resumedAt}>Recalcul terminé — reprise au mois {fmt(resumedAt)} sans réinitialiser N ni C.</p>}
     <div className="fisher-dashboard" hidden={!fisher}>
@@ -198,6 +218,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
       <p>Son activé par défaut, sauf préférence désactivée conservée. Initialisation au premier geste de lecture ou de son ; sirène rouge uniquement pendant la lecture à B ≤ seuil configuré. Pause, déplacement du curseur, scénario, sortie et onglet inactif arrêtent le son. Aucun recalcul moteur.</p>
       <div className="mapping-fields"><label>Biomasse totale du lac<select aria-label="Observateur de biomasse totale" value={biomass?.id??''} onChange={e=>{move(0);setMapping({biomass:e.target.value||undefined,capture:capture?.id,captureKind:capture?.kind as Mapping['captureKind']});}}><option value="">Non disponible</option>{run.series.map(s=><option key={s.id}>{s.id}</option>)}</select></label><label>Capture<select aria-label="Observateur de capture" value={capture?.id??''} onChange={e=>{move(0);setMapping({biomass:biomass?.id,capture:e.target.value||undefined,captureKind:capture?.kind as Mapping['captureKind']});}}><option value="">Non disponible</option>{run.series.filter(s=>s.id!==biomass?.id).map(s=><option key={s.id}>{s.id}</option>)}</select></label><label>Nature de la capture<select aria-label="Nature de la capture" value={capture?.kind??'catch_cumulative'} onChange={e=>{move(0);setMapping({biomass:biomass?.id,capture:capture?.id,captureKind:e.target.value as Mapping['captureKind']});}}><option value="catch_cumulative">Cumul depuis le début</option><option value="catch_rate">Débit de capture</option><option value="catch_interval">Capture par intervalle</option></select></label></div>
     </details>
-  </>;
+    </div>
+  </div>;
 }
 function Metric({label,value,unit,note}:{label:string;value:string;unit:string;note:string}){return <article className="metric-card"><h2>{label}</h2><p><strong>{value}</strong>{value!=='Non disponible'&&<span> {unit}</span>}</p><small>{note}</small></article>;}
