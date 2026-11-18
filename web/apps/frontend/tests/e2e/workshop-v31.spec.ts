@@ -51,7 +51,7 @@ test('default sound arms above threshold, crosses automatically, stops immediate
   await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('1');await expect.poll(active).toBe(0);expect((await count()).connected).toBe(0);
   await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('500');await expect.poll(active).toBe(2);await page.getByRole('button',{name:'Pause',exact:true}).click();await expect.poll(active).toBe(0);
   await input(page,'Position temporelle',100);await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill(String(n[100].value));await page.getByRole('button',{name:'Reprendre',exact:true}).click();await expect.poll(active).toBe(2);
-  await page.getByRole('button',{name:'Modifier les conditions',exact:true}).click();await expect.poll(active).toBe(0);await page.getByLabel('Effort souhaité',{exact:true}).fill('200');
+  await page.getByRole('button',{name:'Modifier les conditions',exact:true}).click();await expect.poll(active).toBe(0);await page.getByLabel('Sorties par semaine',{exact:true}).fill('8');
   await page.getByRole('button',{name:/Appliquer à partir du mois/}).click();await expect(page.locator('[data-resume-time]')).toBeVisible();await expect.poll(active).toBe(2);expect((await count()).max).toBe(2);expect((await count()).contexts).toBe(1);
   await page.getByLabel('Son des alertes').uncheck();await expect.poll(active).toBe(0);expect((await count()).connected).toBe(0);await page.getByLabel('Son des alertes').check();await expect.poll(active).toBe(2);
   await page.getByRole('button',{name:'Modélisation',exact:true}).click();await expect.poll(active).toBe(0);await page.getByRole('button',{name:'Simulation',exact:true}).click();await page.getByLabel('Son des alertes').uncheck();

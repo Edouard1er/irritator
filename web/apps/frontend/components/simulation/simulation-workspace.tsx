@@ -2,7 +2,8 @@
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize, Minimize, Pause, Play, RotateCcw, VolumeX, Waves } from 'lucide-react';
-import {calendarTime,conditionsAt,fleetAt,intervene,nativeRequest,ratesAt,seasonAt,validateRequest,type RunRequest,type Conditions,type Fleet,type TemporalExperiment} from '@contracts';
+import {calendarTime,conditionsAt,fleetAt,nativeRequest,ratesAt,seasonAt,validateRequest,type RunRequest,type Conditions} from '@contracts';
+import {applyFishingPractice,initializePracticeHistory,practiceAt,type FishingPractice,type PracticeHistory} from '@/lib/simulation/fishing-effort';
 import {errorText,runSimulation,type HttpResult} from '@/lib/api/client';
 import {downloadFile} from '@/lib/serialization/workspace';
 import {ConditionsEditor} from './conditions-editor';
@@ -68,6 +69,8 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const [editing,setEditing]=useState<number>(),[recalculating,setRecalculating]=useState(false),[interventionError,setInterventionError]=useState(''),[resumedAt,setResumedAt]=useState<number>();
   const [compare,setCompare]=useState(true),[monthly,setMonthly]=useState(!!request?.temporal);
   const experiment=request?.temporal&&original.id===`root:${request.temporal.target}`?request.temporal:undefined;
+  const [practiceHistory,setPracticeHistory]=useState<PracticeHistory>();
+  const fishingHistory=experiment?(practiceHistory??initializePracticeHistory(experiment)):undefined;
   const [mapping,setMapping]=useState<Mapping>();
   const run=useMemo(()=>applyMapping(original,mapping),[original,mapping]);
   const [config,setConfig]=useState<AlertConfig>(defaultConfig);
@@ -84,6 +87,7 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
   const time=timeline[selectedIndex]?.time;
   const environment=experiment&&time!==undefined?conditionsAt(experiment,calendarTime(time)):undefined;
   const season=time!==undefined?seasonAt(calendarTime(time)):undefined;
+  const currentPractice=experiment&&fishingHistory&&time!==undefined?practiceAt(fishingHistory,experiment,calendarTime(time)):undefined;
   const fleet=experiment&&time!==undefined?fleetAt(experiment,calendarTime(time)):undefined;
   const interventionTimes=useMemo(()=>experiment?.interventions.map(r=>r.time)??[],[experiment]);
   const baseline=compare&&comparisonInitial!==original?comparisonInitial.series.find(s=>s.kind==='biomass_total'):undefined;
@@ -142,15 +146,15 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     void prepareAudio();
   };
   const move=(next:number)=>{audio.current?.stop();setPlaying(false);setIndex(next);};
-  const applyIntervention=async(p:Conditions,f:Fleet,mode:TemporalExperiment['fleet']['mode'],shares:[number,number,number])=>{
+  const applyIntervention=async(p:Conditions,practice:FishingPractice,history:PracticeHistory)=>{
     if(!request||editing===undefined||recalculating||!onIntervention)return;
     if(sound)void prepareAudio();const at=editing;setRecalculating(true);setInterventionError('');audio.current?.stop();setPlaying(false);
-    try {const next=intervene(request,at,p,f,mode,shares);validateRequest(next);const data=await runSimulation(next);
+    try {const applied=applyFishingPractice(request,at,p,practice,history),next=applied.request;validateRequest(next);const data=await runSimulation(next);
       if(!mounted.current)return;
       const points=normalizeRun(data,next).find(r=>r.id===original.id)?.series.find(s=>s.kind==='biomass_total')?.points;
       const position=points?.findIndex(p=>Math.abs(p.time-at)<=32*Number.EPSILON*Math.max(1,Math.abs(at)));
       if(position===undefined||position<0)throw new Error('Le moteur ne fournit pas le point de reprise ; les résultats précédents sont conservés.');
-      onIntervention(next,data);setIndex(position);setEditing(undefined);setResumedAt(at);setPlaying(activity.current&&!document.hidden);
+      onIntervention(next,data);setPracticeHistory(applied.history);setIndex(position);setEditing(undefined);setResumedAt(at);setPlaying(activity.current&&!document.hidden);
     }catch(e){if(mounted.current)setInterventionError(errorText(e));}finally{if(mounted.current)setRecalculating(false);}
   };
   const activateInteractive=async()=>{
@@ -167,8 +171,8 @@ function Playback({ run: original, active, fisher, scientific,request,onInterven
     {run.status!=='completed'&&<p className="stale-banner" role="status">Résultats partiels ou indisponibles ({run.status}). La lecture s’arrête au dernier point effectivement fourni.</p>}
     {run.warnings.map(w=><p key={w} className="stale-banner" role="status">{w}</p>)}
     {configError&&<p className="error-banner" role="alert">{configError}</p>}
-    {experiment&&<div className="environment-strip"><strong>{season?.name} · mois {season?.month}/12</strong><span>Pluie {fmt(environment?.P)}/10</span><span>Salinité {fmt(environment?.S)}/10</span><span>Accessibilité {fmt((environment?.a??0)*100)} %</span><span>Effort {fmt(environment?.E)}</span><button disabled={editing!==undefined||recalculating||time===undefined||calendarTime(time)>=request!.simulation.end||!onIntervention} onClick={()=>{audio.current?.stop();setPlaying(false);setEditing(time===undefined?undefined:calendarTime(time));setInterventionError('');}}>Modifier les conditions</button>{experiment.interventions.length>0&&<label><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/> Comparer à la trajectoire initiale (bleu)</label>}</div>}
-    {editing!==undefined&&experiment&&<ConditionsEditor key={editing} experiment={experiment} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,f,m,s)=>void applyIntervention(p,f,m,s)} onCancel={()=>setEditing(undefined)}/>}
+    {experiment&&<div className="environment-strip"><strong>{season?.name} · mois {season?.month}/12</strong><span>Pluie {fmt(environment?.P)}/10</span><span>Salinité {fmt(environment?.S)}/10</span><span>Accessibilité {fmt((environment?.a??0)*100)} %</span>{fisher&&currentPractice&&fishingHistory?.records.length!==0&&<span>Ma pratique : {currentPractice.boats} pirogue(s), {fmt(currentPractice.tripsPerWeek)} sorties/semaine {currentPractice.tripScope==='total'?'pour le groupe':'par pirogue'}</span>}<span>Effort du modèle : {fmt(environment?.E)}{fishingHistory?.records.some(r=>r.time<=(time??0))?' (calculé à partir des pratiques)':''}</span><button disabled={editing!==undefined||recalculating||time===undefined||calendarTime(time)>=request!.simulation.end||!onIntervention} onClick={()=>{audio.current?.stop();setPlaying(false);setEditing(time===undefined?undefined:calendarTime(time));setInterventionError('');}}>Modifier les conditions</button>{experiment.interventions.length>0&&<label><input type="checkbox" checked={compare} onChange={e=>setCompare(e.target.checked)}/> Comparer à la trajectoire initiale (bleu)</label>}</div>}
+    {editing!==undefined&&experiment&&request&&fishingHistory&&<ConditionsEditor key={editing} experiment={experiment} request={request} history={fishingHistory} time={editing} scientific={!fisher} busy={recalculating} onApply={(p,practice,history)=>void applyIntervention(p,practice,history)} onCancel={()=>setEditing(undefined)}/>}
     {interventionError&&<p role="alert" className="error-banner">{interventionError} · La trajectoire précédente reste affichée ; aucune intervention n’est enregistrée.</p>}
     {resumedAt!==undefined&&<p className="intervention-confirmation" role="status" data-resume-time={resumedAt}>Recalcul terminé — reprise au mois {fmt(resumedAt)} sans réinitialiser N ni C.</p>}
     <div className="fisher-dashboard" hidden={!fisher}>
