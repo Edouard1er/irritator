@@ -1,5 +1,7 @@
 # Effort calculé à partir des pratiques — compte rendu et recette
 
+> Ce document conserve le compte rendu V1. L’implémentation courante intègre maintenant la motorisation, les mailles, Ligne et Senne : voir [EFFORT_DECLARE_V2.md](EFFORT_DECLARE_V2.md) pour les formules, les facteurs, les tests et les limites à jour.
+
 Travail sur `two-modes`, à partir du SHA `a51584816c4998df895f175ede86b1a1dcc3bc49`.
 Arbre initial propre. Aucune branche créée, aucun commit, push ou merge.
 Les quatre documents du kit, ses exemples JSON, les deux captures et la vidéo
