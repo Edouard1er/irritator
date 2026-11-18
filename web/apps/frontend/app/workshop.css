@@ -179,7 +179,7 @@
 @media(min-width:1100px){
   .quick-fishing-trips:not([hidden]){display:block;background:#fffdf7;border:1px solid #d8c593;border-radius:10px;padding:12px 16px;margin-bottom:10px;min-width:0}
   .quick-trips-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
-  .quick-trips-heading h2{font-size:16px;margin:0;color:#174a4b}.quick-trips-badge{font-size:10px;font-weight:650;letter-spacing:.3px;color:#806322;background:#f7edcf;border-radius:12px;padding:3px 9px}
+  .quick-trips-heading h2{font-size:16px;margin:0;color:#174a4b}
   .quick-trips-layout{display:grid;grid-template-columns:minmax(180px,1fr) minmax(240px,1.65fr) minmax(170px,.85fr);gap:24px;align-items:center}
   .quick-trips-choice output{font-size:12px;color:#174a4b}.quick-trips-choice strong{font-size:28px;font-weight:700;margin-right:4px}.quick-trips-choice p{font-size:11px;margin:1px 0;color:#5d6c6b}.quick-trips-choice .quick-trips-variation{color:#806322;font-weight:600}
   .quick-trips-center{text-align:center;font-size:11px;font-weight:650;color:#315d5b;margin-bottom:2px}
@@ -187,7 +187,7 @@
   .quick-trips-track input:focus-visible{outline:2px solid #0f7778;outline-offset:4px}.quick-trips-track input:disabled{cursor:default}
   .quick-trips-scale{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#63746f}.quick-trips-scale button{font-size:10px;min-height:23px;padding:2px 10px;border:1px solid #d6c597;background:#fcf6e5;color:#72591e}
   .quick-trips-effort{border-left:1px solid #e3d8bc;padding-left:18px}.quick-trips-effort>span{font-size:11px;color:#6c622f}.quick-trips-effort output{display:block;color:#8a6821;font-size:25px}.quick-trips-effort small{display:block;font-size:10px;color:#63746f}
-  .quick-trips-footer{display:flex;align-items:center;gap:10px;border-top:1px solid #eee5d0;margin-top:8px;padding-top:8px}.quick-trips-footer p{margin:0 auto 0 0;color:#63746f;font-size:10px}.quick-trips-footer button{font-size:11px;min-height:32px;white-space:nowrap}.quick-fishing-trips>p{font-size:11px;margin:6px 0 0;color:#806322}
+  .quick-trips-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid #eee5d0;margin-top:8px;padding-top:8px}.quick-trips-footer p{margin:0 auto 0 0;color:#63746f;font-size:10px}.quick-trips-footer button{font-size:11px;min-height:32px;white-space:nowrap}.quick-fishing-trips>p{font-size:11px;margin:6px 0 0;color:#806322}
 }
 
 /* Desktop practice summary; the existing smaller-screen workspaces keep their layout. */
@@ -197,7 +197,6 @@
   .simulation-workspace{max-width:none;width:100%}
   .simulation-practice-layout.has-fishing-practice{display:grid;grid-template-columns:280px minmax(0,1fr);align-items:start;gap:20px}
   .fishing-practice-sidebar{--practice-amber:#dfbc5f;--practice-muted:#d0e7e2;--practice-line:#4c9188;display:block;position:sticky;top:10px;height:var(--fishing-practice-height,calc(100dvh - 215px));background:var(--accent-dark);color:#ddf0ed;padding:36px 22px 26px;border-right:2px solid var(--practice-line);font-size:11px;line-height:1.6}
-  .fishing-practice-sidebar .fishing-practice-eyebrow{color:var(--practice-amber);text-transform:uppercase;letter-spacing:1.6px;font-size:9px;font-weight:750;margin-bottom:14px}
   .fishing-practice-sidebar h2{font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:400;line-height:.95;letter-spacing:-1.4px;margin:0 0 18px;color:#fff}
   .fishing-practice-sidebar h2 em{color:var(--practice-amber);font-weight:400}
   .fishing-practice-intro{color:var(--practice-muted);font-size:11px;line-height:1.7;margin-bottom:20px}
@@ -227,7 +226,6 @@
 }
 @media(min-width:1100px) and (max-height:850px){
   .fishing-practice-sidebar{padding:12px 16px;font-size:10px;line-height:1.35}
-  .fishing-practice-sidebar .fishing-practice-eyebrow{font-size:8px;margin-bottom:6px}
   .fishing-practice-sidebar h2{font-size:28px;margin-bottom:10px}
   .fishing-practice-intro{font-size:10px;line-height:1.4;margin-bottom:10px}
   .fishing-practice-card{padding:8px 10px;margin-bottom:8px}

@@ -30,7 +30,7 @@ test('atelier réel : charger, lancer, lire, pause, reprendre, recommencer et co
   const chart = await page.locator('.biomass-card .js-plotly-plot').evaluate((el: any) => ({ y: el.data[0].y, x: el.data[0].x, xTitle: el.layout.xaxis.title.text, yTitle: el.layout.yaxis.title.text, annotations: el.layout.annotations.map((a: any) => a.text) }));
   expect(chart.y).toEqual(result.scenarioTrajectories[0].observations[0].samples.map((s: any) => s.value));
   expect(chart.xTitle).toContain('unité du modèle'); expect(chart.yTitle).toContain('unité du modèle'); expect(chart.annotations.join(' ')).toContain('140');
-  await page.getByRole('button', { name: 'Lancer l’animation', exact: true }).click();
+  await page.getByRole('button', { name: 'Lancer la simulation', exact: true }).click();
   await expect.poll(async () => Number(await page.getByLabel('Position temporelle').inputValue())).toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Pause', exact: true }).click(); const paused = await page.getByLabel('Position temporelle').inputValue();
   await page.waitForTimeout(350); await expect(page.getByLabel('Position temporelle')).toHaveValue(paused);

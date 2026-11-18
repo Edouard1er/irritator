@@ -30,7 +30,7 @@ describe('Workshop presentation and player', () => {
   });
   it('plays, pauses, resumes and uses the same observations at a faster speed', () => {
     vi.useFakeTimers(); start();
-    fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' })); act(() => vi.advanceTimersByTime(5000));
+    fireEvent.click(screen.getByRole('button', { name: 'Lancer la simulation' })); act(() => vi.advanceTimersByTime(5000));
     expect(screen.getByLabelText('Position temporelle')).toHaveValue('1'); fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     act(() => vi.advanceTimersByTime(20000)); expect(screen.getByLabelText('Position temporelle')).toHaveValue('1');
     fireEvent.change(screen.getByLabelText('Vitesse de lecture'), { target: { value: '2' } }); fireEvent.click(screen.getByRole('button', { name: 'Reprendre' }));
@@ -42,7 +42,7 @@ describe('Workshop presentation and player', () => {
     vi.stubGlobal('AudioContext', FakeAudio); start();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });
     expect(screen.getByLabelText('Son des alertes')).toBeChecked();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer la simulation' })); });
     expect(beep).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(5000)); act(() => vi.advanceTimersByTime(5000)); expect(beep).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(5000)); expect(beep).toHaveBeenCalledTimes(2); // Voice + slow modulation for red.
@@ -65,7 +65,7 @@ describe('Workshop presentation and player', () => {
   });
   it('keeps visual alerts when browser audio is refused', async () => {
     vi.stubGlobal('AudioContext', class { constructor() { throw new Error('Audio blocked'); } });
-    start(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer l’animation' })); });
+    start(); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lancer la simulation' })); });
     expect(screen.getByLabelText('Son des alertes')).toBeChecked();
     expect(screen.getByText(/Le navigateur ne permet pas le son/)).toBeVisible();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier', { exact: true }), { target: { value: '140' } });

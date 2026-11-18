@@ -30,7 +30,6 @@ export function FishingPracticeSidebar({practice,effort,referenceEffort,onEdit,d
     return()=>{cancelAnimationFrame(frame);observer?.disconnect();window.removeEventListener('resize',update);document.removeEventListener('fullscreenchange',update);document.removeEventListener('scroll',update,true);};
   },[]);
   return <aside ref={sidebar} className="fishing-practice-sidebar" aria-labelledby="fishing-practice-title">
-    <p className="fishing-practice-eyebrow">01 — Le vécu du pêcheur</p>
     <h2 id="fishing-practice-title">Ma façon<br/><em>de pêcher.</em></h2>
     <p className="fishing-practice-intro">Décrivez vos sorties, vos pirogues et vos engins. L’effort est calculé automatiquement.</p>
     {practice?<>

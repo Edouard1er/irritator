@@ -32,7 +32,7 @@ export function ConditionsEditor({experiment,request,history:initialHistory,time
     {scientific&&<p className="pedagogy-note">Pluie et salinité : indices pédagogiques de 0 à 10. La couleur de l’eau et les saisons sont illustratives, sans validation climatique ou écologique du lac de Guiers.</p>}</fieldset>
     <h3>Ma pratique de pêche</h3>
     {needsHabit&&<label className="practice-habit-confirmation"><input type="checkbox" checked={confirmHabit} disabled={busy} onChange={e=>setConfirmHabit(e.target.checked)}/> Je confirme la pratique ci-dessous comme ma pratique habituelle de départ.<small>Elle servira de repère fixe pour les réglages rapides, même après une décision ou un retour dans le temps.</small></label>}
-    {!practiceAt(history,experiment,time)&&<p role="status">La pratique correspondant à l’effort courant n’est pas enregistrée. Les valeurs proposées par défaut incluent 4 sorties par semaine ; elles restent modifiables. Vous pouvez aussi importer le fichier de pratiques associé.</p>}
+    {!practiceAt(history,experiment,time)&&<p role="status">La pratique correspondant à l’effort courant n’est pas enregistrée. Les valeurs par défaut incluent 4 sorties par semaine ; elles restent modifiables. Vous pouvez aussi importer le fichier de pratiques associé.</p>}
     <fieldset disabled={busy}><legend>Mes pirogues et mes sorties</legend><div className="practice-controls">
       {numberField('boats','Nombre de pirogues',1,true)}
       {selectField('motor','Type de pirogue',[['no','Non motorisée'],['yes','Motorisée']])}

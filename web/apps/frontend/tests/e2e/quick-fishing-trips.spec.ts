@@ -40,7 +40,7 @@ test.beforeEach(async({page})=>{
 
 test('desktop preview → native E300 at exact 3.8 → habit E150 at exact 10.3; same full editor, stable reference and restoration',async({page})=>{
   test.setTimeout(120000);const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
-  let baseline=await load(page);await expect(card(page)).toContainText('Repère proposé : 4 sorties/semaine');
+  let baseline=await load(page);await expect(card(page)).toContainText('Repère : 4 sorties/semaine');
   // First explicit validation of the participant's habitual practice uses the existing editor.
   await card(page).getByRole('button',{name:'Personnaliser',exact:true}).click();
   await expect(page.getByLabel(/Je confirme la pratique/)).toBeChecked();
@@ -96,7 +96,7 @@ test('time change and API failure discard no applied state; rapid drafts never c
   await card(page).getByRole('button',{name:/^Appliquer/}).click();await expect(page.locator('.simulation-playback-main > .error-banner')).toContainText('ENGINE_UNAVAILABLE');
   await expect(sidebar(page)).toHaveText(before!);await expect(page.locator('.workshop-metrics')).toHaveText(metrics!);await expect(frequency(page)).toHaveValue('8');
   await expect(page.locator('[data-resume-time]')).toHaveCount(0);await page.unroute('**/api/v1/simulations/run');
-  const success=await apply(page);await seek(page,success.result,3.8);await expect(card(page)).toContainText('Pratique habituelle à confirmer');
+  const success=await apply(page);await seek(page,success.result,3.8);await expect(card(page).getByRole('button',{name:'Repère',exact:true})).toBeVisible();
   await card(page).getByRole('button',{name:'Personnaliser',exact:true}).click();await page.getByRole('button',{name:'Annuler',exact:true}).click();
   await seek(page,success.result,10.3);await frequency(page).fill('0');const zero=await apply(page);expect(zero.request.temporal.interventions.find((r:any)=>r.parameter==='E'&&r.newValue===0)).toBeTruthy();
 });

@@ -24,7 +24,7 @@ describe('Synchronized workshop dashboard',()=>{
     const view=start();expect(screen.getByLabelText('Son des alertes')).toBeChecked();
     expect(screen.queryByRole('heading',{name:'Où en est la ressource ?'})).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier',{exact:true}),{target:{value:'140'}});
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Lancer l’animation'}));});expect(starts).not.toHaveBeenCalled();
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Lancer la simulation'}));});expect(starts).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier',{exact:true}),{target:{value:'220'}});expect(starts).toHaveBeenCalledWith('critical_crossed',.25);
     const before=stops.mock.calls.length;fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier',{exact:true}),{target:{value:'100'}});expect(stops.mock.calls.length).toBeGreaterThan(before);expect(starts).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByLabelText('Son des alertes'));expect(localStorage.getItem('irritator-alert-sound')).toBe('off');
@@ -58,7 +58,7 @@ describe('Synchronized workshop dashboard',()=>{
     vi.useFakeTimers();const view=start();
     fireEvent.change(screen.getByLabelText('Seuil choisi pour l’atelier',{exact:true}),{target:{value:'230'}});
     expect(screen.getByLabelText('Son des alertes')).toBeChecked();
-    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Lancer l’animation'}));});
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Lancer la simulation'}));});
     expect(starts).toHaveBeenCalledWith('critical_crossed',.25);const count=starts.mock.calls.length;
     act(()=>vi.advanceTimersByTime(5000));expect(starts).toHaveBeenCalledTimes(count); // Same critical state: one continuous voice.
     fireEvent.click(screen.getByRole('button',{name:'Pause'}));const stopped=stops.mock.calls.length;expect(stopped).toBeGreaterThan(0);

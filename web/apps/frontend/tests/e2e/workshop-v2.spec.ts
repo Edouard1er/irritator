@@ -20,7 +20,7 @@ test('monthly real engine: synchronized indicators, qualitative scenarios, scale
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
   const titles=await page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>[el.layout.xaxis.title.text,el.layout.yaxis.title.text]);expect(titles[0]).toContain('mois');expect(titles[1]).toContain('(t)');
   await page.screenshot({path:path.join(evidence,'01-orange-1920.png'),fullPage:true});
-  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(async()=>Number(await page.getByLabel('Position temporelle').inputValue())).toBeGreaterThan(0);
+  await page.getByRole('button',{name:'Lancer la simulation',exact:true}).click();await expect.poll(async()=>Number(await page.getByLabel('Position temporelle').inputValue())).toBeGreaterThan(0);
   await page.getByRole('button',{name:'Pause',exact:true}).click();const pausedCanvas=await page.locator('canvas[data-fish-count]').evaluate((el:HTMLCanvasElement)=>el.toDataURL());
   await page.waitForTimeout(200);expect(await page.locator('canvas[data-fish-count]').evaluate((el:HTMLCanvasElement)=>el.toDataURL())).toBe(pausedCanvas);
   await page.getByLabel('Position temporelle').focus();await page.getByLabel('Position temporelle').press('End');
@@ -77,14 +77,14 @@ test('real Web Audio red alarm remains single and stops on pause, mute, scenario
   await page.getByLabel('Volume des alertes').focus();await page.getByLabel('Volume des alertes').press('Home');
   const count=()=>page.evaluate(()=>(window as any).activeAlarmOscillators());expect(await count()).toBe(0);
   await page.getByLabel('Son des alertes').check();expect(await count()).toBe(0);
-  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(count).toBe(2);
+  await page.getByRole('button',{name:'Lancer la simulation',exact:true}).click();await expect.poll(count).toBe(2);
   await page.waitForTimeout(450);expect(await count()).toBe(2);
   await page.getByRole('button',{name:'Pause',exact:true}).click();await expect.poll(count).toBe(0);
   await page.getByRole('button',{name:'Reprendre',exact:true}).click();await expect.poll(count).toBe(2);
   await page.getByRole('button',{name:'Arrêter l’alarme'}).click();await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).not.toBeChecked();
   await page.getByLabel('Son des alertes').check();await expect.poll(count).toBe(2);
   await page.getByLabel('Situation simulée').selectOption('prospectives:1:5');await expect.poll(count).toBe(0);await expect(page.getByLabel('Son des alertes')).toBeChecked();
-  await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('230');await page.getByLabel('Son des alertes').check();await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();await expect.poll(count).toBe(2);
+  await page.getByLabel('Seuil choisi pour l’atelier',{exact:true}).fill('230');await page.getByLabel('Son des alertes').check();await page.getByRole('button',{name:'Lancer la simulation',exact:true}).click();await expect.poll(count).toBe(2);
   await page.getByRole('button',{name:'Modélisation',exact:true}).click();await expect.poll(count).toBe(0);
 });
 
@@ -99,7 +99,7 @@ test('native biomass fish remain responsive with no DOM expansion',async({page})
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
   await expect.poll(()=>page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data?.[0]?.y?.length)).toBe(201);
   await mkdir(evidence,{recursive:true});await page.screenshot({path:path.join(evidence,'09-dense-600.png'),fullPage:true});
-  await page.getByRole('button',{name:'Lancer l’animation',exact:true}).click();
+  await page.getByRole('button',{name:'Lancer la simulation',exact:true}).click();
   const intervals=await page.evaluate(()=>new Promise<number[]>(resolve=>{const deltas:number[]=[];let last=0;const frame=(time:number)=>{if(last)deltas.push(time-last);last=time;if(deltas.length===45)resolve(deltas);else requestAnimationFrame(frame);};requestAnimationFrame(frame);}));
   await page.getByRole('button',{name:'Pause',exact:true}).click();const sorted=intervals.toSorted((a,b)=>a-b),p95=sorted[Math.floor(sorted.length*.95)]!;
   await writeFile(path.join(evidence,'canvas-performance.json'),JSON.stringify({initialBiomass:600,symbols:Number(await canvas.getAttribute('data-fish-count')),frames:intervals.length,medianMs:sorted[Math.floor(sorted.length/2)],p95Ms:p95,maxMs:sorted.at(-1)},null,2));

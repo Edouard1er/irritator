@@ -32,7 +32,7 @@ export const statusInfo: Record<BiomassStatus, { title: string; icon: string; ex
   declining: { title: 'BAISSE À SURVEILLER', icon: '↘', explanation: 'La quantité simulée diminue, même si elle reste éloignée du seuil choisi.', color: '#946200' },
   near_threshold: { title: 'ALERTE : SEUIL APPROCHÉ', icon: '⚠', explanation: 'La quantité simulée est dans la zone d’alerte pédagogique.', color: '#a34908' },
   critical_crossed: { title: 'DANGER : SEUIL FRANCHI', icon: '×', explanation: 'La quantité simulée est au niveau du seuil choisi pour l’atelier ou en dessous, même si elle remonte.', color: '#b52b3b' },
-  unknown: { title: 'LECTURE À COMPLÉTER', icon: '—', explanation: 'Biomasse, seuil ou tendance non disponible. Aucune alarme ne peut être déduite.', color: '#526676' },
+  unknown: { title: 'Choisissez votre seuil critique', icon: '—', explanation: 'Biomasse, seuil ou tendance non disponible. Aucune alarme ne peut être déduite.', color: '#526676' },
 };
 
 /** Stable sort retains simultaneous DEVS observations in source order. Invalid values are gaps. */

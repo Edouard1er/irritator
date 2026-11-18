@@ -44,15 +44,15 @@ export function QuickFishingTrips({time,practice,history,conditions,disabled,bus
     }
   };
   return <section className="quick-fishing-trips" aria-label="Ajuster mes sorties de pêche" hidden={hidden}>
-    <div className="quick-trips-heading"><h2>Ajuster mes sorties de pêche</h2><span className="quick-trips-badge">Aperçu · avant application</span></div>
+    <div className="quick-trips-heading"><h2>Ajuster mes sorties de pêche</h2></div>
     <div className="quick-trips-layout">
       <div className="quick-trips-choice">
         <output aria-label="Sorties choisies"><strong>{fmt(trips)}</strong> sorties par semaine{!Number.isInteger(usual)&&' en moyenne'}</output>
-        <p>{history.habitualPractice?`Au lieu de ${fmt(usual)} habituellement`:`Repère proposé : ${fmt(usual)} sorties/semaine`}</p>
-        <p className="quick-trips-variation">{variation===undefined?'Écart indisponible':`${variation>0?'+':''}${fmt(variation)} % ${history.habitualPractice?'par rapport à l’habitude':'par rapport au repère proposé'}`}</p>
+        <p>{history.habitualPractice?`Au lieu de ${fmt(usual)} habituellement`:`Repère : ${fmt(usual)} sorties/semaine`}</p>
+        <p className="quick-trips-variation">{variation===undefined?'Écart indisponible':`${variation>0?'+':''}${fmt(variation)} % ${history.habitualPractice?'par rapport à l’habitude':'par rapport au repère'}`}</p>
       </div>
       <div className="quick-trips-gauge">
-        <div className="quick-trips-center">{history.habitualPractice?'Habituel':'Repère proposé'} : {fmt(usual)} sorties/semaine</div>
+        <div className="quick-trips-center">{history.habitualPractice?'Habituel':'Repère'} : {fmt(usual)} sorties/semaine</div>
         <div className="quick-trips-track"><input aria-label="Fréquence des sorties de pêche" aria-valuetext={`${fmt(trips)} sorties par semaine`} type="range" min={0} max={usual>0?max:1} step="any" value={Math.min(Math.max(0,trips),usual>0?max:1)} disabled={unavailable||busy} onPointerDown={onPrepare} onChange={e=>choose(snap(Number(e.target.value)))} onKeyDown={e=>{
           let next:number|undefined;
           if(['ArrowLeft','ArrowDown'].includes(e.key))next=Math.max(0,usual+Math.ceil(trips-usual)-1);
@@ -60,12 +60,12 @@ export function QuickFishingTrips({time,practice,history,conditions,disabled,bus
           if(e.key==='Home')next=0;if(e.key==='End')next=max;
           if(next!==undefined){e.preventDefault();choose(next);}
         }}/><i aria-hidden="true"/></div>
-        <div className="quick-trips-scale"><span>Moins · 0</span><button type="button" disabled={unavailable||busy} onClick={()=>choose(usual)}>{history.habitualPractice?'Habitude':'Repère proposé'}</button><span>Plus · {fmt(max)}</span></div>
+        <div className="quick-trips-scale"><span>Moins · 0</span><button type="button" disabled={unavailable||busy} onClick={()=>choose(usual)}>{history.habitualPractice?'Habitude':'Repère'}</button><span>Plus · {fmt(max)}</span></div>
       </div>
       <div className="quick-trips-effort"><span>Effort qui sera transmis</span><output aria-label="Aperçu de l’effort"><strong>E = {preview.effort?fmt(preview.effort.modelEffort):'—'}</strong></output><small>Le panneau gauche indique l’état appliqué.</small></div>
     </div>
     <div className="quick-trips-footer">
-      <p>{changed?'Animation en pause. Appliquer valide ce choix et reprend l’animation.':!history.habitualPractice?'Pratique habituelle à confirmer avec Personnaliser.':'La jauge indique la pratique actuellement appliquée.'}</p>
+      {(changed||history.habitualPractice)&&<p>{changed?'Animation en pause. Appliquer valide ce choix et reprend l’animation.':'La jauge indique la pratique actuellement appliquée.'}</p>}
       <button type="button" onClick={onCustomize} disabled={disabled} aria-controls="simulation-conditions-editor" aria-expanded={editing}>Personnaliser</button>
       <button type="button" className="primary" disabled={unavailable||busy||!changed||!!preview.error} onClick={()=>void submit()}>{busy?'Recalcul dans Irritator…':`Appliquer à partir du mois ${Number(time.toFixed(8))}`}</button>
     </div>
