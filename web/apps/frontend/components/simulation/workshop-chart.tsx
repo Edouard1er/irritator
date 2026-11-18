@@ -17,11 +17,13 @@ export default function WorkshopChart({ series, timeUnit, index, time, statuses,
       if (disposed) return;
       module = plot;
       const finiteValue = (n: number) => Number.isFinite(n) ? n : null;
-      const visible = series.points.filter((p, i) => biomass ? i <= index : time !== undefined && p.time <= time);
+      // Only pass elapsed observations to Plotly, including comparison/hover data.
+      const visibleTime = time ?? series.points[index]?.time ?? -Infinity;
+      const visible = series.points.filter(p => biomass ? p.time <= visibleTime : time !== undefined && p.time <= time);
+      const baselineVisible = baseline?.points.filter(p => !biomass || p.time <= visibleTime);
       const traces: Plotly.Data[] = [];
-      if(baseline)traces.push({type:'scatter',mode:'lines',name:'Trajectoire initiale',x:baseline.points.map(p=>p.time),y:baseline.points.map(p=>finiteValue(p.value)),line:{color:'#657eaa',dash:'dash',width:2},hovertemplate:'Initiale : %{y} t à %{x} mois<extra></extra>'});
+      if(baselineVisible)traces.push({type:'scatter',mode:biomass&&baselineVisible.length===1?'lines+markers':'lines',name:'Trajectoire initiale',x:baselineVisible.map(p=>p.time),y:baselineVisible.map(p=>finiteValue(p.value)),line:{color:'#657eaa',dash:'dash',width:2},marker:{size:4},hovertemplate:'Initiale : %{y} t à %{x} mois<extra></extra>'});
       if (biomass) {
-        traces.push({ type: 'scatter', name: 'Suite enregistrée (non lue)', mode: 'lines', x: series.points.map(p => p.time), y: series.points.map(p => finiteValue(p.value)), line: { color: '#b1bdc8', dash: 'dot', width: 1, shape: 'hv' }, hoverinfo: 'skip', connectgaps: false });
         for (const status of Object.keys(statusInfo) as BiomassStatus[]) {
           const x: (number | null)[] = [], y: (number | null)[] = [];
           visible.forEach((p, i) => { if (statuses[i] === status) { if (i > 0) { x.push(visible[i - 1]!.time); y.push(finiteValue(visible[i - 1]!.value)); } x.push(p.time, null); y.push(finiteValue(p.value), null); } });

@@ -61,7 +61,8 @@ test('video sequence: practice 150→300 at 3.8→100 at 10.3 equals direct nati
   await expect(page.locator('.biomass-card .js-plotly-plot')).toBeVisible();
   await expect.poll(()=>page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data.some((t:any)=>t.name==='Trajectoire initiale'))).toBe(true);
   expect(await page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.layout.shapes.filter((s:any)=>s.line.color==='#8c4089').map((s:any)=>s.x0))).toEqual([firstTime,secondTime]);
-  expect(await page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data.find((t:any)=>t.name==='Trajectoire initiale').y)).toEqual(observations(baseline,'N').map(p=>p.value));
+  const comparedTime=points[indexAt(second.result,11.3)]!.time;
+  expect(await page.locator('.biomass-card .js-plotly-plot').evaluate((el:any)=>el.data.find((t:any)=>t.name==='Trajectoire initiale').y)).toEqual(observations(baseline,'N').filter(p=>p.time<=comparedTime).map(p=>p.value));
   await page.locator('.simulation-container').evaluate(el=>el.scrollTop=0);await page.screenshot({path:path.join(evidence,'02-resultats-sequence.png'),fullPage:true});
   await page.locator('.environment-strip').getByRole('button',{name:'Personnaliser',exact:true}).click();await page.locator('.practice-details summary').click();
   const download=page.waitForEvent('download');await page.getByRole('button',{name:'Exporter les pratiques appliquées'}).click();const practices=await download,practiceText=await readFile((await practices.path())!,'utf8');
