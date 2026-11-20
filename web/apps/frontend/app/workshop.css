@@ -99,9 +99,9 @@
 .scenario-picker{display:grid;gap:3px;font-size:11px;min-width:230px;max-width:36%;flex:1}
 .scenario-picker select{width:100%;font-size:13px;min-height:36px}
 .audience-toggle{padding:2px}.audience-toggle button{min-height:34px}.presentation-button{min-height:39px}
-.qualitative-banner{min-height:60px;padding:10px 16px;margin-bottom:10px;gap:14px;border-radius:9px}
-.qualitative-banner h2{font-size:22px}.qualitative-banner p{font-size:12px}
-.status-symbol{width:38px;height:38px;font-size:26px}.banner-time{align-self:center;font-size:14px}
+.qualitative-banner{min-height:46px;padding:6px 16px;margin-bottom:10px;gap:14px;border-radius:9px}
+.qualitative-banner h2{font-size:22px;margin:0}
+.status-symbol{width:32px;height:32px;font-size:23px}.banner-time{align-self:center;font-size:14px}
 .workshop-metrics{gap:12px;margin-bottom:10px}.metric-card{padding:10px 16px;min-height:80px}
 .metric-card h2{font-size:13px;min-height:0;font-weight:600}.metric-card p{margin-top:4px}
 .metric-card strong{font-size:29px}.metric-card p>span{font-size:16px}.metric-card small{font-size:10px;color:#526b7b}
@@ -177,8 +177,8 @@
 .practice-habit-confirmation{display:block;font-size:12px;padding:10px 12px;margin:10px 0;background:#fff8e6;border:1px solid #e1cb8c;border-radius:8px}
 .practice-habit-confirmation input{margin-right:7px}.practice-habit-confirmation small{display:block;margin:5px 0 0 23px;color:#526b72}
 @media(min-width:1100px){
-  .quick-fishing-trips:not([hidden]){display:block;background:#fffdf7;border:1px solid #d8c593;border-radius:10px;padding:12px 16px;margin-bottom:10px;min-width:0}
-  .quick-trips-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+  .quick-fishing-trips:not([hidden]){display:block;background:#fffdf7;border:1px solid #d8c593;border-radius:10px;padding:8px 16px;margin-bottom:10px;min-width:0}
+  .quick-trips-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
   .quick-trips-heading h2{font-size:16px;margin:0;color:#174a4b}
   .quick-trips-layout{display:grid;grid-template-columns:minmax(180px,1fr) minmax(240px,1.65fr) minmax(170px,.85fr);gap:24px;align-items:center}
   .quick-trips-choice output{font-size:12px;color:#174a4b}.quick-trips-choice strong{font-size:28px;font-weight:700;margin-right:4px}.quick-trips-choice p{font-size:11px;margin:1px 0;color:#5d6c6b}.quick-trips-choice .quick-trips-variation{color:#806322;font-weight:600}
@@ -187,7 +187,7 @@
   .quick-trips-track input:focus-visible{outline:2px solid #0f7778;outline-offset:4px}.quick-trips-track input:disabled{cursor:default}
   .quick-trips-scale{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#63746f}.quick-trips-scale button{font-size:10px;min-height:23px;padding:2px 10px;border:1px solid #d6c597;background:#fcf6e5;color:#72591e}
   .quick-trips-effort{border-left:1px solid #e3d8bc;padding-left:18px}.quick-trips-effort>span{font-size:11px;color:#6c622f}.quick-trips-effort output{display:block;color:#8a6821;font-size:25px}.quick-trips-effort small{display:block;font-size:10px;color:#63746f}
-  .quick-trips-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid #eee5d0;margin-top:8px;padding-top:8px}.quick-trips-footer p{margin:0 auto 0 0;color:#63746f;font-size:10px}.quick-trips-footer button{font-size:11px;min-height:32px;white-space:nowrap}.quick-fishing-trips>p{font-size:11px;margin:6px 0 0;color:#806322}
+  .quick-trips-footer{display:flex;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid #eee5d0;margin-top:6px;padding-top:6px}.quick-trips-footer p{min-width:0;margin:0 auto 0 0;color:#63746f;font-size:10px}.quick-trips-footer p[role=status]{color:#806322}.quick-trips-footer button{font-size:11px;min-height:32px;white-space:nowrap}.quick-fishing-trips>p{font-size:11px;margin:6px 0 0;color:#806322}
 }
 
 /* Desktop practice summary; the existing smaller-screen workspaces keep their layout. */

@@ -65,13 +65,12 @@ export function QuickFishingTrips({time,practice,history,conditions,disabled,bus
       <div className="quick-trips-effort"><span>Effort qui sera transmis</span><output aria-label="Aperçu de l’effort"><strong>E = {preview.effort?fmt(preview.effort.modelEffort):'—'}</strong></output><small>Le panneau gauche indique l’état appliqué.</small></div>
     </div>
     <div className="quick-trips-footer">
-      {(changed||history.habitualPractice)&&<p>{changed?'Animation en pause. Appliquer valide ce choix et reprend l’animation.':'La jauge indique la pratique actuellement appliquée.'}</p>}
+      {notice?<p role="status">{notice}</p>:(changed||history.habitualPractice)&&<p>{changed?'Animation en pause. Appliquer valide ce choix et reprend l’animation.':'La jauge indique la pratique actuellement appliquée.'}</p>}
       <button type="button" onClick={onCustomize} disabled={disabled} aria-controls="simulation-conditions-editor" aria-expanded={editing}>Personnaliser</button>
       <button type="button" className="primary" disabled={unavailable||busy||!changed||!!preview.error} onClick={()=>void submit()}>{busy?'Recalcul dans Irritator…':`Appliquer à partir du mois ${Number(time.toFixed(8))}`}</button>
     </div>
     {usual===0&&<p role="status">Une pratique habituelle positive est nécessaire pour la jauge. Utilisez Personnaliser.</p>}
     {trips>max&&usual>0&&<p role="status">La pratique courante dépasse la plage rapide. Personnaliser conserve sa valeur exacte.</p>}
     {preview.error&&<p role="alert">{preview.error}</p>}
-    {notice&&<p role="status">{notice}</p>}
   </section>;
 }
