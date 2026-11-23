@@ -6,7 +6,7 @@
 .level-workspace>.workbench{height:100%;min-height:0}
 .scientific-editor-content{display:flex;flex-direction:column;flex:1;min-height:0}
 .scientific-editor-content>.workspace{min-height:300px}
-.territory-view-navigation{display:flex;gap:8px;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line)}
+.territory-view-navigation{display:flex;flex-wrap:wrap;gap:8px;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line)}
 .territory-view-navigation button{min-height:44px;font-size:14px}
 .territory-view-navigation button[aria-pressed=true]{background:var(--accent);color:white}
 .territory-workspace{padding:24px;max-width:1600px;margin:auto;font-size:15px;line-height:1.55;min-width:0}

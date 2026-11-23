@@ -1,4 +1,5 @@
 'use client';
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type SetStateAction } from 'react';
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, type Connection, type Edge, type EdgeChange, type NodeChange } from '@xyflow/react';
 import { Activity, ArrowRight, Check, ChevronDown, CircleHelp, FilePlus2, FolderOpen, Maximize, Network, Play, RefreshCw, Save, Settings2, X } from 'lucide-react';
@@ -22,6 +23,7 @@ import { TerritoryWorkspace } from '@/components/territory/territory-workspace';
 import territorialModel from '../../../../examples/atelier-interventions-month-v3.json';
 
 const nodeTypes = { irritator: IrritatorNodeView };
+const LogisticSpatialExperiment = dynamic(() => import('@/components/simulation/logistic-spatial-experiment').then(module => module.LogisticSpatialExperiment));
 type Status = 'Prêt' | 'Validation' | 'Exécution' | 'Terminé' | 'Échec';
 type EditorOptions = { level?: 1 | 2; active?: boolean };
 export function ModelEditor(options: EditorOptions = {}) { return <ReactFlowProvider><Editor {...options}/></ReactFlowProvider>; }
@@ -29,7 +31,8 @@ export function ModelEditor(options: EditorOptions = {}) { return <ReactFlowProv
 function Editor({ level = 1, active = true }: EditorOptions) {
   const localKey = level === 1 ? storageKey : 'irritator.level2.workspace.v2';
   const [document, setDocument] = useState<EditorState>(() => level === 1 ? emptyModel() : deserializeModel(territorialModel));
-  const [modelingView, setModelingView] = useState<'territory' | 'editor'>(level === 2 ? 'territory' : 'editor');
+  const [modelingView, setModelingView] = useState<'territory' | 'editor' | 'logistic'>(level === 2 ? 'territory' : 'editor');
+  const [logisticVisited, setLogisticVisited] = useState(false);
   const [territoryRevision, setTerritoryRevision] = useState(0);
   const [guidedScientific, setGuidedScientific] = useState(false);
   const scopeId = document.activeScope ?? rootScope;
@@ -240,7 +243,7 @@ function Editor({ level = 1, active = true }: EditorOptions) {
     finally { running.current = false; }
   };
 
-  return <div className={`workbench ${workspace}-active${level === 2 && modelingView === 'territory' ? ' guided-level-two' : ''}${level === 2 && modelingView === 'territory' && !guidedScientific ? ' guided-fisher' : ''}${level === 2 && workspace === 'modeling' && modelingView === 'territory' ? ' territory-reading-active' : ''}`}>
+  return <div className={`workbench ${workspace}-active${level === 2 && modelingView === 'territory' ? ' guided-level-two' : ''}${level === 2 && modelingView === 'territory' && !guidedScientific ? ' guided-fisher' : ''}${level === 2 && workspace === 'modeling' && modelingView === 'territory' ? ' territory-reading-active' : ''}${modelingView === 'logistic' ? ' logistic-view-active' : ''}`}>
     <header className="app-header"><a className="brand" href="/" onClick={e => e.preventDefault()} aria-label="Irritator"><span className="brand-mark"><Network size={21} /></span><strong>Irritator</strong></a><span className="header-divider" /><label className="model-name"><span className="sr-only">Nom du modèle</span><input value={state.request.model.id} maxLength={64} onChange={e => { const id = e.target.value; setDocument(s => ({ ...s, request: { ...s.request, model: { ...s.request.model, id } } })); }} /><span className={`unsaved-dot ${dirty ? 'visible' : ''}`} title="Modifications non exportées" /></label>
       <nav className="file-actions" aria-label="Fichier"><button onClick={newModel} disabled={busy}><FilePlus2 size={15} />Nouveau</button><button onClick={() => fileInput.current?.click()} disabled={busy}><FolderOpen size={15} />Ouvrir</button><button onClick={exportModel}><Save size={15} />Enregistrer</button></nav>
       <div className="header-right"><button className={`engine-status ${health}`} title={healthError ?? 'Handshake du runner vérifié ; les tests numériques vérifient les calculs.'} onClick={() => void connectBackend()}><span />{health === 'ready' ? 'Moteur connecté' : health === 'checking' ? 'Vérification…' : 'Moteur indisponible'}<RefreshCw size={12} /></button>{level === 1 && <button className="primary run-header" onClick={() => void run()} disabled={busy || health !== 'ready'}><Play size={14} fill="currentColor" />{busy ? 'Exécution…' : 'Simuler'}</button>}<button className="icon-button" aria-label="Aide" onClick={() => setShowHelp(true)}><CircleHelp size={18} /></button></div>
@@ -249,7 +252,12 @@ function Editor({ level = 1, active = true }: EditorOptions) {
     <input type="file" ref={fileInput} accept=".json,application/json" className="sr-only" aria-label="Ouvrir un modèle JSON" onChange={e => void openFile(e)} />
     <div id={level === 1 ? 'modeling-workspace' : 'level2-modeling-workspace'} className="modeling-workspace" hidden={workspace !== 'modeling'}>
     {level === 2 && <>
-      <nav className="territory-view-navigation" aria-label="Vues de modélisation du niveau 2"><button aria-pressed={modelingView === 'territory'} onClick={() => setModelingView('territory')}>Territoire</button><button aria-pressed={modelingView === 'editor'} onClick={() => setModelingView('editor')}>Éditeur scientifique</button></nav>
+      <nav className="territory-view-navigation" aria-label="Vues de modélisation du niveau 2">
+        <button aria-pressed={modelingView === 'territory'} onClick={() => setModelingView('territory')}>Territoire</button>
+        {(modelingView !== 'logistic' || guidedScientific) && <button aria-pressed={modelingView === 'editor'} onClick={() => setModelingView('editor')}>Éditeur scientifique</button>}
+        <button className="logistic-experiment-entry" aria-pressed={modelingView === 'logistic'} onClick={() => { setLogisticVisited(true); setModelingView('logistic'); }}>Expérience logistique spatiale</button>
+      </nav>
+      {logisticVisited && <div hidden={modelingView !== 'logistic'}><LogisticSpatialExperiment active={active && modelingView === 'logistic'} /></div>}
       <div hidden={modelingView !== 'territory'}><LevelTwoJourney active={active && modelingView === 'territory'} stale={resultStale} request={document.request} result={result?.data} resultRequest={result?.request} busy={busy} error={error} onRun={() => void run()} onAudience={setGuidedScientific}
         territory={(journeyStep, scientific, next, showResults, atlas) => <TerritoryWorkspace key={territoryRevision} atlasController={atlas} journeyStep={journeyStep} journeyScientific={scientific} request={document.request} result={showResults ? result?.data : undefined} resultRequest={showResults ? result?.request : undefined} busy={busy} documentError={error} onApply={request => { setDocument(s => ({ ...s, request })); setError(undefined); }} onSimulation={next}/>}
         simulation={(journeyActive, guided) => <SimulationWorkspace guided={guided} preferenceScope={level === 2 ? 'level2' : undefined} request={resultRequest} result={result?.data} sessionId={result?.sessionId} onIntervention={(request,data)=>{if (level === 2) request = { ...request, fishingActivities: document.request.fishingActivities };setDocument(s=>({...s,request}));setResult(old=>({data,request,fingerprint:fingerprint(request),sessionId:old?.sessionId??old?.data.runId??data.runId}));setStatus('Terminé');}} stale={resultStale} status={status} error={error} active={active && modelingView === 'territory' && journeyActive} />}/></div>

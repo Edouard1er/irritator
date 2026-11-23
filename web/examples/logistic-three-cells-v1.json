@@ -1,0 +1,439 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "logistic-three-cells",
+    "components": [
+      {
+        "id": "C1-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 60,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C1-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C1-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C1-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C1-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C1-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C1-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C2-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 150,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C2-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C2-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C2-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C2-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C2-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C2-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C3-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 380,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C3-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C3-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C3-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C3-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C3-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C3-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "C1-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C1-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C1-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C1-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C1-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C1-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C1-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C1-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C1-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C1-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C2-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C2-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C2-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C2-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C2-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C2-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C2-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C2-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C2-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C2-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C3-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C3-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C3-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C3-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C3-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C3-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C3-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C3-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C3-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C3-N",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "C1-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C2-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C3-N",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 20
+  }
+}

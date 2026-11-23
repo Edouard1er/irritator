@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "logistic-single-feasibility",
+    "components": [
+      {
+        "id": "N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 150,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "r",
+          "port": 0
+        },
+        "to": {
+          "component": "rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "N",
+          "port": 0
+        },
+        "to": {
+          "component": "rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "rN",
+          "port": 0
+        },
+        "to": {
+          "component": "linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "one",
+          "port": 0
+        },
+        "to": {
+          "component": "linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "rN",
+          "port": 0
+        },
+        "to": {
+          "component": "rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "N",
+          "port": 0
+        },
+        "to": {
+          "component": "rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "linear",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "sum",
+          "port": 0
+        },
+        "to": {
+          "component": "N",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "N",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 20
+  }
+}

@@ -1,4 +1,5 @@
-.guided-fisher > .app-header,.guided-fisher .territory-view-navigation,.guided-level-two > .app-footer{display:none}
+.guided-fisher > .app-header,.guided-level-two > .app-footer,.logistic-view-active > .app-header,.logistic-view-active > .app-footer{display:none}
+.guided-fisher .territory-view-navigation > button:not(.logistic-experiment-entry){display:none}
 .guided-level-two .modeling-workspace{overflow:auto}
 .level-two-journey{--journey-ink:#123e43;--journey-soft:#e9f3ef;max-width:1440px;margin:auto;padding:28px;color:var(--journey-ink);font-size:18px;line-height:1.55;min-width:0}
 .level-two-journey *{box-sizing:border-box;min-width:0}

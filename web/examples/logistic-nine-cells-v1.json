@@ -1,0 +1,1285 @@
+{
+  "schemaVersion": 1,
+  "model": {
+    "id": "logistic-nine-cells",
+    "components": [
+      {
+        "id": "C00-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 0,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C00-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C00-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C00-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C00-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C00-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C00-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C01-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 60,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C01-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C01-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C01-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C01-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C01-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C01-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C02-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 150,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C02-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C02-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C02-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C02-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C02-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C02-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C10-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 300,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C10-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C10-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C10-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C10-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C10-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C10-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C11-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 380,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C11-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C11-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C11-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C11-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C11-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C11-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C12-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 80,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C12-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C12-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C12-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C12-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C12-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C12-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C20-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 220,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C20-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C20-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C20-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C20-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C20-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C20-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C21-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 270,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C21-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C21-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C21-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C21-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C21-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C21-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      },
+      {
+        "id": "C22-N",
+        "type": "qss3_integrator",
+        "parameters": {
+          "X": 50,
+          "dQ": 0.01
+        }
+      },
+      {
+        "id": "C22-r",
+        "type": "constant",
+        "parameters": {
+          "value": 0.35,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C22-one",
+        "type": "constant",
+        "parameters": {
+          "value": 1,
+          "offset": 0
+        }
+      },
+      {
+        "id": "C22-rN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C22-linear",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C22-rNtimesN",
+        "type": "qss3_multiplier",
+        "parameters": {}
+      },
+      {
+        "id": "C22-sum",
+        "type": "qss3_wsum_2",
+        "parameters": {
+          "coeff-0": 1,
+          "coeff-1": -0.0033333333333333335
+        }
+      }
+    ],
+    "connections": [
+      {
+        "from": {
+          "component": "C00-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C00-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C00-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C00-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C00-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C00-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C00-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C00-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C00-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C00-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C01-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C01-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C01-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C01-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C01-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C01-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C01-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C01-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C01-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C01-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C02-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C02-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C02-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C02-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C02-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C02-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C02-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C02-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C02-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C02-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C10-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C10-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C10-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C10-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C10-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C10-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C10-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C10-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C10-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C10-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C11-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C11-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C11-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C11-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C11-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C11-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C11-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C11-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C11-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C11-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C12-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C12-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C12-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C12-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C12-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C12-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C12-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C12-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C12-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C12-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C20-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C20-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C20-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C20-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C20-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C20-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C20-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C20-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C20-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C20-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C21-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C21-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C21-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C21-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C21-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C21-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C21-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C21-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C21-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C21-N",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C22-r",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-rN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C22-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-rN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C22-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-linear",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C22-one",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-linear",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C22-rN",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-rNtimesN",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C22-N",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-rNtimesN",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C22-linear",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-sum",
+          "port": 0
+        }
+      },
+      {
+        "from": {
+          "component": "C22-rNtimesN",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-sum",
+          "port": 1
+        }
+      },
+      {
+        "from": {
+          "component": "C22-sum",
+          "port": 0
+        },
+        "to": {
+          "component": "C22-N",
+          "port": 0
+        }
+      }
+    ],
+    "observations": [
+      {
+        "component": "C00-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C01-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C02-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C10-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C11-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C12-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C20-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C21-N",
+        "samplingInterval": 0.1
+      },
+      {
+        "component": "C22-N",
+        "samplingInterval": 0.1
+      }
+    ]
+  },
+  "simulation": {
+    "start": 0,
+    "end": 20
+  }
+}
