@@ -1,6 +1,8 @@
 import { catalog, validateRequest, type RunRequest } from '@contracts';
 import type { HttpResult } from '@/lib/api/client';
-import fixture from '../../../../examples/logistic-nine-cells-v1.json';
+import { spatialRequest, type SpatialDimension } from '../../../../examples/logistic-grid';
+
+export { spatialRequest, type SpatialDimension };
 
 type SpatialSample = HttpResult['observations'][number]['samples'][number];
 
@@ -75,12 +77,6 @@ function sameTime(a: number, b: number): boolean {
   return Math.abs(a - b) <= 32 * Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
 }
 
-export function spatialRequest(): RunRequest {
-  const request: unknown = structuredClone(fixture);
-  validateRequest(request);
-  return request;
-}
-
 export function spatialCells(request: RunRequest): SpatialCell[] {
   const atoms = new Map(request.model.components.map(atom => [atom.id, atom.parameters]));
   return request.model.observations.map(({ component, samplingInterval }) => {
@@ -89,13 +85,32 @@ export function spatialCells(request: RunRequest): SpatialCell[] {
     const quantum = atoms.get(component)?.dQ;
     const growth = atoms.get(`${id}-r`)?.value;
     const lossWeight = atoms.get(`${id}-sum`)?.['coeff-1'];
-    if (!/^C[0-2][0-2]-N$/.test(component) || initial === undefined || quantum === undefined ||
+    if (!/^C[0-3][0-3]-N$/.test(component) || initial === undefined || quantum === undefined ||
         growth === undefined || lossWeight === undefined || lossWeight >= 0) {
       throw new Error(`Paramètres de la cellule ${component} indisponibles.`);
     }
     return { id, component, row: Number(id[1]), column: Number(id[2]), initial, growth,
       capacity: -1 / lossWeight, quantum, samplingInterval };
   });
+}
+
+export function spatialResize(base: RunRequest, baseCells: readonly SpatialCell[], dimension: SpatialDimension) {
+  const request = spatialRequest(dimension);
+  const previousParameters = new Map(base.model.components.map(atom => [atom.id, atom.parameters]));
+  for (const atom of request.model.components) {
+    const parameters = previousParameters.get(atom.id);
+    if (parameters) atom.parameters = { ...parameters };
+  }
+  if (base.limits) request.limits = { ...base.limits };
+  validateRequest(request);
+
+  const previousCells = new Map(baseCells.map(cell => [cell.id, cell]));
+  const cells = spatialCells(request).map(cell => ({
+    ...cell,
+    // Keep the declared capacity instead of introducing a second reciprocal rounding.
+    capacity: previousCells.get(cell.id)?.capacity ?? cell.capacity,
+  }));
+  return { request, cells };
 }
 
 export function spatialDrafts(cells: readonly SpatialCell[]): SpatialDrafts {

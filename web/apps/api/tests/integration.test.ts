@@ -8,6 +8,7 @@ import { buildApp } from '../src/app.js';
 import { readConfig } from '../src/config/index.js';
 import { ProcessEngine } from '../src/services/engine.js';
 import { ApiError, catalog, validateRequest, type RunRequest, type RunResult } from '../../../packages/contracts/index.js';
+import { spatialRequest } from '../../../examples/logistic-grid.js';
 import { reference, affine } from './fixtures.js';
 
 test('real TCP HTTP -> Fastify -> C++ -> libirritator scientific campaign',{timeout:60000},async()=>{
@@ -67,6 +68,49 @@ test('server caps lower client requests',async()=>{
   const app=buildApp(config);
   try {const r=await app.inject({method:'POST',url:'/api/v1/simulations/run',payload:{...reference(),limits:{maxRunCalls:100000}}});assert.equal(r.statusCode,422);assert.equal(r.json().error.code,'LIMIT_EXCEEDED');}finally{await app.close();}
 });
+
+test('variable logistic grids complete through Fastify and the native runner', async () => {
+  const app = buildApp(readConfig());
+  try {
+    for (const dimension of [2, 3, 4] as const) {
+      const request = spatialRequest(dimension);
+      const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json<RunResult>();
+      assert.equal(result.status, 'completed');
+      assert.equal(result.modelId, request.model.id);
+      assert.equal(result.simulation.finalTime, request.simulation.end);
+      assert.equal(result.observations.length, dimension * dimension);
+      assert.deepEqual(result.observations.map(({ component }) => component),
+        request.model.observations.map(({ component }) => component));
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test('variable logistic grid rejects tighter model and sampling budgets before native launch', async () => {
+  const request = spatialRequest(4);
+  for (const limits of [{ maxComponents: 111 }, { maxPoints: 3231 }]) {
+    const config = readConfig();
+    Object.assign(config.engineLimits, limits);
+    let launchAttempted = false;
+    const engine = new ProcessEngine(config, () => {
+      launchAttempted = true;
+      throw new Error('The rejected grid must not reach the runner.');
+    });
+    const app = buildApp(config, engine);
+    try {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(response.json().error.code, 'LIMIT_EXCEEDED');
+      assert.equal(launchAttempted, false);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
 test('HTTP disconnection releases native process slot',{timeout:15000},async()=>{
   const config={...readConfig(),maxConcurrent:1,timeoutMs:5000};
   let notifyStarted!: () => void;

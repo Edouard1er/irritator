@@ -8,6 +8,9 @@ compile_commands.json
 /docs
 /out
 /reports/*
+!/reports/logistic-pilot/
+/reports/logistic-pilot/*
+!/reports/logistic-pilot/lot1-grille-variable-rapport.md
 !/reports/web-integration-test-4.md
 !/reports/frontend-test-5.md
 !/reports/frontend-test-5/

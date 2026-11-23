@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import type { RunRequest } from '@contracts';
 import { errorText, runSimulation } from '@/lib/api/client';
-import { spatialApply, spatialCells, spatialDrafts, spatialReading, spatialRequest, spatialTimeline, spatialTrajectories, type SpatialCell, type SpatialDraft, type SpatialDrafts, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
+import { spatialApply, spatialCells, spatialDrafts, spatialReading, spatialRequest, spatialResize, spatialTimeline, spatialTrajectories, type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
 import { LogisticTrajectories, logisticSeriesColor } from './logistic-trajectories';
 import styles from './logistic-spatial.module.css';
 
@@ -24,6 +24,7 @@ type Phase =
   | { status: 'error'; message: string };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
 const beginning = { tick: 0, playing: false, started: false };
+const dimensions = [2, 3, 4] as const;
 const formatParameter = (value: number) => String(value).replace('.', ',');
 const parameterFields = [
   ['initial', 'Biomasse initiale N₀ (t)'],
@@ -31,12 +32,12 @@ const parameterFields = [
   ['capacity', 'Capacité K (t)'],
 ] as const;
 
-type Configuration = { request: RunRequest; cells: SpatialCell[] };
+type Configuration = { dimension: SpatialDimension; request: RunRequest; cells: SpatialCell[] };
 type Validation = { cell: string; message: string; fields?: Partial<Record<keyof SpatialDraft, string>> | undefined };
 
-function nominalConfiguration(): Configuration {
-  const request = spatialRequest();
-  return { request, cells: spatialCells(request) };
+function nominalConfiguration(dimension: SpatialDimension = 3): Configuration {
+  const request = spatialRequest(dimension);
+  return { dimension, request, cells: spatialCells(request) };
 }
 
 function withoutDraft(previous: SpatialDrafts, cell: string): SpatialDrafts {
@@ -55,7 +56,7 @@ function ratioColor(ratio: number | undefined) {
 
 export function LogisticSpatialExperiment({ active }: { active: boolean }) {
   const [configuration, setConfiguration] = useState(nominalConfiguration);
-  const { request, cells } = configuration;
+  const { dimension, request, cells } = configuration;
   const timeline = useMemo(() => spatialTimeline(request), [request]);
   const [drafts, setDrafts] = useState<SpatialDrafts>({});
   const [validation, setValidation] = useState<Validation>();
@@ -130,12 +131,32 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
       return;
     }
     setValidation(undefined);
-    void run({ request: result.request, cells: result.cells }, selected);
+    void run({ dimension, request: result.request, cells: result.cells }, selected);
+  }
+
+  function changeDimension(value: string) {
+    const nextDimension = dimensions.find(size => String(size) === value);
+    if (!nextDimension || nextDimension === dimension || running.current) return;
+
+    try {
+      const next = spatialResize(request, cells, nextDimension);
+      const activeIds = new Set(next.cells.map(cell => cell.id));
+      setConfiguration({ dimension: nextDimension, ...next });
+      setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => activeIds.has(id))));
+      setSelected(previous => activeIds.has(previous) ? previous : 'C00');
+      setCompared(previous => previous.filter(id => activeIds.has(id)));
+      setValidation(undefined);
+      setCursor(beginning);
+      setPhase({ status: 'idle' });
+    } catch (cause) {
+      setCursor(beginning);
+      setPhase({ status: 'error', message: errorText(cause) });
+    }
   }
 
   function restore() {
     if (running.current) return;
-    const nominal = nominalConfiguration();
+    const nominal = nominalConfiguration(dimension);
     setConfiguration(nominal);
     setDrafts({});
     setValidation(undefined);
@@ -205,7 +226,13 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
           <h2 id="logistic-spatial-grid">Biomasse par cellule</h2>
           <span>Tonnes</span>
         </div>
-        <div className={styles.grid}>
+        <label className={styles.dimensions}>
+          Dimensions de la grille
+          <select value={dimension} disabled={phase.status === 'running'} onChange={event => changeDimension(event.currentTarget.value)}>
+            {dimensions.map(size => <option key={size} value={size}>{size} × {size}</option>)}
+          </select>
+        </label>
+        <div className={styles.grid} data-dimension={dimension}>
           {cells.map(cell => {
             const trajectory = byId.get(cell.id);
             const reading = trajectory ? spatialReading(trajectory, time) : null;
@@ -228,6 +255,7 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
         <div className={styles.legend} aria-label="Légende du rapport biomasse sur capacité">
           <strong>Rapport B/K</strong>
           <ul>{legend.map(([color, text]) => <li key={color}><i aria-hidden="true" data-tone={color} />{text}</li>)}</ul>
+          <p>Chaque cellule a sa propre capacité K. Ajouter des cellules augmente la capacité totale.</p>
         </div>
       </section>
 

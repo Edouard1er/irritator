@@ -116,12 +116,27 @@
 .panelHeading h2 { font-size: 17px; letter-spacing: -0.02em; }
 .panelHeading > span { font-size: 12px; color: var(--muted); }
 
+.dimensions {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dimensions select { min-height: 36px; font-size: 13px; }
+.dimensions select:disabled { opacity: 0.45; }
+
 .grid {
+  --columns: 3;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--columns), minmax(0, 1fr));
   grid-auto-rows: 1fr;
   gap: 8px;
 }
+.grid[data-dimension="2"] { --columns: 2; }
+.grid[data-dimension="4"] { --columns: 4; }
 
 .tile {
   display: flex;
@@ -177,6 +192,7 @@
   margin: 8px 0 0;
 }
 .legend li, .series li { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.legend p { margin-top: 9px; font-size: 12px; line-height: 1.45; }
 .legend i, .series i { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 10px; }
 .legend i { background: var(--tile-fill); border: 1px solid var(--tile-border); }
 .equilibriumLabel { font-weight: 600; }

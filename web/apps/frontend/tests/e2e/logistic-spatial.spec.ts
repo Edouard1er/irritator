@@ -23,26 +23,32 @@ async function openExperiment(page: Page) {
   return panel;
 }
 
-async function execute(page: Page, panel: Locator) {
+async function executeRequest(page: Page, panel: Locator, trigger = panel.getByRole('button', { name: 'Lancer la simulation', exact: true })) {
   const pending = page.waitForResponse(response => isSimulation(response.request()));
-  await panel.getByRole('button', { name: 'Lancer la simulation', exact: true }).click();
+  await trigger.click();
   const response = await pending;
   expect(response.status(), await response.text()).toBe(200);
-  expect(response.request().postDataJSON()).toEqual(fixture);
+  const request = response.request().postDataJSON() as RunRequest;
   const { runId, ...result } = await response.json() as RunResult & { runId: string };
   expect(typeof runId).toBe('string');
   expect(result.simulation).toMatchObject({ start: 0, end: 20, finalTime: 20 });
   expect(result.simulation.runCalls).toBeGreaterThan(0);
-  expect(result.observations.map(({ component }) => component)).toEqual(fixture.model.observations.map(o => o.component));
+  expect(result.observations.map(({ component }) => component)).toEqual(request.model.observations.map(o => o.component));
   await expect(panel.getByText('Terminé', { exact: true })).toBeVisible();
+  return { request, result };
+}
+
+async function execute(page: Page, panel: Locator) {
+  const { request, result } = await executeRequest(page, panel);
+  expect(request).toEqual(fixture);
   return result;
 }
 
-function compareNative(result: RunResult) {
+function compareNative(result: RunResult, request = fixture) {
   const runner = process.env.IRRITATOR_RUNNER;
   expect(runner, 'Définir IRRITATOR_RUNNER avec le même exécutable que le serveur API.').toBeTruthy();
   const native = spawnSync(runner!, [], {
-    input: JSON.stringify(fixture), encoding: 'utf8', timeout: 30000, windowsHide: true,
+    input: JSON.stringify(request), encoding: 'utf8', timeout: 30000, windowsHide: true,
   });
   expect(native.error).toBeUndefined();
   expect(native.status, native.stderr).toBe(0);
@@ -203,6 +209,107 @@ test('une coupure réseau retire les résultats précédents et permet une nouve
   expect(recovered).toEqual(result);
   await showMonth(panel, recovered, 0);
   await expect(panel.getByRole('alert')).toHaveCount(0);
+});
+
+test('les grilles 2 × 2, 3 × 3 et 4 × 4 conservent les paramètres communs et demandent un nouveau calcul natif', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (isSimulation(request)) requests.push(request.url()); });
+  const panel = await openExperiment(page);
+  await page.waitForLoadState('networkidle');
+  const dimensions = panel.getByRole('combobox', { name: 'Dimensions de la grille', exact: true });
+  const details = (id: string) => panel.getByRole('region', { name: `Paramètres de ${id}`, exact: true });
+  const initial = (id: string) => details(id).getByLabel('Biomasse initiale N₀ (t)', { exact: true });
+  const growth = (id: string) => details(id).getByLabel('Taux de croissance r (mois⁻¹)', { exact: true });
+  const capacity = (id: string) => details(id).getByLabel('Capacité K (t)', { exact: true });
+  const compare = (id: string) => panel.getByRole('checkbox', { name: `Comparer ${id}`, exact: true });
+
+  async function expectGrid(size: number) {
+    const ids = Array.from({ length: size * size }, (_, index) => `C${Math.floor(index / size)}${index % size}`);
+    const tiles = panel.locator('[data-cell]');
+    await expect.poll(() => tiles.evaluateAll(elements => elements.map(element => element.getAttribute('data-cell')))).toEqual(ids);
+    await expect.poll(() => tiles.first().evaluate(element => getComputedStyle(element.parentElement!).gridTemplateColumns.split(' ').length)).toBe(size);
+    return ids;
+  }
+
+  async function resize(size: number) {
+    const count = requests.length;
+    await dimensions.selectOption(String(size));
+    const ids = await expectGrid(size);
+    await expect(panel.getByText('Non lancé', { exact: true })).toBeVisible();
+    await expect(panel.locator('[data-cell][data-biomass]')).toHaveCount(0);
+    await expect(chart(panel)).toHaveCount(0);
+    await expect(panel.getByLabel('Paramètres simulés', { exact: true })).toHaveCount(0);
+    await expect(slider(panel)).toBeDisabled();
+    await expect(slider(panel)).toHaveValue('0');
+    await expect(panel.getByRole('button', { name: 'Lire', exact: true })).toBeDisabled();
+    await expect(panel.getByRole('button', { name: 'Remettre au début', exact: true })).toBeDisabled();
+    expect(requests).toHaveLength(count);
+    return ids;
+  }
+
+  async function checkRun(ids: string[], modelId: string) {
+    const { request, result } = await executeRequest(page, panel);
+    expect(request.model.id).toBe(modelId);
+    expect(request.model.components).toHaveLength(ids.length * 7);
+    expect(request.model.connections).toHaveLength(ids.length * 9);
+    expect(request.model.observations.map(({ component }) => component)).toEqual(ids.map(id => `${id}-N`));
+    expect(request.model.components.find(atom => atom.id === 'C11-N')?.parameters.X).toBe(120);
+    expect(request.model.components.find(atom => atom.id === 'C11-r')?.parameters.value).toBe(0.42);
+    expect(request.model.components.find(atom => atom.id === 'C11-sum')?.parameters['coeff-1']).toBe(-1 / 330);
+    expect(request.model.components.find(atom => atom.id === 'C01-r')?.parameters.value).toBe(0.35);
+    compareNative(result, request);
+    await expect(slider(panel)).toBeEnabled();
+    await showMonth(panel, result, 0);
+    await showMonth(panel, result, 20);
+    return result;
+  }
+
+  await expect(dimensions).toHaveValue('3');
+  const nineIds = await expectGrid(3);
+  await cell(panel, 'C11').click();
+  await initial('C11').fill('120');
+  await growth('C11').fill('0,42');
+  await capacity('C11').fill('330');
+  const { result: nine } = await executeRequest(page, panel, details('C11').getByRole('button', { name: 'Appliquer et simuler', exact: true }));
+  await showMonth(panel, nine, 20);
+  await cell(panel, 'C01').click();
+  await growth('C01').fill('0,4');
+  await cell(panel, 'C11').click();
+  await compare('C01').check();
+
+  const sixteenIds = await resize(4);
+  await expect(cell(panel, 'C11')).toHaveAttribute('aria-pressed', 'true');
+  await expect(compare('C01')).toBeChecked();
+  await cell(panel, 'C33').click();
+  await expect(initial('C33')).toHaveValue('270');
+  await expect(growth('C33')).toHaveValue('0.35');
+  await expect(capacity('C33')).toHaveValue('300');
+  await compare('C23').check();
+  const sixteen = await checkRun(sixteenIds, 'logistic-sixteen-cells');
+  expect(sixteen.observations.filter(({ component }) => nineIds.includes(component.slice(0, -2)))).toEqual(nine.observations);
+  await expectPlottedSeries(panel, sixteen, ['C01', 'C23', 'C33'], 20);
+
+  const fourIds = await resize(2);
+  await expect(cell(panel, 'C00')).toHaveAttribute('aria-pressed', 'true');
+  await expect(compare('C23')).toHaveCount(0);
+  await expect(compare('C01')).toBeChecked();
+  await cell(panel, 'C01').click();
+  await expect(growth('C01')).toHaveValue('0,4');
+  await expect(panel.locator('[data-pending-cells]')).toHaveAttribute('data-pending-cells', 'C01');
+  await cell(panel, 'C11').click();
+  await expect(initial('C11')).toHaveValue('120');
+  await expect(growth('C11')).toHaveValue('0.42');
+  await expect(capacity('C11')).toHaveValue('330');
+  const four = await checkRun(fourIds, 'logistic-four-cells');
+  expect(four.observations).toEqual(nine.observations.filter(({ component }) => fourIds.includes(component.slice(0, -2))));
+  await expectPlottedSeries(panel, four, ['C01', 'C11'], 20);
+
+  expect(await resize(3)).toEqual(nineIds);
+  await expect(cell(panel, 'C11')).toHaveAttribute('aria-pressed', 'true');
+  const restored = await checkRun(nineIds, fixture.model.id);
+  expect(restored).toEqual(nine);
+  await expectPlottedSeries(panel, restored, ['C01', 'C11'], 20);
+  expect(requests).toHaveLength(4);
 });
 
 test('le curseur et la lecture restent synchronisés jusqu’à la fin et après une relance', async ({ page }) => {

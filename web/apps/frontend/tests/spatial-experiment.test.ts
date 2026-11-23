@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpResult } from '@/lib/api/client';
+import reference from '../../../examples/logistic-nine-cells-v1.json';
 import {
-  spatialApply, spatialCells, spatialChartSamples, spatialDrafts, spatialReading, spatialRequest, spatialTimeline,
-  spatialTrajectories, type SpatialDraft,
+  spatialApply, spatialCells, spatialChartSamples, spatialDrafts, spatialReading, spatialRequest, spatialResize,
+  spatialTimeline, spatialTrajectories, type SpatialDimension, type SpatialDraft,
 } from '@/lib/simulation/spatial-experiment';
 
 const nativeSamples = [
@@ -21,6 +22,31 @@ function nativeResult(observations = nativeSamples): HttpResult {
 }
 
 describe('Expérience logistique spatiale', () => {
+  it.each([
+    [2, 28, 36, ['C00', 'C01', 'C10', 'C11']],
+    [3, 63, 81, ['C00', 'C01', 'C02', 'C10', 'C11', 'C12', 'C20', 'C21', 'C22']],
+    [4, 112, 144, ['C00', 'C01', 'C02', 'C03', 'C10', 'C11', 'C12', 'C13', 'C20', 'C21', 'C22', 'C23', 'C30', 'C31', 'C32', 'C33']],
+  ] as const)('construit la grille de côté %i avec des identifiants stables', (dimension, atoms, connections, ids) => {
+    const request = spatialRequest(dimension);
+    expect(request.model.components).toHaveLength(atoms);
+    expect(request.model.connections).toHaveLength(connections);
+    expect(request.model.observations.map(({ component }) => component)).toEqual(ids.map(id => `${id}-N`));
+    expect(spatialCells(request).map(({ id }) => id)).toEqual(ids);
+    expect(request.model.connections.every(({ from, to }) =>
+      from.component.split('-')[0] === to.component.split('-')[0])).toBe(true);
+    expect(request).toEqual(spatialRequest(dimension));
+    expect(request).not.toHaveProperty('limits');
+  });
+
+  it('reproduit exactement la requête de référence des neuf cellules', () => {
+    expect(spatialRequest(3)).toEqual(reference);
+  });
+
+  it('refuse les dimensions hors domaine et les grilles qui dépasseraient le budget du runner', () => {
+    expect(() => spatialRequest(1 as SpatialDimension)).toThrow(/2 × 2, 3 × 3 ou 4 × 4/);
+    expect(() => spatialRequest(5 as SpatialDimension)).toThrow(/dépasse le budget de taille du runner/);
+  });
+
   it('prépare une requête indépendante et lit les neuf cellules dans l’ordre de la grille', () => {
     const request = spatialRequest();
     const cells = spatialCells(request);
@@ -90,6 +116,33 @@ describe('Expérience logistique spatiale', () => {
 });
 
 describe('Paramètres individuels de l’expérience logistique', () => {
+  it('préserve les paramètres communs à chaque redimensionnement et réinitialise les cellules réintroduites', () => {
+    const applied = spatialApply(spatialRequest(4), {
+      C01: { initial: '49', growth: '0.27', capacity: '49' },
+      C33: { initial: '88', growth: '0.2', capacity: '240' },
+    });
+    if (!applied.ok) throw new Error(applied.message);
+
+    const small = spatialResize(applied.request, applied.cells, 2);
+    expect(small.cells.map(({ id }) => id)).toEqual(['C00', 'C01', 'C10', 'C11']);
+    expect(small.cells.find(({ id }) => id === 'C01')).toMatchObject({ initial: 49, growth: 0.27, capacity: 49 });
+    const large = spatialResize(small.request, small.cells, 4);
+    expect(large.cells.find(({ id }) => id === 'C01')).toEqual(small.cells.find(({ id }) => id === 'C01'));
+    expect(large.cells.find(({ id }) => id === 'C33')).toMatchObject({ initial: 270, growth: 0.35, capacity: 300 });
+    expect(large.request.model.components.find(({ id }) => id === 'C01-sum')?.parameters).toEqual({
+      'coeff-0': 1, 'coeff-1': -1 / 49,
+    });
+    expect(applied.cells.find(({ id }) => id === 'C33')).toMatchObject({ initial: 88, growth: 0.2, capacity: 240 });
+  });
+
+  it('applique et contrôle les budgets de la requête après le changement de dimension', () => {
+    const base = spatialRequest(2);
+    base.limits = { maxComponents: 63, maxPoints: 1818 };
+    const cells = spatialCells(base);
+    expect(spatialResize(base, cells, 3).request.limits).toEqual(base.limits);
+    expect(() => spatialResize(base, cells, 4)).toThrow(/Model size budget exceeded/);
+  });
+
   it('applique les trois valeurs à la seule cellule choisie sans modifier la requête d’origine', () => {
     const base = spatialRequest();
     const cells = spatialCells(base);

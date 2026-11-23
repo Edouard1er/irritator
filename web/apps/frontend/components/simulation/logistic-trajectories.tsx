@@ -5,10 +5,15 @@ import { loadPlotly } from '@/components/charts/trajectory-plot';
 import { spatialChartSamples, spatialReading, type SpatialCell, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
 import styles from './logistic-spatial.module.css';
 
-const colors = ['#4e657b', '#9d4a16', '#14645e', '#83632d', '#7744a2', '#236aad', '#aa3f66', '#507320', '#9d493d'];
+const colors = [
+  ['#4e657b', '#9d4a16', '#14645e', '#8a356d'],
+  ['#83632d', '#7744a2', '#236aad', '#005c8e'],
+  ['#aa3f66', '#507320', '#9d493d', '#675122'],
+  ['#006748', '#813c2f', '#51468e', '#343e47'],
+] as const;
 
 export function logisticSeriesColor(cell: SpatialCell): string {
-  return colors[cell.row * 3 + cell.column] ?? colors[0]!;
+  return colors[cell.row]?.[cell.column] ?? colors[0][0];
 }
 
 export function LogisticTrajectories({ series, time, start, end }: {

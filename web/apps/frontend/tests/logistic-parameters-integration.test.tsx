@@ -155,3 +155,58 @@ it('bloque la saisie invalide, retire le résultat pendant le calcul et conserve
   expect(screen.getByLabelText('Paramètres simulés')).toHaveAttribute('data-initial', '405');
   expect(cell('C11')).toHaveAttribute('data-biomass', '405');
 });
+
+it('conserve les paramètres des cellules communes et attend une nouvelle simulation après redimensionnement', async () => {
+  const fetcher = vi.fn<typeof fetch>(async (_url, options) => completedRun(requestBody(options)));
+  vi.stubGlobal('fetch', fetcher);
+  const { container } = render(<LogisticSpatialExperiment active />);
+  const dimensions = screen.getByRole('combobox', { name: 'Dimensions de la grille' });
+  const slider = screen.getByRole('slider', { name: 'Temps simulé' });
+  const compare = (id: string) => screen.getByRole('checkbox', { name: `Comparer ${id}` });
+
+  fireEvent.click(cell('C11'));
+  changeField(initialLabel, '405');
+  apply();
+  expect(await screen.findByText('Terminé')).toBeVisible();
+  fireEvent.click(cell('C01'));
+  changeField(growthLabel, '0,55');
+  fireEvent.click(cell('C02'));
+  changeField(initialLabel, '175');
+  fireEvent.click(compare('C10'));
+  fireEvent.click(compare('C22'));
+  fireEvent.change(slider, { target: { value: '10' } });
+  expect(slider).toHaveValue('10');
+  expect(dimensions).toHaveValue('3');
+
+  fireEvent.change(dimensions, { target: { value: '2' } });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole('status')).toHaveTextContent('Non lancé');
+  expect(slider).toBeDisabled();
+  expect(slider).toHaveValue('0');
+  expect(screen.queryByRole('img', { name: 'Trajectoires logistiques' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Paramètres simulés')).not.toBeInTheDocument();
+  expect(container.querySelectorAll('[data-cell][data-biomass]')).toHaveLength(0);
+  expect(cell('C00')).toHaveAttribute('aria-pressed', 'true');
+  expect(compare('C10')).toBeChecked();
+  expect(screen.queryByRole('checkbox', { name: 'Comparer C22' })).not.toBeInTheDocument();
+  expect(container.querySelector('[data-pending-cells]')).toHaveAttribute('data-pending-cells', 'C01');
+  fireEvent.click(cell('C01'));
+  expect(field(growthLabel)).toHaveValue('0,55');
+  await launch();
+  const expected = spatialRequest(2);
+  expected.model.components.find(({ id }) => id === 'C11-N')!.parameters.X = 405;
+  expect(requestBody(fetcher.mock.calls[1]![1])).toEqual(expected);
+
+  fireEvent.change(dimensions, { target: { value: '4' } });
+  expect(cell('C01')).toHaveAttribute('aria-pressed', 'true');
+  expect(compare('C22')).not.toBeChecked();
+  fireEvent.click(cell('C02'));
+  expect(field(initialLabel)).toHaveValue('150');
+  fireEvent.click(cell('C11'));
+  expect(field(initialLabel)).toHaveValue('405');
+  fireEvent.click(screen.getByRole('button', { name: 'Restaurer les paramètres initiaux' }));
+  expect(await screen.findByText('Terminé')).toBeVisible();
+  expect(dimensions).toHaveValue('4');
+  expect(requestBody(fetcher.mock.calls[2]![1])).toEqual(spatialRequest(4));
+  expect(container.querySelector('[data-pending-cells]')).toBeNull();
+});
