@@ -142,6 +142,12 @@
 .lake-readings>span,.lake-season{background:#fffffff0;border:1px solid #bdd4da;border-radius:14px;padding:4px 9px;color:#194455;font-size:11px}
 .lake-readings .lake-count{position:static;font-size:12px}
 .lake-season{position:absolute;top:12px;left:12px;font-size:15px;font-weight:700}
+.lake-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.lake-fullscreen-trigger{display:none}
+.lake-fullscreen-controls{position:absolute;top:12px;right:12px;z-index:2;display:flex;align-items:center;gap:8px}
+.lake-fullscreen-controls button{min-height:32px;background:#fffffff0;border-color:#bdd4da;color:#194455;font-size:12px;box-shadow:0 2px 8px #19445518}
+.lake-fullscreen-error{margin-top:8px;font-size:12px;color:var(--error)}
+@media(min-width:1100px){.lake-fullscreen-trigger{display:inline-flex;min-height:28px;padding:4px 8px;font-size:11px}}
 .monthly-catch-chart{position:relative;min-width:0}
 .monthly-catch-chart svg{height:155px;width:100%;display:block}
 .workshop-visuals .biomass-card .workshop-plot{height:185px}
@@ -154,6 +160,13 @@
 .presentation-mode .workshop-visuals .capture-card .workshop-plot{height:clamp(160px,19vh,240px)}
 @media(max-width:1000px){.workshop-visuals{grid-template-columns:minmax(0,1.4fr) minmax(300px,1fr)}}
 @media(max-width:720px){.workshop-visuals{grid-template-columns:minmax(0,1fr);grid-template-areas:"lake" "biomass" "monthly"}.workshop-visuals .lake-illustration,.presentation-mode .workshop-visuals .lake-illustration{height:330px;min-height:330px;flex:auto}.workshop-visuals .capture-card .workshop-plot{height:230px}.workshop-visuals .biomass-card .workshop-plot,.presentation-mode .workshop-visuals .biomass-card .workshop-plot{height:260px}.monthly-catch-chart svg,.presentation-mode .monthly-catch-chart svg{height:202px}.lake-readings{left:6px;right:6px;bottom:6px}.lake-readings>span{font-size:10px;padding:3px 6px}.lake-readings .lake-count{font-size:11px}}
+.lake-card:fullscreen{position:fixed;inset:0;display:block;width:100%;height:100%;min-width:0;min-height:0;max-width:none;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#5eabb5;overflow:hidden}
+.lake-card:fullscreen::backdrop{background:#5eabb5}
+.lake-card:fullscreen .lake-card-heading{display:none}
+.lake-card:fullscreen .lake-illustration{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;border:0;border-radius:0;box-shadow:none;flex:none}
+.lake-card:fullscreen .lake-readings{bottom:16px;left:16px;right:16px}
+.lake-card:fullscreen .lake-season{top:16px;left:16px}
+.lake-card:fullscreen .lake-fullscreen-error{position:absolute;top:56px;right:12px;max-width:400px;z-index:2;padding:8px 12px;border-radius:6px;background:#fffffff0}
 
 /* Fishing practice controls stay scoped to the existing conditions editor. */
 .conditions-editor .condition-controls{grid-template-columns:repeat(3,minmax(0,1fr))}

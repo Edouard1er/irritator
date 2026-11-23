@@ -9,7 +9,7 @@ import type {Trajectory} from '@/lib/simulation/trajectory';
 const fixture=()=>structuredClone(source) as unknown as RunRequest;
 describe('Temporal model and exact fleet composition',()=>{
   it.each([[0,1,'Printemps'],[2.999,3,'Printemps'],[3,4,'Été'],[6,7,'Automne'],[9,10,'Hiver'],[12,1,'Printemps'],[15,4,'Été'],[25,2,'Printemps']] as const)('calendar at %s', (time,month,name)=>{expect(seasonAt(time)).toMatchObject({month,name});});
-  it('computes salinity growth and signed precipitation influence',()=>{
+  it('computes turbidity growth and signed precipitation influence',()=>{
     const p={...defaultConditions,S:5,Sopt:3,ks:.2,P:8,betaP:-.5};
     expect(ratesAt(p,3).r).toBeCloseTo(.35*Math.exp(-.8),14);
     expect(ratesAt(p,3).q).toBeCloseTo(.001*Math.exp(-.4),14);

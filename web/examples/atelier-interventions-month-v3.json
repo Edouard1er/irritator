@@ -358,7 +358,7 @@
           "catchability": "1/(effort*month)",
           "provenance": {
             "basis": "workshop-convention",
-            "note": "Modèle pédagogique en tonnes et mois : N0=150 t, K=300 t, r0=0.35/mois, q0=0.001/(unité effort.mois). Saisons et réponses à la pluie et à la salinité : hypothèses illustratives non calibrées pour le lac de Guiers. Aucune conversion d’échelle historique n’est revendiquée."
+            "note": "Modèle pédagogique en tonnes et mois : N0=150 t, K=300 t, r0=0.35/mois, q0=0.001/(unité effort.mois). Saisons et réponses à la pluie et à la turbidité : hypothèses illustratives non calibrées pour le lac de Guiers. Aucune conversion d’échelle historique n’est revendiquée."
           }
         }
       }
@@ -450,6 +450,6 @@
     },
     "fleetHistory": [],
     "interventions": [],
-    "provenance": "Calendrier et réponses environnementales pédagogiques configurables, non calibrés pour le lac de Guiers. Indices pluie et salinité illustratifs. Recalcul DEVS/QSS3 depuis l’origine."
+    "provenance": "Calendrier et réponses environnementales pédagogiques configurables, non calibrés pour le lac de Guiers. Indices pluie et turbidité illustratifs. Recalcul DEVS/QSS3 depuis l’origine."
   }
 }

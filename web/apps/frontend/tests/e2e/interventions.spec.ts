@@ -12,12 +12,12 @@ test('real engine: t=10 intervention, synchronized rain/fleet, comparison and ex
   for(const [time,season] of [[3,'Été'],[6,'Automne'],[9,'Hiver'],[12,'Printemps']] as const){await input(page,'Position temporelle',n.findIndex((p:any)=>Math.abs(p.time-time)<1e-9));await expect(page.locator('canvas')).toHaveAttribute('data-season',season);}
   await input(page,'Position temporelle',n.findIndex((p:any)=>Math.abs(p.time-10)<1e-9));await expect(page.getByLabel('Temps courant')).toContainText('t = 10 / 24');
   await page.locator('.environment-strip').getByRole('button',{name:'Personnaliser',exact:true}).click();await expect(page.getByRole('button',{name:'Appliquer à partir du mois 10',exact:true})).toBeVisible();await expect(page.getByLabel('Position temporelle')).toBeDisabled();
-  await page.getByLabel('Sorties par semaine',{exact:true}).fill('8');await input(page,'Pluie',8);await input(page,'Salinité',6);await input(page,'Accessibilité',70);
+  await page.getByLabel('Sorties par semaine',{exact:true}).fill('8');await input(page,'Pluie',8);await input(page,'Turbidité',6);await input(page,'Accessibilité',70);
   await page.screenshot({path:path.join(evidence,'01-edit-conditions.png'),fullPage:true});
   const pending=page.waitForResponse(r=>r.url().endsWith('/api/v1/simulations/run')&&r.request().method()==='POST');await page.getByRole('button',{name:'Appliquer à partir du mois 10',exact:true}).click();const response=await pending,modified=await response.json(),request=response.request().postDataJSON();expect(response.status(),JSON.stringify(modified)).toBe(200);
   await expect(page.locator('[data-resume-time]')).toHaveAttribute('data-resume-time','10');await page.getByRole('button',{name:'Pause',exact:true}).click();
   await input(page,'Position temporelle',n.findIndex((p:any)=>Math.abs(p.time-10)<1e-9));
-  await expect(page.locator('canvas')).toHaveAttribute('data-rain','8');await expect(page.locator('canvas')).toHaveAttribute('data-salinity','6');await expect(page.locator('canvas')).toHaveAttribute('data-effort','300');
+  await expect(page.locator('canvas')).toHaveAttribute('data-rain','8');await expect(page.locator('canvas')).toHaveAttribute('data-turbidity','6');await expect(page.locator('canvas')).toHaveAttribute('data-effort','300');
   expect(request.temporal.interventions.map((x:any)=>x.parameter)).toEqual(['S','P','a','E']);for(const row of request.temporal.interventions){expect(row.time).toBe(10);expect(row.scenario).toBe('atelier:lake');expect(row.provenance).toContain('atelier');}
   const nextN=modified.observations.find((o:any)=>o.component==='lake/N').samples,nextC=modified.observations.find((o:any)=>o.component==='lake/C').samples;
   for(const point of n.filter((p:any)=>p.time<=10)){const next=nextN.find((p:any)=>p.time===point.time);expect(Math.abs(next.value-point.value)).toBeLessThan(1e-7);}

@@ -11,8 +11,8 @@ function start(request=fixture(),history:PracticeHistory=initializePracticeHisto
 }
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label,{exact:true}),{target:{value}});
 describe('Fishing practice in the existing inline conditions editor (UI-01–07)',()=>{
-  it('preserves rain, salinity, access and exposes live model effort as an output, never an input',()=>{
-    start();expect(screen.getByLabelText('Sorties par semaine')).toHaveValue(4);for(const label of ['Pluie','Salinité','Accessibilité'])expect(screen.getByLabelText(label,{exact:true})).toBeInTheDocument();
+  it('preserves rain, turbidity, access and exposes live model effort as an output, never an input',()=>{
+    start();expect(screen.getByLabelText('Sorties par semaine')).toHaveValue(4);for(const label of ['Pluie','Turbidité','Accessibilité'])expect(screen.getByLabelText(label,{exact:true})).toBeInTheDocument();
     const output=screen.getByLabelText('Effort calculé pour le modèle');expect(output.tagName).toBe('OUTPUT');expect(output).toHaveTextContent('150 unités d’effort du modèle');
     expect(screen.queryByLabelText('Effort souhaité')).not.toBeInTheDocument();expect(screen.queryByText('Composition des pirogues')).not.toBeInTheDocument();
     change('Sorties par semaine','8');expect(output).toHaveTextContent('300');expect(screen.getByText(/× 2 par rapport/)).toBeInTheDocument();
@@ -42,7 +42,17 @@ describe('Fishing practice in the existing inline conditions editor (UI-01–07)
   });
   it('keeps scientific conditions available and refuses submission during recalculation',()=>{
     const {onApply}=start(fixture(),undefined,true,true);expect(screen.getByLabelText('Influence de la pluie βp')).toBeDisabled();
+    expect(screen.getByLabelText('Turbidité optimale Sopt')).toBeDisabled();
     expect(screen.getByLabelText('Nombre de pirogues')).toBeDisabled();fireEvent.submit(screen.getByRole('form'));expect(onApply).not.toHaveBeenCalled();
+  });
+  it('submits turbidity through the existing S and Sopt contract without renaming saved data',()=>{
+    const {request,onApply}=start(fixture(),undefined,true);
+    change('Turbidité','6');change('Turbidité optimale Sopt','4');fireEvent.submit(screen.getByRole('form'));
+    const submitted=onApply.mock.calls[0]![0];
+    expect(submitted).toMatchObject({S:6,Sopt:4});
+    expect(Object.keys(submitted).sort()).toEqual(Object.keys(request.temporal!.parameters).sort());
+    expect(request.temporal!.parameters.S).toBe(3);
+    expect(screen.getByText(/Pluie et turbidité : indices pédagogiques de 0 à 10/)).toBeInTheDocument();
   });
   it('states reference convention, nominal unit, sidecar export limitation and technical allocation distinction',()=>{
     const {container}=start();expect(container.querySelector('.practice-result')).toHaveTextContent('6 933,33 m·h/mois');

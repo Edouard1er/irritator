@@ -30,7 +30,7 @@ scénario précédent, la pratique appliquée précédente et la lecture en paus
 Les interventions futures gardent leur valeur absolue ; une modification au même
 instant remplace le précédent choix.
 
-Pluie, salinité, accessibilité, réglages scientifiques, vues pêcheur/scientifique,
+Pluie, turbidité, accessibilité, réglages scientifiques, vues pêcheur/scientifique,
 alertes, son, graphiques, comparaison initiale, commandes temporelles et rendu du
 lac gardent leur chaîne existante. Le résumé contextuel identifie l’effort calculé
 et présente d’abord la pratique en lecture pêcheur.

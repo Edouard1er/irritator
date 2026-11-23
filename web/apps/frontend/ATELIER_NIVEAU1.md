@@ -24,7 +24,7 @@ données conservent la valeur numérique native. Le Canvas unique garde ses posi
 déterministes et ses transitions d’opacité ; pause et mouvement réduit figent
 les pixels, hors changement explicite de données ou de taille.
 
-Les paragraphes sous le lac et la légende de salinité ajoutée en CSS sont supprimés.
+Les paragraphes sous le lac et la légende de turbidité ajoutée en CSS sont supprimés.
 Restent le titre, la biomasse et, si connue, une petite pastille d’accessibilité.
 Les précisions de provenance, les équations et les conventions restent dans la
 lecture Scientifique et les métadonnées JSON. L’édition Pêcheur conserve les
@@ -165,7 +165,7 @@ Le mois est 1+floor(t)%12. Printemps : mois 1–3 ; été : 4–6 ; automne : 7�
 hiver : 10–12. Les événements sont à 3, 6, 9, 12, 15… dans l’horizon simulé.
 Ce calendrier et les réponses environnementales sont **des hypothèses pédagogiques
 non calibrées**, sans description climatique validée du lac de Guiers. Le ciel,
-les particules saisonnières, la pluie et la palette bleu→ocre de salinité sont
+les particules saisonnières, la pluie et la palette bleu→ocre de turbidité sont
 illustratifs ; la légende le précise. La biomasse reste globale au lac.
 
 ### Nouvelle structure JSON v3 facultative
@@ -313,7 +313,7 @@ Les tests couvrent calendrier sur plusieurs cycles et frontières, formules r/q 
 proportions, composition manuelle incohérente, historique simultané/réordonné,
 insertion dans le passé, import/export v3, isolation de la cible et anciens projets.
 La recette Chrome vérifie l’application à t=10, la reprise, les observations avant X,
-la flotte/pluie/salinité au curseur, les barres mensuelles, les repères et la référence,
+la flotte/pluie/turbidité au curseur, les barres mensuelles, les repères et la référence,
 l’export exact de l’historique, les coefficients scientifiques, le mobile et un refus
 HTTP conservant la pause. Elle vérifie aussi la préparation d’un vrai scénario E=260,
 q0=0,0008 sans inférer ses facteurs de son numéro, et les sept parcours des itérations

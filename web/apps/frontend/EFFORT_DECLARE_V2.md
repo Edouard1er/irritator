@@ -111,7 +111,7 @@ Après modification : **337 tests frontend / 29 fichiers**, **101 tests API** et
 | 11 | Historique natif 150→300→100, compilateur natif inchangé, q inchangé, observations et captures mensuelles égales à l’ancien oracle |
 | 12 | Provenance calculée des nouvelles interventions E ; conditions directement réglées distinguées |
 
-Les parcours régressifs existants couvrent pluie/salinité/accessibilité, comparaison initiale et marqueurs, historique/export, vues pêcheur/scientifique, seuil critique et alarmes sonores, pause/reprise, échec API et maintien de la trajectoire. Aucun solveur biologique JavaScript n’a été ajouté.
+Les parcours régressifs existants couvrent pluie/turbidité/accessibilité, comparaison initiale et marqueurs, historique/export, vues pêcheur/scientifique, seuil critique et alarmes sonores, pause/reprise, échec API et maintien de la trajectoire. Aucun solveur biologique JavaScript n’a été ajouté.
 
 Dans la preuve historique, les dates réelles sont `3.800000000000002` et `10.29999999999998`, sans arrondi dans les interventions. Les **495 observations** sont identiques à l’oracle natif antérieur avec **tolérance zéro** : N 241, C 241, r 8, q 1, a 1, E 3. Les captures mensuelles sont aussi identiques. Le préfixe antérieur à la première intervention reste comparé à l’état initial avec la tolérance préexistante `1e-7`. Les tests unitaires couvrent également exactement 3,8 et 10,3 mois.
 
