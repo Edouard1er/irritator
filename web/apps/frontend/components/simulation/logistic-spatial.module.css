@@ -177,6 +177,31 @@
 .tileValue small { font-size: 12px; letter-spacing: 0; }
 .constant { font-size: 11px; font-weight: 600; color: #34545b; }
 
+.lakeFigure {
+  --lake-low: #e3f3ed;
+  --lake-high: #2e9a87;
+  margin: 0;
+  text-align: center;
+}
+.lakeGrid { display: block; width: 100%; height: clamp(350px, 49vw, 540px); }
+.lakeFigure figcaption { margin-top: 7px; color: var(--muted); font-size: 12px; }
+.lakeOutline { stroke: #3b6665; stroke-width: 1px; pointer-events: none; }
+.lakeCell { fill: #edf3f3; stroke: #477a74; stroke-width: 1px; cursor: pointer; }
+.lakeCell[data-biomass] { fill: color-mix(in srgb, var(--lake-high) var(--lake-saturation), var(--lake-low)); }
+.lakeCell[aria-pressed="true"] { stroke: #143f43; stroke-width: 3px; }
+.lakeCell:hover, .lakeCell:focus-visible { stroke: #87480e; stroke-width: 3px; outline: none; }
+.lakeScale {
+  display: flex;
+  justify-content: space-between;
+  max-width: 265px;
+  margin: 5px auto 0;
+  padding-top: 6px;
+  border-top: 6px solid transparent;
+  border-image: linear-gradient(90deg, var(--lake-low), var(--lake-high)) 1;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .experiment [data-tone="unavailable"] { --tile-fill: #f5f8f8; --tile-border: #d5e2e1; }
 .experiment [data-tone="zero"] { --tile-fill: #eef2f5; --tile-border: #cbd8e1; }
 .experiment [data-tone="low"] { --tile-fill: #fff0cf; --tile-border: #e8cf91; }

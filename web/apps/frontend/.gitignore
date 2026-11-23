@@ -7,3 +7,4 @@ test-results/
 .env*.local
 .npm-cache/
 public/vendor/
+/public/geography/lac-de-guiers.hydrolakes.geojson

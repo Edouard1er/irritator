@@ -4,10 +4,12 @@ import { Pause, Play, RotateCcw } from 'lucide-react';
 import type { RunRequest } from '@contracts';
 import { errorText, runSimulation } from '@/lib/api/client';
 import {
-  constantDomain, constantDomainCell, spatialApply, spatialCells, spatialDimensions, spatialDrafts, spatialReading,
+  constantDomain, constantDomainCell, lakeDomain, lakeMeshFromGeoJson,
+  spatialApply, spatialCells, spatialDimensions, spatialDrafts, spatialReading,
   spatialRequest, spatialResize, spatialTimeline, spatialTotals, spatialTrajectories,
-  type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialMode, type SpatialTrajectory,
+  type LakeMesh, type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialMode, type SpatialTrajectory,
 } from '@/lib/simulation/spatial-experiment';
+import { LogisticLakeGrid } from './logistic-lake-grid';
 import { LogisticTrajectories, LogisticTrajectoryPlot, logisticSeriesColor } from './logistic-trajectories';
 import styles from './logistic-spatial.module.css';
 
@@ -15,6 +17,8 @@ const biomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
 const tileBiomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
 const month = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 2 });
+const wetPercent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumSignificantDigits: 5 });
+const surface = new Intl.NumberFormat('fr-FR', { maximumSignificantDigits: 5 });
 const legend = [
   ['zero', '0 %'],
   ['low', '0 < B/K < 50 %'],
@@ -25,7 +29,7 @@ const legend = [
 
 type Phase =
   | { status: 'idle' | 'running' }
-  | { status: 'completed'; grids: Map<SpatialDimension, SpatialTrajectory[]> }
+  | { status: 'completed'; grids: Map<Grid, SpatialTrajectory[]> }
   | { status: 'error'; message: string };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
 const beginning = { tick: 0, playing: false, started: false };
@@ -42,7 +46,10 @@ const parameterFields = [
   ['capacity', 'Capacité K (t)'],
 ] as const;
 
-type Configuration = { dimension: SpatialDimension; request: RunRequest; cells: SpatialCell[] };
+type Grid = SpatialDimension | 'lake';
+type Configuration = { request: RunRequest; cells: SpatialCell[] } & (
+  { dimension: SpatialDimension } | { dimension: 'lake'; mesh: LakeMesh; wetCells: ReturnType<typeof lakeDomain>['cells'] }
+);
 type Validation = { cell: string; message: string; fields?: Partial<Record<keyof SpatialDraft, string>> | undefined };
 
 function nominalConfiguration(dimension: SpatialDimension, mode: SpatialMode): Configuration {
@@ -65,7 +72,8 @@ function ratioColor(ratio: number | undefined) {
 }
 
 export function LogisticSpatialExperiment({ active }: { active: boolean }) {
-  const [mode, setMode] = useState<SpatialMode>('independent');
+  const [mode, setMode] = useState<SpatialMode | 'lake'>('independent');
+  const [lakeVisited, setLakeVisited] = useState(false);
   return <section className={styles.experiment} aria-labelledby="logistic-spatial-heading">
     <header className={styles.heading}>
       <div>
@@ -74,20 +82,62 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
       </div>
       <label className={styles.dimensions}>
         Mode de l’expérience
-        <select value={mode} onChange={event => setMode(event.currentTarget.value === 'constant' ? 'constant' : 'independent')}>
+        <select value={mode} onChange={event => {
+          const value = event.currentTarget.value;
+          if (value === 'lake') setLakeVisited(true);
+          setMode(value === 'constant' || value === 'lake' ? value : 'independent');
+        }}>
           <option value="independent">Populations indépendantes</option>
           <option value="constant">Domaine constant</option>
+          <option value="lake">Silhouette du lac</option>
         </select>
       </label>
     </header>
     <SpatialExperimentMode mode="independent" visible={mode === 'independent'} active={active && mode === 'independent'} />
     <SpatialExperimentMode mode="constant" visible={mode === 'constant'} active={active && mode === 'constant'} />
+    {lakeVisited && <LakeExperiment visible={mode === 'lake'} active={active && mode === 'lake'} />}
   </section>;
 }
 
-function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; visible: boolean; active: boolean }) {
+type Visibility = { visible: boolean; active: boolean };
+type LakeConfiguration = Extract<Configuration, { dimension: 'lake' }>;
+
+function LakeExperiment({ visible, active }: Visibility) {
+  const [configuration, setConfiguration] = useState<LakeConfiguration>();
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch('/geography/lac-de-guiers.hydrolakes.geojson', { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const mesh = lakeMeshFromGeoJson(await response.json());
+        const { request, cells: wetCells } = lakeDomain(mesh.cells);
+        if (!controller.signal.aborted) {
+          setConfiguration({ dimension: 'lake', mesh, wetCells, request, cells: spatialCells(request) });
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+    return () => controller.abort();
+  }, [attempt]);
+  if (configuration) return <SpatialExperimentMode mode="lake" lakeConfiguration={configuration} visible={visible} active={active} />;
+  if (!visible) return null;
+  return error ? <>
+    <p className={styles.error} role="alert">Chargement du contour impossible · {error}</p>
+    <button onClick={() => { setError(''); setAttempt(value => value + 1); }}>Recharger le contour</button>
+  </> : <p role="status">Chargement du contour HydroLAKES…</p>;
+}
+
+function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Visibility & (
+  { mode: SpatialMode; lakeConfiguration?: never } | { mode: 'lake'; lakeConfiguration: LakeConfiguration }
+)) {
   const fixed = mode === 'constant';
-  const [configuration, setConfiguration] = useState(() => nominalConfiguration(3, mode));
+  const [configuration, setConfiguration] = useState(() => lakeConfiguration ?? nominalConfiguration(3, fixed ? 'constant' : 'independent'));
+  const lake = configuration.dimension === 'lake' ? configuration : undefined;
+  const editable = mode === 'independent';
   const { dimension, request, cells } = configuration;
   const timeline = useMemo(() => spatialTimeline(request), [request]);
   const [drafts, setDrafts] = useState<SpatialDrafts>({});
@@ -95,7 +145,8 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
   const appliedValues = useMemo(() => spatialDrafts(cells), [cells]);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [cursor, setCursor] = useState(beginning);
-  const [selected, setSelected] = useState('C02');
+  const [selected, setSelected] = useState(() => lakeConfiguration?.wetCells.reduce((largest, cell) =>
+    cell.wetFraction > largest.wetFraction ? cell : largest).id ?? 'C02');
   const [compared, setCompared] = useState<string[]>([]);
   const running = useRef(false);
   const lastTick = timeline.length - 1;
@@ -108,10 +159,13 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
     size, name: gridLabel(size), points: spatialTotals(phase.grids.get(size) ?? [], timeline),
     ...aggregateStyles[size],
   })) : [], [fixed, phase, timeline]);
-  const currentTotal = totals.find(({ size }) => size === dimension)?.points[cursor.tick]?.value;
+  const lakeTotals = useMemo(() => lake && phase.status === 'completed'
+    ? spatialTotals(phase.grids.get('lake') ?? [], timeline) : [], [lake, phase, timeline]);
+  const currentTotal = lake ? lakeTotals[cursor.tick]?.value : totals.find(({ size }) => size === dimension)?.points[cursor.tick]?.value;
   const chartSeries = useMemo(() => Array.from(byId.values()).filter(({ cell }) =>
     cell.id === selected || compared.includes(cell.id)), [byId, selected, compared]);
   const selectedCell = cells.find(cell => cell.id === selected)!;
+  const selectedWetCell = lake?.wetCells.find(cell => cell.id === selected);
   const draft = drafts[selected] ?? appliedValues[selected]!;
   const selectedValidation = validation?.cell === selected ? validation : undefined;
   const pending = cells.filter(cell => drafts[cell.id]).map(cell => cell.id);
@@ -139,10 +193,10 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
     setPhase({ status: 'running' });
     let runningDimension = next.dimension;
     try {
-      const grids = new Map<SpatialDimension, SpatialTrajectory[]>();
+      const grids = new Map<Grid, SpatialTrajectory[]>();
       // Run one native request at a time against the same API used by the independent mode.
       const configurations = fixed ? spatialDimensions.map(size =>
-        size === next.dimension ? next : nominalConfiguration(size, mode)) : [next];
+        size === next.dimension ? next : nominalConfiguration(size, 'constant')) : [next];
       for (const { dimension, request, cells } of configurations) {
         runningDimension = dimension;
         const result = await runSimulation(request);
@@ -152,7 +206,8 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
       if (appliedCell) setDrafts(previous => withoutDraft(previous, appliedCell));
       setPhase({ status: 'completed', grids });
     } catch (cause) {
-      setPhase({ status: 'error', message: fixed ? `Grille ${gridLabel(runningDimension)} · ${errorText(cause)}` : errorText(cause) });
+      setPhase({ status: 'error', message: fixed && runningDimension !== 'lake'
+        ? `Grille ${gridLabel(runningDimension)} · ${errorText(cause)}` : errorText(cause) });
     } finally {
       running.current = false;
     }
@@ -169,7 +224,7 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
   }
 
   function apply() {
-    if (running.current) return;
+    if (dimension === 'lake' || running.current) return;
     const result = spatialApply(request, { [selected]: draft }, cells);
     if (!result.ok) {
       setValidation({ cell: selected, fields: result.errors[selected], message: result.message });
@@ -184,7 +239,7 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
     if (!nextDimension || nextDimension === dimension || running.current) return;
 
     try {
-      const next = fixed ? nominalConfiguration(nextDimension, mode) : spatialResize(request, cells, nextDimension);
+      const next = fixed ? nominalConfiguration(nextDimension, 'constant') : spatialResize(request, cells, nextDimension);
       const activeIds = new Set(next.cells.map(cell => cell.id));
       setConfiguration({ dimension: nextDimension, ...next });
       setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => activeIds.has(id))));
@@ -202,8 +257,8 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
   }
 
   function restore() {
-    if (running.current) return;
-    const nominal = nominalConfiguration(dimension, mode);
+    if (dimension === 'lake' || running.current) return;
+    const nominal = nominalConfiguration(dimension, 'independent');
     setConfiguration(nominal);
     setDrafts({});
     setValidation(undefined);
@@ -221,7 +276,7 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
   return <>
     <div className={styles.runActions}>
       <span className={styles.status} data-phase={phase.status} role="status">{statusLabel[phase.status]}</span>
-      {!fixed && <button onClick={restore} disabled={phase.status === 'running'}>
+      {editable && <button onClick={restore} disabled={phase.status === 'running'}>
         <RotateCcw size={15} aria-hidden="true" /> Restaurer les paramètres initiaux
       </button>}
       <button className="primary" onClick={() => void run(configuration)} disabled={phase.status === 'running'}
@@ -269,47 +324,54 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
           <h2 id="logistic-spatial-grid">Biomasse par cellule</h2>
           <span>Tonnes</span>
         </div>
-        <label className={styles.dimensions}>
+        {!lake && <label className={styles.dimensions}>
           Dimensions de la grille
           <select value={dimension} disabled={phase.status === 'running'} onChange={event => changeDimension(event.currentTarget.value)}>
             {spatialDimensions.map(size => <option key={size} value={size}>{gridLabel(size)}</option>)}
           </select>
-        </label>
-        {fixed && <dl className={styles.domainMetrics} aria-label="Domaine de la grille">
+        </label>}
+        {(fixed || lake) && <dl className={styles.domainMetrics} aria-label="Domaine de la grille">
           <div><dt>Surface totale</dt><dd>{biomass.format(constantDomain.area)} km²</dd></div>
-          <div><dt>Surface par cellule</dt><dd>{biomass.format(constantDomainCell(dimension).area)} km²</dd></div>
+          {dimension === 'lake'
+            ? <div><dt>Cellules humides</dt><dd>{cells.length}</dd></div>
+            : <div><dt>Surface par cellule</dt><dd>{biomass.format(constantDomainCell(dimension).area)} km²</dd></div>}
           <div><dt>Capacité totale</dt><dd>{biomass.format(constantDomain.area * constantDomain.capacityDensity)} t</dd></div>
           <div><dt>Biomasse totale</dt><dd data-total-biomass={currentTotal ?? undefined}>
             {currentTotal == null ? (ready ? 'Point absent' : '—') : biomass.format(currentTotal) + ' t'}
           </dd></div>
         </dl>}
-        <div className={styles.grid} data-dimension={dimension}>
-          {cells.map(cell => {
-            const trajectory = byId.get(cell.id);
-            const reading = trajectory ? spatialReading(trajectory, time) : null;
-            return <button className={styles.tile} key={cell.id} aria-label={cell.id} aria-pressed={selected === cell.id}
-              aria-describedby={'logistic-spatial-value-' + cell.id}
-              data-cell={cell.id} data-tone={ratioColor(reading?.ratio)} data-biomass={reading?.value}
-              data-pending={drafts[cell.id] ? 'true' : undefined}
-              data-observed-time={reading?.time} data-source={reading?.source}
-              title={reading ? reading.value + ' t' : undefined} onClick={() => setSelected(cell.id)}>
-              <span className={styles.tileTop}><strong>{cell.id}</strong>
-                {reading && <span>{percent.format(reading.ratio)}</span>}
-              </span>
-              <span className={styles.tileValue} id={'logistic-spatial-value-' + cell.id}>
-                {reading ? <>{(fixed ? tileBiomass : biomass).format(reading.value)} <small>t</small></> : ready ? 'Point absent' : '—'}
-              </span>
-              {trajectory?.constant && <span className={styles.constant}>Équilibre</span>}
-            </button>;
-          })}
-        </div>
-        <div className={styles.legend} aria-label="Légende du rapport biomasse sur capacité">
-          <strong>Rapport B/K</strong>
-          <ul>{legend.map(([color, text]) => <li key={color}><i aria-hidden="true" data-tone={color} />{text}</li>)}</ul>
-          <p>{fixed
-            ? 'La surface est répartie également entre les cellules. Les densités initiale et de capacité sont de 150 et 300 t/km².'
-            : 'Chaque cellule a sa propre capacité K. Ajouter des cellules augmente la capacité totale.'}</p>
-        </div>
+        {lake ? <>
+          <LogisticLakeGrid mesh={lake.mesh} cells={lake.wetCells} trajectories={byId} time={time} selected={selected} select={setSelected} />
+          <p className={styles.coverage}>Les 9 km² fictifs sont répartis selon la fraction humide des cases dans la projection locale.</p>
+        </> : <>
+          <div className={styles.grid} data-dimension={dimension}>
+            {cells.map(cell => {
+              const trajectory = byId.get(cell.id);
+              const reading = trajectory ? spatialReading(trajectory, time) : null;
+              return <button className={styles.tile} key={cell.id} aria-label={cell.id} aria-pressed={selected === cell.id}
+                aria-describedby={'logistic-spatial-value-' + cell.id}
+                data-cell={cell.id} data-tone={ratioColor(reading?.ratio)} data-biomass={reading?.value}
+                data-pending={drafts[cell.id] ? 'true' : undefined}
+                data-observed-time={reading?.time} data-source={reading?.source}
+                title={reading ? reading.value + ' t' : undefined} onClick={() => setSelected(cell.id)}>
+                <span className={styles.tileTop}><strong>{cell.id}</strong>
+                  {reading && <span>{percent.format(reading.ratio)}</span>}
+                </span>
+                <span className={styles.tileValue} id={'logistic-spatial-value-' + cell.id}>
+                  {reading ? <>{(fixed ? tileBiomass : biomass).format(reading.value)} <small>t</small></> : ready ? 'Point absent' : '—'}
+                </span>
+                {trajectory?.constant && <span className={styles.constant}>Équilibre</span>}
+              </button>;
+            })}
+          </div>
+          <div className={styles.legend} aria-label="Légende du rapport biomasse sur capacité">
+            <strong>Rapport B/K</strong>
+            <ul>{legend.map(([color, text]) => <li key={color}><i aria-hidden="true" data-tone={color} />{text}</li>)}</ul>
+            <p>{fixed
+              ? 'La surface est répartie également entre les cellules. Les densités initiale et de capacité sont de 150 et 300 t/km².'
+              : 'Chaque cellule a sa propre capacité K. Ajouter des cellules augmente la capacité totale.'}</p>
+          </div>
+        </>}
       </section>
 
       {fixed && <section className={styles.panel} aria-labelledby="logistic-aggregate-heading">
@@ -340,7 +402,13 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
           <h2>Cellule {selectedCell.id}</h2>
           {selectedTrajectory?.constant && <span className={styles.equilibriumLabel}>Équilibre dédupliqué</span>}
         </div>
-        {fixed ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
+        {selectedWetCell ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
+          <div><dt>Fraction humide</dt><dd>{wetPercent.format(selectedWetCell.wetFraction)}</dd></div>
+          <div><dt>Surface fictive</dt><dd>{surface.format(selectedWetCell.area)} km²</dd></div>
+          <div><dt>Biomasse initiale N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
+          <div><dt>Taux de croissance r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
+          <div><dt>Capacité de charge K</dt><dd>{biomass.format(selectedCell.capacity)} t</dd></div>
+        </dl> : fixed ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
           <div><dt>N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
           <div><dt>r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
           <div><dt>K</dt><dd>{biomass.format(selectedCell.capacity)} t</dd></div>
@@ -363,7 +431,7 @@ function SpatialExperimentMode({ mode, visible, active }: { mode: SpatialMode; v
           {selectedValidation && <p className={styles.fieldError} role="alert">{selectedValidation.message}</p>}
           <button type="submit" className="primary" disabled={phase.status === 'running'}>Appliquer et simuler</button>
         </form>}
-        {!fixed && simulated && <>
+        {editable && simulated && <>
           <h3 className={styles.simulatedHeading}>Paramètres simulés</h3>
           <dl className={styles.parameters} aria-label="Paramètres simulés" data-simulated-cell={simulated.id}
             data-initial={simulated.initial} data-growth={simulated.growth} data-capacity={simulated.capacity}>

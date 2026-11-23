@@ -10,6 +10,8 @@ const colors = [
   ['#83632d', '#7744a2', '#236aad', '#005c8e'],
   ['#aa3f66', '#507320', '#9d493d', '#675122'],
   ['#006748', '#813c2f', '#51468e', '#343e47'],
+  ['#334787', '#9d3560', '#3a6e73', '#514c27'],
+  ['#985025', '#585985', '#456c2f', '#7b4858'],
 ] as const;
 
 export function logisticSeriesColor(cell: SpatialCell): string {

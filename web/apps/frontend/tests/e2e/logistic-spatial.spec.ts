@@ -450,3 +450,134 @@ test('le domaine constant présente les observations locales et les trois sommes
   await expect(plot).toBeVisible();
   await saveFrame(panel, '04-domaine-constant-t20.png');
 });
+
+test('la silhouette découpe les cellules et rejoue les trajectoires du runner', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1240 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const panel = await openExperiment(page);
+  await page.waitForLoadState('networkidle');
+  const mode = panel.getByRole('combobox', { name: 'Mode de l’expérience' });
+  await mode.selectOption('lake');
+  const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
+  await expect(grid).toHaveAttribute('data-rows', '6');
+  await expect(grid).toHaveAttribute('data-columns', '3');
+  await expect(grid.getByRole('button')).toHaveCount(13);
+  for (const id of ['C00', 'C22', 'C32', 'C41', 'C42']) await expect(cell(panel, id)).toHaveCount(0);
+
+  const source = JSON.parse(readFileSync(new URL('../../data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url), 'utf8'));
+  const rings = source.features[0].geometry.coordinates as [number, number][][];
+  const west = Math.min(...rings[0]!.map(([x]) => x));
+  const south = Math.min(...rings[0]!.map(([, y]) => y));
+  const north = Math.max(...rings[0]!.map(([, y]) => y));
+  const aspect = Math.cos((north + south) / 2 * Math.PI / 180);
+  const projected = rings.map(ring => ring.slice(0, -1).map(([x, y]) => [(x - west) * aspect / (north - south), (north - y) / (north - south)]));
+  const outline = grid.locator('clipPath path');
+  await expect(outline).toHaveAttribute('clip-rule', 'evenodd');
+  const pathRings = (await outline.getAttribute('d'))!.split('Z').filter(Boolean).map(part =>
+    part.slice(1).split('L').map(vertex => vertex.split(',').map(Number)));
+  expect(pathRings.map(ring => ring.length)).toEqual(projected.map(ring => ring.length));
+  expect(pathRings.every((ring, r) => ring.every((vertex, i) => vertex.every((coord, axis) =>
+    Math.abs(coord - projected[r]![i]![axis]!) < 1e-12)))).toBe(true);
+
+  // Probe the SVG hit map on a wet case at water, shore and island positions.
+  await grid.scrollIntoViewIfNeeded();
+  const points = await grid.evaluate((element, rings) => {
+    const svg = element as SVGSVGElement;
+    const target = svg.querySelector<SVGRectElement>('[data-cell="C30"]')!;
+    const { x, y, width, height } = target.getBBox();
+    const transform = svg.getScreenCTM()!;
+    const contains = (ring: number[][], px: number, py: number) => ring.reduce((inside, point, i) => {
+      const [ax, ay] = point as [number, number];
+      const [bx, by] = ring[(i + 1) % ring.length] as [number, number];
+      return (ay > py) !== (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay) ? !inside : inside;
+    }, false);
+    const probes: Record<string, { x: number; y: number; hit: string | null }> = {};
+    for (let row = 1; row < 64; row++) for (let column = 1; column < 64; column++) {
+      const px = x + width * column / 64;
+      const py = y + height * row / 64;
+      const kind = !contains(rings[0]!, px, py) ? 'shore'
+        : rings.slice(1).some(ring => contains(ring, px, py)) ? 'island' : 'water';
+      if (probes[kind]) continue;
+      const screen = new DOMPoint(px, py).matrixTransform(transform);
+      const hit = document.elementFromPoint(screen.x, screen.y)?.closest('[data-cell]')?.getAttribute('data-cell') ?? null;
+      // Skip points where the antialiased boundary can affect hit testing.
+      if (![[-1, 0], [1, 0], [0, -1], [0, 1]].every(([dx, dy]) => {
+        const adjacent = new DOMPoint(screen.x + dx!, screen.y + dy!).matrixTransform(transform.inverse());
+        const side = !contains(rings[0]!, adjacent.x, adjacent.y) ? 'shore'
+          : rings.slice(1).some(ring => contains(ring, adjacent.x, adjacent.y)) ? 'island' : 'water';
+        return side === kind;
+      })) continue;
+      probes[kind] = { x: screen.x, y: screen.y, hit };
+    }
+    return probes;
+  }, projected);
+  expect(points.water?.hit).toBe('C30');
+  expect(points.shore?.hit).toBeNull();
+  expect(points.island?.hit).toBeNull();
+  await page.mouse.click(points.water!.x, points.water!.y);
+  await expect(cell(panel, 'C30')).toHaveAttribute('aria-pressed', 'true');
+  await cell(panel, 'C11').press('Enter');
+  await expect(cell(panel, 'C11')).toHaveAttribute('aria-pressed', 'true');
+  const details = panel.getByRole('region', { name: 'Paramètres de C11', exact: true });
+  await expect(details).toContainText('Fraction humide');
+  await expect(details).toContainText('65,066');
+  await expect(details).toContainText('Surface fictive');
+  await expect(details).toContainText('Biomasse initiale');
+  await expect(details).toContainText('0,35 mois⁻¹');
+  await expect(details).toContainText('Capacité de charge');
+
+  const { request, result } = await executeRequest(page, panel);
+  compareNative(result, request);
+  const ids = result.observations.map(({ component }) => component.slice(0, -2));
+  expect(ids).toHaveLength(13);
+  const renderedIds = await grid.getByRole('button').evaluateAll(elements => elements.map(element => element.getAttribute('data-cell')));
+  expect(renderedIds).toEqual(ids);
+  expect(request.model.components).toHaveLength(91);
+  await panel.getByRole('checkbox', { name: 'Comparer C20', exact: true }).check();
+  const fills = [];
+  const frames = process.env.IRRITATOR_LAKE_BROWSER_EVIDENCE;
+  if (frames) await mkdir(frames, { recursive: true });
+  for (const time of [0, 10, 20]) {
+    await slider(panel).fill(String(time));
+    await expect(grid).toHaveAttribute('data-time', String(time));
+    let sum = 0;
+    for (const id of ids) {
+      const point = expectedAt(result, id, time);
+      sum += point.value;
+      await expect(cell(panel, id)).toHaveAttribute('data-biomass', String(point.value));
+    }
+    await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(sum));
+    await expectPlottedSeries(panel, result, ['C11', 'C20'], time);
+    fills.push(await cell(panel, 'C11').evaluate(element => getComputedStyle(element).fill));
+    if (frames) await panel.screenshot({ path: path.join(frames, `grille-t${time}.png`), animations: 'disabled' });
+  }
+  expect(new Set(fills).size).toBe(3);
+
+  await slider(panel).fill('19.8');
+  await panel.getByRole('button', { name: 'Lire', exact: true }).click();
+  await expect(grid).toHaveAttribute('data-time', '20');
+  await mode.selectOption('constant');
+  await expect(panel.getByRole('button', { name: 'Simuler les trois grilles' })).toBeVisible();
+  await mode.selectOption('independent');
+  await expect(panel.getByRole('combobox', { name: 'Dimensions de la grille' })).toHaveValue('3');
+  await mode.selectOption('lake');
+  await expect(grid).toHaveAttribute('data-time', '20');
+  await expect(cell(panel, 'C11')).toHaveAttribute('aria-pressed', 'true');
+  await expectPlottedSeries(panel, result, ['C11', 'C20'], 20);
+});
+
+test('le contour peut être rechargé après une erreur sans affecter les autres modes', async ({ page }) => {
+  const contour = '**/geography/lac-de-guiers.hydrolakes.geojson';
+  await page.route(contour, route => route.fulfill({ status: 503 }));
+  const panel = await openExperiment(page);
+  const mode = panel.getByRole('combobox', { name: 'Mode de l’expérience' });
+  await mode.selectOption('lake');
+  await expect(panel.getByRole('alert')).toContainText('Chargement du contour impossible');
+  await mode.selectOption('independent');
+  await expect(panel.getByRole('combobox', { name: 'Dimensions de la grille' })).toHaveValue('3');
+  await mode.selectOption('lake');
+  await page.unroute(contour);
+  await panel.getByRole('button', { name: 'Recharger le contour' }).click();
+  await expect(panel.getByRole('group', { name: 'Grille humide du lac de Guiers' }).getByRole('button')).toHaveCount(13);
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+});

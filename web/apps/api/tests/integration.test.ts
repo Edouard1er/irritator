@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
@@ -8,7 +8,8 @@ import { buildApp } from '../src/app.js';
 import { readConfig } from '../src/config/index.js';
 import { ProcessEngine } from '../src/services/engine.js';
 import { ApiError, catalog, validateRequest, type RunRequest, type RunResult } from '../../../packages/contracts/index.js';
-import { spatialRequest } from '../../../examples/logistic-grid.js';
+import { lakeDomain, spatialRequest } from '../../../examples/logistic-grid.js';
+import { lakeMeshFromGeoJson } from '../../../examples/logistic-lake.js';
 import { reference, affine } from './fixtures.js';
 
 test('real TCP HTTP -> Fastify -> C++ -> libirritator scientific campaign',{timeout:60000},async()=>{
@@ -131,6 +132,29 @@ test('constant-domain logistic grids complete through Fastify with all native sa
         initial += samples[0]!.value;
       }
       assert.equal(initial, 1350);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test('lake silhouette publishes only the wet cells through Fastify and the native runner', async () => {
+  const source = JSON.parse(readFileSync(new URL('../../../../apps/frontend/data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url), 'utf8'));
+  const { request, cells } = lakeDomain(lakeMeshFromGeoJson(source).cells);
+  const app = buildApp(readConfig());
+  try {
+    const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
+    assert.equal(response.statusCode, 200, response.body);
+    const result = response.json<RunResult>();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.modelId, request.model.id);
+    assert.equal(result.simulation.finalTime, 20);
+    assert.deepEqual(result.observations.map(({ component }) => component), cells.map(cell => `${cell.id}-N`));
+    for (const [index, { samples }] of result.observations.entries()) {
+      assert.equal(samples.length, 201);
+      assert.equal(samples[0]!.time, 0);
+      assert.ok(Math.abs(samples[0]!.value - cells[index]!.initial) < 1e-12);
+      assert.equal(samples.at(-1)!.time, 20);
     }
   } finally {
     await app.close();

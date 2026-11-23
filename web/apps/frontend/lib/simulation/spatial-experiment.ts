@@ -3,7 +3,8 @@ import type { HttpResult } from '@/lib/api/client';
 import { spatialRequest, type SpatialDimension } from '../../../../examples/logistic-grid';
 
 export { spatialRequest, type SpatialDimension };
-export { constantDomain, constantDomainCell, spatialDimensions, type SpatialMode } from '../../../../examples/logistic-grid';
+export { constantDomain, constantDomainCell, lakeDomain, spatialDimensions, type SpatialMode } from '../../../../examples/logistic-grid';
+export { lakeMeshFromGeoJson, lakeRows, lakeColumns, type LakeMesh } from '../../../../examples/logistic-lake';
 
 type SpatialSample = HttpResult['observations'][number]['samples'][number];
 
@@ -102,7 +103,7 @@ export function spatialCells(request: RunRequest): SpatialCell[] {
     const quantum = atoms.get(component)?.dQ;
     const growth = atoms.get(`${id}-r`)?.value;
     const lossWeight = atoms.get(`${id}-sum`)?.['coeff-1'];
-    if (!/^C[0-3][0-3]-N$/.test(component) || initial === undefined || quantum === undefined ||
+    if (!/^C[0-5][0-3]-N$/.test(component) || initial === undefined || quantum === undefined ||
         growth === undefined || lossWeight === undefined || lossWeight >= 0) {
       throw new Error(`Paramètres de la cellule ${component} indisponibles.`);
     }
