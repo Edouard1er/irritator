@@ -3,9 +3,10 @@ import { ClientError, runSimulation, type HttpResult } from '@/lib/api/client';
 import { spatialRequest, type SpatialDimension } from '../../../../examples/logistic-grid';
 
 export { spatialRequest, type SpatialDimension };
-export { constantDomain, constantDomainCell, lakeDomain, lakeSurfaceAreaKm2, spatialDimensions, type LakeDomain, type SpatialMode } from '../../../../examples/logistic-grid';
-export { clipLakeMesh, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions, type LakeMesh } from '../../../../examples/logistic-lake';
-export { LakeRunError, runLakeSimulation, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
+export { constantDomain, constantDomainCell, lakeSurfaceAreaKm2, spatialDimensions, type LakeDomain, type SpatialMode } from '../../../../examples/logistic-grid';
+export { clipLakeMesh, lakeDistributionId, lakeMaxAlpha, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
+  type LakeDistribution, type LakeMesh } from '../../../../examples/logistic-lake';
+export { LakeRunError, runLakeBatches, type LakePlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
 
 export async function runLakeBatch(request: RunRequest, signal: AbortSignal): Promise<HttpResult> {
   // ENGINE_BUSY is issued before the native process is started.

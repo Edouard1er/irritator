@@ -9,7 +9,7 @@ import { readConfig } from '../src/config/index.js';
 import { ProcessEngine } from '../src/services/engine.js';
 import { ApiError, catalog, validateRequest, type RunRequest, type RunResult } from '../../../packages/contracts/index.js';
 import { lakeDomain, spatialRequest } from '../../../examples/logistic-grid.js';
-import { runLakeSimulation } from '../../../examples/logistic-lake-run.js';
+import { runLakeSimulation } from '../../../examples/logistic-lake-analysis.js';
 import { lakeMeshFromGeoJson, lakeResolutions } from '../../../examples/logistic-lake.js';
 import { reference, affine } from './fixtures.js';
 

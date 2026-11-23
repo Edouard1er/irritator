@@ -1,5 +1,6 @@
 import { parseResult, type RunRequest, type RunResult } from '../packages/contracts/index.js';
 import type { LakeDomain } from './logistic-grid.js';
+import type { LakeMesh } from './logistic-lake.js';
 
 type BatchTrace = {
   modelId: string;
@@ -29,6 +30,9 @@ export type LakeRunTrace = {
   failure?: { modelId: string; elapsedMs: number; message: string; resultBytes?: number };
 };
 
+export type LakeReference = { local: number[][]; total: number[] };
+export type LakePlan = { mesh: LakeMesh; domain: LakeDomain; reference: LakeReference };
+
 export class LakeRunError extends Error {
   constructor(public trace: LakeRunTrace, cause: unknown) {
     super(`Lot ${trace.batches.length + 1}/${trace.plannedBatches} · ${trace.failure!.message}`, { cause });
@@ -41,7 +45,7 @@ function recordError(errors: NumericalErrors, observed: number, expected: number
   errors.maxRelative = Math.max(errors.maxRelative, absolute / expected);
 }
 
-export async function runLakeSimulation(domain: LakeDomain, execute: (request: RunRequest) => Promise<unknown>, options: {
+export async function runLakeBatches(domain: LakeDomain, reference: LakeReference, execute: (request: RunRequest) => Promise<unknown>, options: {
   signal?: AbortSignal;
   onProgress?: (completed: number) => void;
 } = {}) {
@@ -49,11 +53,7 @@ export async function runLakeSimulation(domain: LakeDomain, execute: (request: R
   const { signal, onProgress } = options;
   const { start, end } = parameters.simulation;
   const ticks = Math.round((end - start) / parameters.samplingInterval) + 1;
-  // Analytical reference for diagnostics only. Displayed samples all come from the runner.
-  const ratios = Array.from({ length: ticks }, (_, tick) =>
-    1 / (1 + (parameters.capacityDensity / parameters.initialDensity - 1) * Math.exp(-parameters.growth * tick * parameters.samplingInterval)));
   const totals = new Float64Array(ticks);
-  const totalCapacity = parameters.areaKm2 * parameters.capacityDensity;
   const observations: RunResult['observations'] = [];
   const encoder = new TextEncoder();
   const started = performance.now();
@@ -76,6 +76,7 @@ export async function runLakeSimulation(domain: LakeDomain, execute: (request: R
       const errors = emptyErrors();
       for (const [index, observation] of result.observations.entries()) {
         const cell = members[index]!;
+        const analytical = reference.local[observations.length + index]!;
         const { samples } = observation;
         if (samples.length !== ticks) throw new Error(`Série incomplète pour ${observation.component} (${samples.length}/${ticks} points).`);
         if (Math.abs(samples[0]!.value - cell.initial) > 32 * Number.EPSILON * cell.initial) {
@@ -86,7 +87,8 @@ export async function runLakeSimulation(domain: LakeDomain, execute: (request: R
           if (Math.abs(time - expectedTime) > 32 * Number.EPSILON * Math.max(1, Math.abs(expectedTime))) {
             throw new Error(`Date inattendue pour ${observation.component} à l’indice ${tick}.`);
           }
-          recordError(errors, value, cell.capacity * ratios[tick]!);
+          if (value < 0) throw new Error(`Biomasse négative pour ${observation.component} à l’indice ${tick}.`);
+          recordError(errors, value, analytical[tick]!);
           totals[tick] = totals[tick]! + value;
         }
       }
@@ -113,7 +115,7 @@ export async function runLakeSimulation(domain: LakeDomain, execute: (request: R
   }
 
   const aggregateErrors = emptyErrors();
-  totals.forEach((total, tick) => recordError(aggregateErrors, total, totalCapacity * ratios[tick]!));
+  totals.forEach((total, tick) => recordError(aggregateErrors, total, reference.total[tick]!));
   trace.aggregateErrors = aggregateErrors;
   trace.elapsedMs = performance.now() - started;
   return { observations, trace };

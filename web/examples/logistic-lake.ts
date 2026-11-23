@@ -10,6 +10,12 @@ export const lakeResolutions = [
 ] as const;
 export type LakeResolution = typeof lakeResolutions[number];
 export const lakeResolutionId = ({ rows, columns }: { rows: number; columns: number }) => `${rows}x${columns}`;
+export const lakeMaxAlpha = 0.6;
+export type LakeDistribution = { kind: 'homogeneous' } | { kind: 'gradient'; alpha: number };
+
+export function lakeDistributionId(distribution: LakeDistribution): string {
+  return distribution.kind === 'gradient' ? `gradient-${distribution.alpha}` : distribution.kind;
+}
 
 type Point = readonly [number, number];
 type Ring = readonly Point[];

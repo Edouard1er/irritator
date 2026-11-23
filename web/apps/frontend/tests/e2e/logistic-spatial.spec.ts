@@ -9,6 +9,7 @@ const experiment = 'Expérience logistique spatiale';
 const fixture: RunRequest = JSON.parse(readFileSync(new URL('../../../../examples/logistic-nine-cells-v1.json', import.meta.url), 'utf8'));
 const evidence = process.env.IRRITATOR_LOGISTIC_BROWSER_EVIDENCE;
 const refinementEvidence = process.env.IRRITATOR_LAKE_REFINEMENT_EVIDENCE;
+const heterogeneityEvidence = process.env.IRRITATOR_LAKE_GRADIENT_EVIDENCE;
 const formatBiomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
 const isSimulation = (request: { method(): string; url(): string }) =>
   request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/simulations/run';
@@ -570,7 +571,7 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
 });
 
 test('le contour peut être rechargé après une erreur sans affecter les autres modes', async ({ page }) => {
-  const contour = '**/geography/lac-de-guiers.hydrolakes.geojson';
+  const contour = '**/api/logistic-lake?*';
   await page.route(contour, route => route.fulfill({ status: 503 }));
   const panel = await openExperiment(page);
   const mode = panel.getByRole('combobox', { name: 'Mode de l’expérience' });
@@ -723,4 +724,138 @@ test('les pleins écrans partagent instant, sélection et cadrage avec la grille
     await expect(cell(panel, cellId)).toHaveAttribute('aria-pressed', 'true');
     await expect(slider(panel)).toHaveValue('12');
   }
+});
+
+test('le gradient nord-sud relance les six maillages et compare les observations à 0, 10 et 20 mois', async ({ page }) => {
+  test.setTimeout(240000);
+  await page.setViewportSize({ width: 1440, height: 1850 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const panel = await openExperiment(page);
+  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('lake');
+  const resolution = panel.getByRole('combobox', { name: 'Résolution du lac' });
+  const distribution = panel.getByRole('combobox', { name: 'Distribution biologique' });
+  const intensity = panel.getByRole('slider', { name: 'Intensité du gradient α' });
+  const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
+  const launch = panel.getByRole('button', { name: 'Lancer la simulation', exact: true });
+  const months = [0, 10, 20];
+  const responses: Response[] = [];
+  page.on('response', response => {
+    if (isSimulation(response.request())) responses.push(response);
+  });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  if (heterogeneityEvidence) await mkdir(heterogeneityEvidence, { recursive: true });
+
+  async function run(batchCount: number, modelPrefix: string) {
+    const offset = responses.length;
+    await launch.click();
+    const outcome = panel.locator('[data-phase="completed"], [data-phase="error"]');
+    await expect(outcome).toBeVisible({ timeout: 60000 });
+    expect(await outcome.getAttribute('data-phase'), (await panel.getByRole('alert').allTextContents()).join('\n')).toBe('completed');
+    const observations: RunResult['observations'] = [];
+    const initial: number[] = [];
+    let batches = 0;
+    for (const response of responses.slice(offset)) {
+      if (response.status() === 503) {
+        expect((await response.json()).error.code).toBe('ENGINE_BUSY');
+        continue;
+      }
+      expect(response.status(), await response.text()).toBe(200);
+      const request: RunRequest = response.request().postDataJSON();
+      expect(request.model.id).toBe(`${modelPrefix}-${++batches}`);
+      const result = await response.json() as RunResult & { runId: string };
+      expect(result.runId).toBeTruthy();
+      expect(result.simulation.finalTime).toBe(20);
+      expect(result.simulation.runCalls).toBeGreaterThan(0);
+      expect(result.observations.every(o => o.samples.length === 201)).toBe(true);
+      observations.push(...result.observations);
+      initial.push(...request.model.components.filter(atom => atom.type === 'qss3_integrator').map(atom => atom.parameters.X!));
+    }
+    expect(batches).toBe(batchCount);
+    expect(initial.reduce((sum, value) => sum + value, 0)).toBeCloseTo(45_000, 8);
+    const totals = months.map(instant => observations.reduce((sum, observation) => sum + observation.samples[instant * 10]!.value, 0));
+    return { observations, totals };
+  }
+
+  async function showMonths(totals: number[], size: string, kind: string, capture: boolean) {
+    for (const [index, instant] of months.entries()) {
+      await slider(panel).fill(String(instant));
+      await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(totals[index]));
+      await expect(chart(panel)).toHaveAttribute('data-time', String(instant));
+      if (capture && heterogeneityEvidence) {
+        await expect(panel.getByLabel('Rapport biomasse sur capacité')).toBeInViewport();
+        await expect.poll(() => chart(panel).locator('.js-plotly-plot').evaluate((element, time) =>
+          (element as HTMLElement & { layout?: { shapes?: { x0: number }[] } }).layout?.shapes?.[0]?.x0 === time,
+        instant)).toBe(true);
+        await panel.screenshot({
+          path: path.join(heterogeneityEvidence, `${size}-${kind}-t${instant}.png`), animations: 'disabled',
+        });
+      }
+    }
+  }
+
+  for (const [size, wetCells, batchCount] of [
+    ['6x3', 13, 1], ['12x6', 35, 2], ['18x9', 65, 4], ['24x12', 101, 6], ['36x18', 184, 11], ['48x24', 296, 17],
+  ] as const) {
+    const prefix = `logistic-lake-${size}-proportional`;
+    const capture = size === '6x3' || size === '48x24';
+    await resolution.selectOption(size);
+    await expect(grid.getByRole('button')).toHaveCount(wetCells);
+    let homogeneous: Awaited<ReturnType<typeof run>> | undefined;
+    if (capture) {
+      await distribution.selectOption('homogeneous');
+      homogeneous = await run(batchCount, prefix);
+      await showMonths(homogeneous.totals, size, 'homogene', true);
+    }
+
+    const previousRequests = responses.length;
+    await distribution.selectOption('gradient');
+    await intensity.fill('0.6');
+    await expect(panel.getByText('Gradient biologique synthétique — non calibré')).toBeVisible();
+    expect(responses).toHaveLength(previousRequests);
+    const gradient = await run(batchCount, `${prefix}-g0p6`);
+    expect(gradient.observations).toHaveLength(wetCells);
+    const initialRatios = await grid.getByRole('button').evaluateAll(cells => cells.map(cell => ({
+      ratio: Number(cell.getAttribute('data-biomass-ratio')),
+      fill: getComputedStyle(cell).fill,
+    })));
+    expect(initialRatios[0]!.ratio).toBeGreaterThan(0.5);
+    expect(initialRatios.at(-1)!.ratio).toBeLessThan(0.5);
+    expect(new Set(initialRatios.map(cell => cell.fill)).size).toBeGreaterThan(2);
+    const initialTable = panel.getByRole('row', { name: /Gradient nord-sud/ });
+    for (const [index, total] of gradient.totals.entries()) {
+      await expect(initialTable.getByRole('cell').nth(index)).toHaveAttribute('data-comparison-biomass', String(total));
+      if (homogeneous) await expect(panel.getByRole('row', { name: /Distribution homogène/ }).getByRole('cell').nth(index))
+        .toHaveAttribute('data-comparison-biomass', String(homogeneous.totals[index]));
+    }
+    if (homogeneous) {
+      expect(gradient.totals[0]).toBeCloseTo(homogeneous.totals[0]!, 8);
+      expect(gradient.totals[1]).toBeLessThan(homogeneous.totals[1]!);
+      expect(gradient.totals[2]).toBeLessThan(homogeneous.totals[2]!);
+    }
+    await showMonths(gradient.totals, size, 'gradient', capture);
+    if (size === '6x3') {
+      await intensity.fill('0');
+      const zero = await run(1, prefix);
+      expect(zero).toEqual(homogeneous);
+      await intensity.fill('0.6');
+    }
+  }
+
+  await panel.getByRole('button', { name: 'Plein écran · Carte du lac', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.textContent)).toContain('Gradient biologique synthétique — non calibré');
+  await panel.getByRole('slider', { name: 'Temps en plein écran' }).fill('10');
+  await expect(grid).toHaveAttribute('data-time', '10');
+  await panel.getByRole('button', { name: 'Quitter le plein écran · Carte du lac', exact: true }).click();
+  await expect(slider(panel)).toHaveValue('10');
+
+  const downloading = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Télécharger la trace JSON' }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('lac-de-guiers-48x24-gradient-0.6.json');
+  const trace = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  expect(trace).toMatchObject({ parameters: { rows: 48, columns: 24, distribution: { kind: 'gradient', alpha: 0.6 } },
+    plannedBatches: 17, points: 296 * 201 });
+  expect(trace.aggregateErrors.maxAbsoluteTonnes).toBeLessThan(1);
+  expect(errors).toEqual([]);
 });

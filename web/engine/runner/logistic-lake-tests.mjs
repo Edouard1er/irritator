@@ -6,7 +6,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { caps, parseResult } from '../../dist/packages/contracts/index.js';
 import { lakeDomain } from '../../dist/examples/logistic-grid.js';
 import { lakeMeshFromGeoJson, lakeResolutions } from '../../dist/examples/logistic-lake.js';
-import { LakeRunError, runLakeSimulation } from '../../dist/examples/logistic-lake-run.js';
+import { runLakeSimulation } from '../../dist/examples/logistic-lake-analysis.js';
+import { LakeRunError } from '../../dist/examples/logistic-lake-run.js';
 
 const geojson = readFileSync(new URL('../../apps/frontend/data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url));
 const source = JSON.parse(geojson);
@@ -204,5 +205,127 @@ test('P1.9 — Compare les quanta sur les six grilles et vérifie chaque traject
     const evidence = { runnerSha256: sha256(readFileSync(process.env.IRRITATOR_RUNNER)), geojsonSha256: sha256(geojson),
       node: process.version, runs };
     writeFileSync(process.env.IRRITATOR_LAKE_NATIVE_EVIDENCE, JSON.stringify(evidence, null, 2) + '\n');
+  }
+});
+
+test('P1.10 — Gradient conservatif et reproductible sur les six grilles', async t => {
+  const alpha = 0.6;
+  // Keep the lot 1.9 quantum. Distinct initial ratios exercise other QSS3
+  // trajectories, so their regression bounds are measured independently.
+  const localRelativeTolerance = 7e-4;
+  const aggregateRelativeTolerance = 3e-5;
+  const analyticalByGrid = [];
+  for (const resolution of lakeResolutions) {
+    const mesh = lakeMeshFromGeoJson(source, resolution);
+    const historical = lakeDomain(mesh);
+    const disabled = lakeDomain(mesh, 'proportional', { kind: 'gradient', alpha: 0 });
+    const gradient = lakeDomain(mesh, 'proportional', { kind: 'gradient', alpha });
+    const moderate = lakeDomain(mesh, 'proportional', { kind: 'gradient', alpha: 0.3 });
+    assert.deepEqual(disabled.cells, historical.cells);
+    assert.deepEqual(disabled.batches, historical.batches);
+    assert.equal(gradient.batches.length, historical.batches.length);
+    assert.equal(gradient.parameters.areaKm2, 300);
+    assert.equal(gradient.parameters.initialTonnes, 45_000);
+    assert.equal(gradient.parameters.capacityDensity, 300);
+    assert.deepEqual(gradient.parameters.simulation, { start: 0, end: 20 });
+    const grid = `${mesh.rows}x${mesh.columns}`;
+
+    for (const domain of [gradient, moderate]) {
+      assert.ok(Math.abs(domain.cells.reduce((sum, cell) => sum + cell.area, 0) - 300) < 1e-12);
+      assert.ok(Math.abs(domain.cells.reduce((sum, cell) => sum + cell.initial, 0) - 45_000) < 1e-9);
+      assert.ok(Math.abs(domain.cells.reduce((sum, cell) => sum + cell.capacity, 0) - 90_000) < 1e-9);
+      const factor = cell => 1 + domain.parameters.distribution.alpha * (0.5 - (cell.row + 0.5) / mesh.rows);
+      const denominator = domain.cells.reduce((sum, cell) => sum + cell.area * factor(cell), 0);
+      for (const [index, cell] of domain.cells.entries()) {
+        assert.ok(Math.abs(cell.initial - (45_000 / denominator) * cell.area * factor(cell)) < 1e-11);
+        assert.ok(cell.initial > 0 && cell.initial < cell.capacity);
+        assert.equal(cell.capacity, 300 * cell.area);
+        assert.equal(cell.growth, 0.35);
+        assert.equal(cell.quantum, historical.cells[index].quantum);
+      }
+      assert.ok(domain.cells[0].initial / domain.cells[0].capacity > 0.5);
+      const southern = domain.cells.at(-1);
+      assert.ok(southern.initial / southern.capacity < 0.5);
+    }
+
+    for (const [index, { request, cells }] of gradient.batches.entries()) {
+      const previous = historical.batches[index].request.model;
+      assert.deepEqual(request.model.connections, previous.connections);
+      assert.deepEqual(request.model.observations, previous.observations);
+      assert.ok(request.model.components.length <= caps.maxComponents);
+      assert.ok(request.model.connections.every(({ from, to }) =>
+        from.component.split('-')[0] === to.component.split('-')[0]));
+      const integrators = request.model.components.filter(atom => atom.type === 'qss3_integrator');
+      assert.deepEqual(integrators.map(atom => atom.parameters), cells.map(cell => ({ X: cell.initial, dQ: cell.quantum })));
+      assert.deepEqual(request.model.components.filter(atom => atom.type !== 'qss3_integrator'),
+        previous.components.filter(atom => atom.type !== 'qss3_integrator'));
+    }
+
+    const baselineRun = await runLakeSimulation(historical, async request => runNative(request));
+    const disabledRun = await runLakeSimulation(disabled, async request => runNative(request));
+    assert.deepEqual(disabledRun.observations, baselineRun.observations);
+    assert.deepEqual(disabledRun.trace.aggregateErrors, baselineRun.trace.aggregateErrors);
+    assert.deepEqual(disabledRun.trace.localErrors, baselineRun.trace.localErrors);
+
+    const baselineTotals = Array(201).fill(0);
+    for (const observation of baselineRun.observations) {
+      observation.samples.forEach(({ value }, tick) => { baselineTotals[tick] += value; });
+    }
+    for (const domain of [moderate, gradient]) {
+      const analytical = Array(201).fill(0);
+      const native = Array(201).fill(0);
+      const { observations, trace } = await runLakeSimulation(domain, async request => runNative(request));
+      assert.equal(trace.points, domain.cells.length * 201);
+      assert.equal(trace.batches.length, domain.batches.length);
+      for (const [index, { component, samples }] of observations.entries()) {
+        const { initial, capacity, growth, quantum } = domain.cells[index];
+        assert.equal(component, domain.cells[index].component);
+        assert.ok(Math.abs(samples[0].value - initial) <= 32 * Number.EPSILON * initial);
+        for (const [tick, { time, value }] of samples.entries()) {
+          assert.ok(value >= 0);
+          const expected = exact(tick * 0.1, initial, capacity, growth);
+          analytical[tick] += expected;
+          native[tick] += value;
+          const floorAllowance = quantum === 1e-9 ? 1e-7 : 0;
+          assert.ok(Math.abs(value - expected) <= localRelativeTolerance * expected + floorAllowance,
+            `${grid} ${component}, ${time} mois`);
+        }
+      }
+      const errors = native.map((value, tick) => Math.abs(value - analytical[tick]));
+      assert.ok(errors.every((error, tick) => error <= aggregateRelativeTolerance * analytical[tick]));
+      assert.equal(trace.aggregateErrors.maxAbsoluteTonnes, Math.max(...errors));
+      assert.ok(Math.abs(analytical[0] - 45_000) < 1e-9);
+      assert.ok(analytical[100] < exact(10, 45_000, 90_000) - 1);
+      if (domain === gradient) {
+        analyticalByGrid.push({ grid, analytical });
+        const repeat = await runLakeSimulation(domain, async request => runNative(request));
+        assert.deepEqual(repeat.observations, observations);
+        assert.deepEqual(repeat.trace.batches.map(batch => batch.runCalls), trace.batches.map(batch => batch.runCalls));
+
+        const batch = domain.batches[Math.floor(domain.batches.length / 2)];
+        const variant = structuredClone(batch.request);
+        const changed = batch.cells[0];
+        const integrator = variant.model.components.find(atom => atom.id === changed.component);
+        integrator.parameters.X *= 0.9;
+        const altered = runNative(variant).observations;
+        const originals = observations.filter(series => batch.cells.some(cell => cell.component === series.component));
+        assert.notDeepEqual(altered[0], originals[0]);
+        assert.deepEqual(altered.slice(1), originals.slice(1));
+      }
+      const atMonths = series => [series[0], series[100], series[200]];
+      t.diagnostic(JSON.stringify({ grid, alpha: domain.parameters.distribution.alpha, wetCells: domain.cells.length,
+        batches: trace.batches.length, points: trace.points, maxRunCalls: Math.max(...trace.batches.map(batch => batch.runCalls)),
+        localErrors: trace.localErrors, aggregateErrors: trace.aggregateErrors, baseline: atMonths(baselineTotals),
+        native: atMonths(native), analytical: atMonths(analytical) }));
+    }
+  }
+  const finest = analyticalByGrid.at(-1).analytical;
+  for (const { grid, analytical } of analyticalByGrid) {
+    const meshDifferences = analytical.map((value, tick) => value - finest[tick]);
+    const maxMeshDifference = Math.max(...meshDifferences.map(Math.abs));
+    if (grid !== '48x24') assert.ok(maxMeshDifference > 0.01);
+    t.diagnostic(JSON.stringify({ grid, meshComparison: '48x24', maxMeshDifference,
+      timeOfMax: meshDifferences.findIndex(value => Math.abs(value) === maxMeshDifference) / 10,
+      atMonths: [meshDifferences[0], meshDifferences[100], meshDifferences[200]] }));
   }
 });

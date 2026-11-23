@@ -37,6 +37,27 @@
 .heading .dimensions { margin: 0; }
 .runActions { flex-wrap: wrap; justify-content: flex-end; margin-bottom: 14px; }
 .runActions button, .playActions button { min-height: 42px; }
+.lakeOptions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+}
+.lakeOptions .dimensions { margin: 0; }
+.gradientNotice { color: #654511; font-size: 13px; font-weight: 600; }
+.gradientIntensity {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.gradientIntensity input { accent-color: #17655e; }
+.lakeComparison { overflow-x: auto; margin-bottom: 17px; }
+.lakeComparison table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lakeComparison caption { text-align: left; font-weight: 700; padding: 6px 0; }
+.lakeComparison :is(th, td) { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.lakeComparison th:first-child { text-align: left; }
 .progress { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 .progress progress, .fullscreenTime input { accent-color: #17655e; }
 
@@ -204,6 +225,7 @@
 .lakeFigure {
   --lake-low: #e3f3ed;
   --lake-high: #2e9a87;
+  --lake-below-half: #27759c;
   margin: 0;
   text-align: center;
 }
@@ -215,6 +237,7 @@
 .lakeOutline { stroke: #3b6665; stroke-width: 1px; pointer-events: none; }
 .lakeCell { fill: #edf3f3; stroke: #477a74; stroke-width: 1px; cursor: pointer; }
 .lakeCell[data-biomass] { fill: color-mix(in srgb, var(--lake-high) var(--lake-saturation), var(--lake-low)); }
+.lakeCell[data-below-half] { fill: color-mix(in srgb, var(--lake-below-half) var(--lake-saturation), var(--lake-low)); }
 .lakeCell[aria-pressed="true"] { stroke: #143f43; stroke-width: 3px; }
 .lakeCell:hover, .lakeCell:focus-visible { stroke: #87480e; stroke-width: 3px; outline: none; }
 .lakeScale {
@@ -228,6 +251,10 @@
   color: var(--muted);
   font-size: 12px;
 }
+.lakeFigure[data-low-ratios] .lakeScale {
+  border-image: linear-gradient(90deg, var(--lake-below-half), var(--lake-low) 50%, var(--lake-high)) 1;
+}
+.lakeScaleTitle { color: var(--muted); font-size: 12px; }
 
 .experiment [data-tone="unavailable"] { --tile-fill: #f5f8f8; --tile-border: #d5e2e1; }
 .experiment [data-tone="zero"] { --tile-fill: #eef2f5; --tile-border: #cbd8e1; }

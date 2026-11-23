@@ -1,7 +1,7 @@
 import { ApiError, caps, catalog, requestSchema, validateRequest, type RunRequest } from '../packages/contracts/index.js';
 import single from './logistic-single-v1.json' with { type: 'json' };
 import reference from './logistic-nine-cells-v1.json' with { type: 'json' };
-import { lakeResolutionId, type LakeMesh } from './logistic-lake.js';
+import { lakeMaxAlpha, lakeResolutionId, type LakeDistribution, type LakeMesh } from './logistic-lake.js';
 
 export const spatialDimensions = [2, 3, 4] as const;
 export type SpatialDimension = typeof spatialDimensions[number];
@@ -62,17 +62,28 @@ export const lakeQuantumFraction = 3e-7;
 export type LakeQuantum = 'absolute' | 'proportional';
 const quantumBounds = catalog.components.find(atom => atom.type === 'qss3_integrator')!.parameters.dQ!;
 
-export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional') {
+export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional',
+  distribution: LakeDistribution = { kind: 'homogeneous' }) {
   const { initialDensity, capacityDensity, growth, horizon } = constantDomain;
   const simulation = { start: 0, end: horizon };
   const samplingInterval = single.model.observations[0]!.samplingInterval;
+  const initialTonnes = initialDensity * lakeSurfaceAreaKm2;
+  const alpha = distribution.kind === 'gradient' ? distribution.alpha : 0;
+  if (!Number.isFinite(alpha) || alpha < 0 || alpha > lakeMaxAlpha) {
+    throw new RangeError('L’intensité du gradient doit être comprise entre 0 et 0,6.');
+  }
   const totalFraction = mesh.cells.reduce((sum, cell) => sum + cell.wetFraction, 0);
-  const cells = mesh.cells.map(cell => {
-    const area = lakeSurfaceAreaKm2 * cell.wetFraction / totalFraction;
+  const areas = mesh.cells.map(cell => lakeSurfaceAreaKm2 * cell.wetFraction / totalFraction);
+  const weights = alpha === 0 ? undefined : mesh.cells.map(({ row }, index) =>
+    areas[index]! * (1 + alpha * (0.5 - (row + 0.5) / mesh.rows)));
+  const totalWeight = weights?.reduce((sum, weight) => sum + weight, 0);
+  const cells = mesh.cells.map((cell, index) => {
+    const area = areas[index]!;
+    const initial = weights ? initialTonnes * weights[index]! / totalWeight! : initialDensity * area;
     const capacity = capacityDensity * area;
     const quantum = strategy === 'absolute' ? constantDomain.quantum
       : Math.min(quantumBounds.maximum, Math.max(quantumBounds.minimum, capacity * lakeQuantumFraction));
-    return { ...cell, component: `${cell.id}-N`, area, initial: initialDensity * area, capacity, growth, quantum, samplingInterval };
+    return { ...cell, component: `${cell.id}-N`, area, initial, capacity, growth, quantum, samplingInterval };
   });
   // Same point estimate (including terminal margin) as the flat request contract.
   const pointsPerCell = single.model.observations.reduce((sum, observation) =>
@@ -84,14 +95,15 @@ export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional
     Math.floor(caps.maxPoints / pointsPerCell),
   );
   const resolution = lakeResolutionId(mesh);
+  const distributionSuffix = alpha === 0 ? '' : `-g${String(alpha).replace('.', 'p')}`;
   const batches: { request: RunRequest; cells: typeof cells }[] = [];
   for (let offset = 0; offset < cells.length; offset += batchSize) {
     const members = cells.slice(offset, offset + batchSize);
-    const id = `logistic-lake-${resolution}-${strategy}-${batches.length + 1}`;
+    const id = `logistic-lake-${resolution}-${strategy}${distributionSuffix}-${batches.length + 1}`;
     batches.push({ request: buildRequest(id, members, simulation), cells: members });
   }
   const parameters = { rows: mesh.rows, columns: mesh.columns, areaKm2: lakeSurfaceAreaKm2,
-    initialDensity, capacityDensity, growth, simulation, samplingInterval,
+    initialDensity, initialTonnes, capacityDensity, growth, simulation, samplingInterval, distribution,
     quantum: strategy === 'absolute' ? { strategy, tonnes: constantDomain.quantum }
       : { strategy, capacityFraction: lakeQuantumFraction, minimum: quantumBounds.minimum, maximum: quantumBounds.maximum } };
   return { cells, batches, parameters };

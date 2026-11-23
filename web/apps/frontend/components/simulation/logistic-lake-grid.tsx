@@ -8,13 +8,14 @@ const tonnes = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
 const initialView = { zoom: 1, dx: 0, dy: 0 };
 const zoomLevels = [1, 1.5, 2, 3, 4, 6, 8];
 
-export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, select }: {
+export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, select, showLowRatios }: {
   mesh: LakeMesh;
   cells: readonly LakeDomain['cells'][number][];
   trajectories: ReadonlyMap<string, SpatialTrajectory>;
   time: number;
   selected: string;
   select: (id: string) => void;
+  showLowRatios: boolean;
 }) {
   const clip = useId();
   const outline = useMemo(() => mesh.rings.map(ring =>
@@ -60,7 +61,7 @@ export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, se
     ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
   };
 
-  return <figure className={styles.lakeFigure}>
+  return <figure className={styles.lakeFigure} data-low-ratios={showLowRatios || undefined}>
     <div className={styles.mapTools} role="group" aria-label="Cadrage de la carte">
       <button type="button" aria-label="Zoom avant" disabled={zoomIndex === zoomLevels.length - 1}
         onClick={() => setView(constrain({ ...view, zoom: zoomLevels[zoomIndex + 1]! }))}><Plus size={16} aria-hidden="true" /></button>
@@ -96,12 +97,15 @@ export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, se
           const trajectory = trajectories.get(cell.id);
           const reading = trajectory ? spatialReading(trajectory, time) : null;
           const saturation = reading ? Math.max(0, Math.min(100, (reading.ratio - 0.5) * 200)) : 0;
+          const belowHalf = showLowRatios && reading !== null && reading.ratio < 0.5;
+          const lowerSaturation = belowHalf ? Math.max(0, Math.min(100, (0.5 - reading.ratio) * 400)) : 0;
           return <rect key={cell.id} className={styles.lakeCell} x={cell.x} y={cell.y} width={cell.width} height={cell.height}
             vectorEffect="non-scaling-stroke" role="button" tabIndex={0} aria-label={cell.id} aria-pressed={selected === cell.id}
             aria-description={reading ? `${tonnes.format(reading.value)} t` : undefined}
             data-cell={cell.id} data-row={cell.row} data-column={cell.column} data-wet-fraction={cell.wetFraction}
             data-area={cell.area} data-biomass={reading?.value} data-observed-time={reading?.time} data-source={reading?.source}
-            style={{ '--lake-saturation': `${saturation}%` } as CSSProperties}
+            data-biomass-ratio={reading?.ratio} data-below-half={belowHalf || undefined}
+            style={{ '--lake-saturation': `${belowHalf ? lowerSaturation : saturation}%` } as CSSProperties}
             onClick={() => select(cell.id)} onKeyDown={event => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
@@ -115,7 +119,9 @@ export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, se
     </svg>
     <figcaption>Lac de Guiers · Contour HydroLAKES · Grille {mesh.rows} × {mesh.columns}</figcaption>
     <div className={styles.lakeScale} aria-label="Rapport biomasse sur capacité">
-      <span>50 %</span><span>Biomasse / capacité</span><span>100 %</span>
+      {showLowRatios ? <><span>25 %</span><span>50 %</span><span>100 %</span></>
+        : <><span>50 %</span><span>Biomasse / capacité</span><span>100 %</span></>}
     </div>
+    {showLowRatios && <span className={styles.lakeScaleTitle}>Biomasse / capacité</span>}
   </figure>;
 }
