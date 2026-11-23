@@ -1,0 +1,70 @@
+{
+  "schema": "irritator-effective-fishing-effort",
+  "version": 2,
+  "status": "hypotheses_de_scenario_a_valider",
+  "modelEffortReference": "temporal.parameters.E",
+  "baseline": {
+    "gear": "gillnet",
+    "motor": "no",
+    "meshMm": 46,
+    "tripsPerWeek": 4,
+    "boats": 1,
+    "tripScope": "total",
+    "gearCount": 2,
+    "netLengthM": 50,
+    "effectiveGearHours": 4
+  },
+  "gearReferences": {
+    "gillnet": {
+      "nominal": 6933.333333333333,
+      "unit": "m·h/mois",
+      "relativePower": 1
+    },
+    "line": {
+      "nominal": 2773.333333333333,
+      "unit": "hameçon·h/mois",
+      "relativePower": 0.8
+    },
+    "seine": {
+      "nominal": 34.666666666666664,
+      "unit": "traits/mois",
+      "relativePower": 1.2
+    }
+  },
+  "motorRelativePower": {
+    "gillnet": {
+      "no": 1,
+      "yes": 1.2
+    },
+    "line": {
+      "no": 1,
+      "yes": 1.15
+    },
+    "seine": {
+      "no": 1,
+      "yes": 1.3
+    }
+  },
+  "gillnetMeshRelativePower": {
+    "meshUnit": "mm",
+    "referenceMeshMm": 46,
+    "interpolation": "linear_between_declared_points_only",
+    "points": [
+      {
+        "meshMm": 35,
+        "relativePower": 0.9
+      },
+      {
+        "meshMm": 46,
+        "relativePower": 1
+      },
+      {
+        "meshMm": 60,
+        "relativePower": 0.85
+      }
+    ]
+  },
+  "warning": "Les coefficients 0.8, 1.2, 1.15, 1.3 et les variations selon les mailles sont exclusivement des hypotheses configurables de demonstration, sans calibration locale ni validite biologique revendiquee.",
+  "id": "effort-demo-kit-v2",
+  "source": "Kit IRRITATOR_EFFORT_V2_ENGINS_MOTORISATION_MAILLES / 02_PARAMETRES_EXEMPLE.json"
+}

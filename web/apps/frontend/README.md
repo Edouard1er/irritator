@@ -1,4 +1,4 @@
-# Irritator Web — éditeur graphique et hiérarchique (Tests 5–7F)
+# Irritator — éditeur graphique et hiérarchique (Tests 5–7F)
 
 Éditeur local Next.js / React Flow connecté au **véritable runner C++ Irritator**.
 Les composants, paramètres et ports viennent de `GET /api/v1/components`.
@@ -302,12 +302,28 @@ deux graphiques : un poisson représente dix tonnes, les captures mensuelles son
 reliées en courbe sans lissage et la sirène est préparée dès le clic de lecture.
 Le son est activé par défaut, sauf désactivation explicite conservée.
 
+Sur ordinateur, **Plein écran** dans le panneau **Le lac** affiche uniquement le
+lac, avec les pastilles de saison, biomasse et accessibilité. **Pause / Reprendre**
+pilote la lecture commune ; **Quitter le plein écran** ou **Échap** revient au
+tableau de bord. Le même Canvas conserve ses poissons, leurs positions relatives
+et la phase des mouvements lors du redimensionnement. L’entrée et la sortie ne
+changent ni le temps simulé, ni les pratiques, ni les interventions et ne lancent
+aucun calcul moteur. La commande **Grand écran** conserve son mode de présentation
+du tableau de bord. Un refus de la Fullscreen API laisse le panneau accessible
+et affiche un message permettant de réessayer.
+
+La recette dédiée utilise Chrome, Firefox et Edge :
+`npm.cmd run test:e2e -- --config playwright.lake.config.ts`.
+Les serveurs locaux doivent être démarrés et les navigateurs installés
+(`npx.cmd playwright install firefox` pour le Firefox piloté par Playwright).
+`IRRITATOR_EDGE_EXECUTABLE` permet de préciser un exécutable EdgeCore si nécessaire.
+
 ## Interventions temporelles (itération 3)
 
 Ouvrir `web/examples/atelier-interventions-month-v3.json` depuis la racine du dépôt,
 exécuter, parcourir le temps et choisir **Modifier les conditions**. L’application
 recalcule avec Irritator C++ depuis l’origine, puis reprend au même instant sans
-réinitialiser la biomasse ou la capture cumulée. Pluie, salinité, accessibilité,
+réinitialiser la biomasse ou la capture cumulée. Pluie, turbidité, accessibilité,
 effort exact et composition des pirogues sont éditables ; les coefficients des
 réponses environnementales et des saisons sont accessibles en lecture Scientifique.
 
