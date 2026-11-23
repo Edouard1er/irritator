@@ -71,8 +71,6 @@ struct recorded_paths {
                   name_str,
                   i8>
       recs;
-
-    vector<recorded_path_id> sort_by_priorities() const noexcept;
 };
 
 struct variables {
@@ -100,16 +98,12 @@ public:
     config_manager& operator=(config_manager&&) noexcept = delete;
 
     std::error_code save() noexcept;
-    std::error_code load() noexcept;
 
     variables vars;
 
 private:
     /** Stores the configuration path (@a `$XDG_RUNTIME_DIR/irritator.ini` or
-     * @a `%HOMEDIR%/%HOMEPATH&/irritator.ini`) directories. @TODO move from
-     * std::string into small_string or vector<char> with cold memory
-     * allocator.
-     */
+     * @a `%HOMEDIR%/%HOMEPATH&/irritator.ini`) directories. */
     const path m_path;
 };
 

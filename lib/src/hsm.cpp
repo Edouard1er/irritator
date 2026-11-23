@@ -77,10 +77,11 @@ static constexpr i32 copy_to_i32(
     irt::unreachable();
 }
 
+template<typename Action>
 static constexpr real copy_to_real(
   const std::span<const real, hsm_t::max_constants> c,
   const hsm_t::variable                             v,
-  const hsm_t::state_action&                        act,
+  const Action&                                     act,
   hsm_t::execution&                                 e) noexcept
 {
     switch (v) {
@@ -123,134 +124,6 @@ static constexpr real copy_to_real(
 
     irt::unreachable();
 }
-
-struct wrap_var {
-    union {
-        real r;
-        i32  i;
-    };
-
-    enum type : u8 { real_t, integer_t } type;
-
-    constexpr bool operator==(const wrap_var& o) const noexcept
-    {
-        if (type == type::real_t)
-            return r ==
-                   ((o.type == type::real_t) ? o.r : static_cast<real>(o.i));
-
-        return i == ((o.type == type::real_t) ? static_cast<i32>(o.r) : o.i);
-    }
-
-    constexpr std::partial_ordering operator<=>(
-      const wrap_var& o) const noexcept
-    {
-        return (type == type::real_t)
-                 ? r <=>
-                     ((o.type == type::real_t) ? o.r : static_cast<real>(o.i))
-                 : i <=>
-                     ((o.type == type::real_t) ? static_cast<i32>(o.r) : o.i);
-    }
-
-    template<typename Action>
-    constexpr wrap_var(const std::span<const real, hsm_t::max_constants> c,
-                       const hsm_t::variable                             v,
-                       Action&                                           act,
-                       hsm_t::execution& e) noexcept
-    {
-        switch (v) {
-        case hsm_t::variable::none:
-            r    = 0;
-            i    = 0;
-            type = type::integer_t;
-            break;
-
-        case hsm_t::variable::port_0:
-            r    = e.ports[3];
-            i    = static_cast<i32>(e.ports[3]);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::port_1:
-            r    = e.ports[2];
-            i    = static_cast<i32>(e.ports[2]);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::port_2:
-            r    = e.ports[1];
-            i    = static_cast<i32>(e.ports[1]);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::port_3:
-            r    = e.ports[0];
-            i    = static_cast<i32>(e.ports[0]);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::var_i1:
-            r    = static_cast<double>(e.i1);
-            i    = e.i1;
-            type = type::integer_t;
-            break;
-
-        case hsm_t::variable::var_i2:
-            r    = static_cast<double>(e.i2);
-            i    = e.i2;
-            type = type::integer_t;
-            break;
-
-        case hsm_t::variable::var_r1:
-            r    = e.r1;
-            i    = static_cast<i32>(e.r1);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::var_r2:
-            r    = e.r2;
-            i    = static_cast<i32>(e.r2);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::var_timer:
-            r    = e.timer;
-            i    = static_cast<i32>(e.timer);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::constant_i:
-            r    = static_cast<double>(act.constant.i);
-            i    = act.constant.i;
-            type = type::integer_t;
-            break;
-
-        case hsm_t::variable::constant_r:
-            r    = act.constant.f;
-            i    = static_cast<i32>(act.constant.f);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::hsm_constant_0:
-        case hsm_t::variable::hsm_constant_1:
-        case hsm_t::variable::hsm_constant_2:
-        case hsm_t::variable::hsm_constant_3:
-        case hsm_t::variable::hsm_constant_4:
-        case hsm_t::variable::hsm_constant_5:
-        case hsm_t::variable::hsm_constant_6:
-        case hsm_t::variable::hsm_constant_7:
-            r    = c[ordinal(v) - ordinal(hsm_t::variable::hsm_constant_0)];
-            i    = static_cast<i32>(act.constant.f);
-            type = type::real_t;
-            break;
-
-        case hsm_t::variable::source:
-            r    = e.source_value.next();
-            i    = static_cast<i32>(r);
-            type = type::real_t;
-            break;
-        }
-    }
-};
 
 static auto is_action_using_source(const hsm_t::state_action& act) noexcept
   -> bool
@@ -934,6 +807,9 @@ status hierarchical_state_machine::start(execution&       exec,
         irt_check(on_enter_sub_state(exec, srcs));
     }
 
+    if (exec.message_overflow)
+        return make_error(simulation_errc::hsm_output_overflow_error);
+
     return success();
 }
 
@@ -942,33 +818,111 @@ expected<bool> hierarchical_state_machine::dispatch(
   execution&       exec,
   external_source& srcs) noexcept
 {
-    debug::ensure(!is_dispatching(exec));
+    debug::ensure(not is_dispatching(exec));
 
-    bool is_processed = false;
+    auto sid = exec.current_state;
 
-    for (state_id sid = exec.current_state; sid != invalid_state_id;) {
-        auto& state               = states[sid];
+    // A time event belongs to the state which armed the timer: it does not
+    // bubble to the super states.
+    if (event == event_type::wake_up) {
+        for (auto d = depth_of(sid); sid != invalid_state_id;
+             sid    = states[sid].super_id, --d)
+            if (d < max_depth and exec.timers[d] <= 0.0)
+                break;
+    }
+
+    auto is_consumed = false;
+    while (sid != invalid_state_id) {
         exec.current_source_state = sid;
 
-        if (handle(sid, event, exec, srcs)) {
-            if (exec.next_state != invalid_state_id) {
-                do {
-                    if (auto ret = on_enter_sub_state(exec, srcs); !ret)
-                        return ret.error();
-                } while (
-                  (exec.next_state = states[exec.current_state].sub_id) !=
-                  invalid_state_id);
-            }
-            is_processed = true;
+        auto ret = handle(sid, event, exec, srcs);
+        if (not ret) {
+            exec.current_source_state = invalid_state_id;
+            return ret.error();
+        }
+
+        if (*ret) {
+            is_consumed = true;
             break;
         }
 
-        sid = state.super_id;
+        sid = event == event_type::wake_up ? invalid_state_id
+                                           : states[sid].super_id;
     }
 
     exec.current_source_state = invalid_state_id;
 
-    return is_processed;
+    if (is_consumed and exec.next_state != invalid_state_id) {
+        do {
+            irt_check(on_enter_sub_state(exec, srcs));
+        } while ((exec.next_state = states[exec.current_state].sub_id) !=
+                 invalid_state_id);
+    }
+
+    if (exec.message_overflow)
+        return make_error(simulation_errc::hsm_output_overflow_error);
+
+    return is_consumed;
+}
+
+static bool have_completion(const hsm_t::state& s) noexcept
+{
+    return s.condition.type != hsm_t::condition_type::port and
+           s.condition.type != hsm_t::condition_type::sigma;
+}
+
+status hierarchical_state_machine::run_to_completion(
+  execution&       exec,
+  bool             input_received,
+  external_source& srcs) noexcept
+{
+    const auto can_recheck = [this](const state_id id) noexcept {
+        return have_completion(states[id]) and not states[id].is_terminal();
+    };
+
+    // The completion event of a state is generated once, when the state is
+    // entered: a terminal state at the beginning already sent its own. The
+    // condition of a state already entered is checked again last, because the
+    // timers and the message can change the variables it reads.
+    auto entered = false;
+    auto recheck = can_recheck(exec.current_state);
+
+    // The cycles with a guard or with null timers are not found by
+    // find_error: the number of events stops them.
+    auto steps = 0;
+
+    for (;;) {
+        const auto before   = exec.current_state;
+        exec.previous_state = before;
+
+        if (entered) {
+            entered = false;
+            irt_check(dispatch(event_type::internal, exec, srcs));
+        } else if (exec.next_timer() <= 0.0) {
+            irt_check(dispatch(event_type::wake_up, exec, srcs));
+            recheck = can_recheck(exec.current_state);
+        } else if (input_received) {
+            input_received = false;
+            if (exec.values.any())
+                irt_check(dispatch(event_type::input_changed, exec, srcs));
+            recheck = can_recheck(exec.current_state);
+        } else if (recheck) {
+            recheck = false;
+            irt_check(dispatch(event_type::internal, exec, srcs));
+        } else {
+            break;
+        }
+
+        if (++steps > max_run_to_completion_steps)
+            return make_error(simulation_errc::hsm_run_to_completion_error);
+
+        if (exec.current_state != before) {
+            entered = have_completion(states[exec.current_state]);
+            recheck = false;
+        }
+    }
+
+    return success();
 }
 
 status hierarchical_state_machine::on_enter_sub_state(
@@ -1004,9 +958,10 @@ status hierarchical_state_machine::on_enter_sub_state(
     return success();
 }
 
-status hierarchical_state_machine::transition(state_id         target,
-                                              execution&       exec,
-                                              external_source& srcs) noexcept
+status hierarchical_state_machine::transition(state_id            target,
+                                              const state_action& effect,
+                                              execution&          exec,
+                                              external_source&    srcs) noexcept
 {
     debug::ensure(target < max_number_of_state);
     debug::ensure(exec.disallow_transition == false);
@@ -1015,27 +970,21 @@ status hierarchical_state_machine::transition(state_id         target,
     if (exec.disallow_transition)
         return success();
 
-    if (exec.current_source_state != invalid_state_id)
-        exec.source_state = exec.current_source_state;
+    const auto lca = find_lca(exec.current_source_state, target);
+    if (lca == invalid_state_id)
+        return make_error(simulation_errc::hsm_transition_error);
 
+    exec.source_state        = exec.current_source_state;
     exec.disallow_transition = true;
-    state_id sid;
-    for (sid = exec.source_state; sid != exec.source_state;) {
-        irt_check(handle(sid, event_type::exit, exec, srcs));
-        sid = states[sid].super_id;
-    }
 
-    int stepsToCommonRoot = steps_to_common_root(exec.source_state, target);
-    debug::ensure(stepsToCommonRoot >= 0);
-
-    while (stepsToCommonRoot--) {
+    for (auto sid = exec.current_state; sid != lca; sid = states[sid].super_id)
         irt_check(handle(sid, event_type::exit, exec, srcs));
-        sid = states[sid].super_id;
-    }
 
     exec.disallow_transition = false;
 
-    exec.current_state = sid;
+    affect_action(effect, exec);
+
+    exec.current_state = lca;
     exec.next_state    = target;
 
     return success();
@@ -1104,79 +1053,79 @@ expected<bool> hierarchical_state_machine::handle(
             irt_check(srcs.update_source(exec.source_value, exec.src_data));
     }
 
+    const auto& s     = states[state];
+    const auto  depth = depth_of(state);
+
+    // A branch without target is an UML internal transition: its action runs
+    // without exit nor enter. A completion event needs a target, otherwise a
+    // state without transition would consume its completion forever.
+    const auto fire = [&](const state_id target, const state_action& action,
+                          const bool is_completion) -> expected<bool> {
+        if (target != invalid_state_id) {
+            irt_check(transition(target, action, exec, srcs));
+            return true;
+        }
+
+        if (is_completion or action.type == action_type::none)
+            return false;
+
+        affect_action(action, exec);
+        return true;
+    };
+
     switch (event) {
     case event_type::enter:
-        affect_action(states[state].enter_action, exec);
+        affect_action(s.enter_action, exec);
+        // A NaN delay arms nothing, like an infinite delay.
+        if (s.condition.type == condition_type::sigma and depth < max_depth)
+            exec.timers[depth] = std::isnan(exec.timer)
+                                   ? time_domain<time>::infinity
+                                   : exec.timer;
         return true;
 
     case event_type::exit:
-        affect_action(states[state].exit_action, exec);
+        affect_action(s.exit_action, exec);
+        if (depth < max_depth)
+            exec.timers[depth] = time_domain<time>::infinity;
         return true;
 
     case event_type::internal:
-        if (states[state].condition.check(constants, exec)) {
-            affect_action(states[state].if_action, exec);
-            if (states[state].if_transition != invalid_state_id)
-                irt_check(transition(states[state].if_transition, exec, srcs));
-            return true;
-        } else {
-            affect_action(states[state].else_action, exec);
-            if (states[state].else_transition != invalid_state_id)
-                irt_check(
-                  transition(states[state].else_transition, exec, srcs));
-            return true;
-        }
-        break;
+        if (not have_completion(s))
+            return false;
+
+        return s.condition.check(constants, exec)
+                 ? fire(s.if_transition, s.if_action, true)
+                 : fire(s.else_transition, s.else_action, true);
 
     case event_type::input_changed:
-        if (states[state].condition.type == condition_type::sigma) {
-            affect_action(states[state].else_action, exec);
-            if (states[state].else_transition != invalid_state_id)
-                irt_check(
-                  transition(states[state].else_transition, exec, srcs));
-            return true;
-        } else {
-            debug::ensure(states[state].condition.type == condition_type::port);
-            if (states[state].condition.check(constants, exec)) {
-                affect_action(states[state].if_action, exec);
-                exec.values.reset();
-                if (states[state].if_transition != invalid_state_id)
-                    irt_check(
-                      transition(states[state].if_transition, exec, srcs));
-                return true;
-            } else {
-                affect_action(states[state].else_action, exec);
-                if (states[state].else_transition != invalid_state_id)
-                    irt_check(
-                      transition(states[state].else_transition, exec, srcs));
-                return true; // If the user does not assign an else transition,
-                             // he want to wait until the real wake up.
-            }
+        if (s.condition.type == condition_type::sigma) {
+            if (depth < max_depth)
+                exec.timer = exec.timers[depth];
+            return fire(s.else_transition, s.else_action, false);
         }
-        break;
+
+        if (s.condition.type != condition_type::port)
+            return false;
+
+        if (s.condition.check(constants, exec)) {
+            if (s.if_transition == invalid_state_id and
+                s.if_action.type == action_type::none)
+                return false;
+
+            exec.values.reset();
+            return fire(s.if_transition, s.if_action, false);
+        }
+
+        return fire(s.else_transition, s.else_action, false);
 
     case event_type::wake_up:
-        debug::ensure(states[state].condition.type == condition_type::sigma);
-
-        if (states[state].condition.check(constants, exec)) {
-            affect_action(states[state].if_action, exec);
-            if (states[state].if_transition != invalid_state_id) {
-                irt_check(transition(states[state].if_transition, exec, srcs));
-                return true;
-            }
+        if (s.condition.type != condition_type::sigma)
             return false;
-        } else {
-            affect_action(states[state].else_action, exec);
-            if (states[state].else_transition != invalid_state_id)
-                irt_check(
-                  transition(states[state].else_transition, exec, srcs));
-            return true; // If the user does not assign an else transition, he
-                         // want to wait until the real wake up.
-        }
-        break;
 
-    default:
-        break;
+        exec.timer = time_domain<time>::zero;
+        if (depth < max_depth)
+            exec.timers[depth] = time_domain<time>::infinity;
+        return fire(s.if_transition, s.if_action, false);
     }
 
     unreachable();
@@ -1208,8 +1157,7 @@ void hierarchical_state_machine::affect_action(const state_action& action,
         break;
 
     case action_type::output: {
-        // @TODO May returns a buffer full.
-        debug::ensure(0 <= e.messages and e.messages < 4);
+        debug::ensure(0 <= e.messages);
         debug::ensure(1 <= ordinal(action.var1) and ordinal(action.var1) <= 4);
 
         const u8 port = ordinal(action.var1) - 1u;
@@ -1427,12 +1375,16 @@ void hierarchical_state_machine::affect_action(const state_action& action,
     case action_type::modulus:
         switch (action.var1) {
         case variable::var_i1:
-            e.i1 = std::modulus<>{}(
-              e.i1, copy_to_i32(constants, action.var2, action, e));
+            if (auto val = copy_to_i32(constants, action.var2, action, e); val)
+                e.i1 %= val;
+            else
+                e.i1 = INT32_MAX;
             break;
         case variable::var_i2:
-            e.i2 = std::modulus<>{}(
-              e.i1, copy_to_i32(constants, action.var2, action, e));
+            if (auto val = copy_to_i32(constants, action.var2, action, e); val)
+                e.i2 %= val;
+            else
+                e.i2 = INT32_MAX;
             break;
         default:
             irt::unreachable();
@@ -1448,7 +1400,7 @@ void hierarchical_state_machine::affect_action(const state_action& action,
             break;
         case variable::var_i2:
             e.i2 = std::bit_and<>{}(
-              e.i1, copy_to_i32(constants, action.var2, action, e));
+              e.i2, copy_to_i32(constants, action.var2, action, e));
             break;
         default:
             irt::unreachable();
@@ -1464,7 +1416,7 @@ void hierarchical_state_machine::affect_action(const state_action& action,
             break;
         case variable::var_i2:
             e.i2 = std::bit_or<>{}(
-              e.i1, copy_to_i32(constants, action.var2, action, e));
+              e.i2, copy_to_i32(constants, action.var2, action, e));
             break;
         default:
             irt::unreachable();
@@ -1524,28 +1476,33 @@ bool hierarchical_state_machine::condition_action::check(
         return e.timer <= 0.0;
 
     case condition_type::equal_to:
-        return wrap_var(constants, var1, *this, e) ==
-               wrap_var(constants, var2, *this, e);
-
     case condition_type::not_equal_to:
-        return wrap_var(constants, var1, *this, e) !=
-               wrap_var(constants, var2, *this, e);
-
     case condition_type::greater:
-        return wrap_var(constants, var1, *this, e) >
-               wrap_var(constants, var2, *this, e);
-
     case condition_type::greater_equal:
-        return wrap_var(constants, var1, *this, e) >=
-               wrap_var(constants, var2, *this, e);
-
     case condition_type::less:
-        return wrap_var(constants, var1, *this, e) <
-               wrap_var(constants, var2, *this, e);
-
     case condition_type::less_equal:
-        return wrap_var(constants, var1, *this, e) <=
-               wrap_var(constants, var2, *this, e);
+        break;
+    }
+
+    // An i32 fits exactly in a real: every comparison is made on reals.
+    const auto lhs = copy_to_real(constants, var1, *this, e);
+    const auto rhs = copy_to_real(constants, var2, *this, e);
+
+    switch (type) {
+    case condition_type::equal_to:
+        return lhs == rhs;
+    case condition_type::not_equal_to:
+        return lhs != rhs;
+    case condition_type::greater:
+        return lhs > rhs;
+    case condition_type::greater_equal:
+        return lhs >= rhs;
+    case condition_type::less:
+        return lhs < rhs;
+    case condition_type::less_equal:
+        return lhs <= rhs;
+    default:
+        break;
     }
 
     unreachable();
@@ -1553,25 +1510,142 @@ bool hierarchical_state_machine::condition_action::check(
     return false;
 }
 
-int hierarchical_state_machine::steps_to_common_root(state_id source,
-                                                     state_id target) noexcept
+auto hierarchical_state_machine::find_lca(state_id source,
+                                          state_id target) const noexcept
+  -> state_id
 {
-    if (source == target)
-        return 1;
-
-    int tolca = 0;
-    for (state_id s = source; s != invalid_state_id; ++tolca) {
-        for (state_id t = target; t != invalid_state_id;) {
+    for (auto s = states[source].super_id; s != invalid_state_id;
+         s      = states[s].super_id)
+        for (auto t = states[target].super_id; t != invalid_state_id;
+             t      = states[t].super_id)
             if (s == t)
-                return tolca;
+                return s;
 
-            t = states[t].super_id;
+    return invalid_state_id;
+}
+
+int hierarchical_state_machine::depth_of(state_id id) const noexcept
+{
+    auto depth = 0;
+
+    // The bound protects from a cycle in a machine not yet checked.
+    for (auto s = states[id].super_id;
+         s != invalid_state_id and depth < max_number_of_state;
+         s = states[s].super_id)
+        ++depth;
+
+    return depth;
+}
+
+static simulation_errc find_completion_cycle(const hsm_t& hsm) noexcept
+{
+    using state_id = hsm_t::state_id;
+
+    constexpr auto max_number_of_state = hsm_t::max_number_of_state;
+    constexpr auto invalid_state_id    = hsm_t::invalid_state_id;
+
+    const auto& states = hsm.states;
+
+    // A leaf with a completion event has at most one certain completion
+    // transition, the first one without guard from the leaf to the top: these
+    // transitions form a functional graph, whose cycles are found in linear
+    // time (find_error runs at each frame of the editor).
+    std::array<state_id, max_number_of_state> next;
+    next.fill(invalid_state_id);
+
+    for (int i = 0; i != max_number_of_state; ++i) {
+        const auto id = static_cast<state_id>(i);
+
+        if ((id != hsm.top_state and states[i].super_id == invalid_state_id) or
+            states[i].sub_id != invalid_state_id or
+            not have_completion(states[i]))
+            continue;
+
+        for (auto s = id; s != invalid_state_id; s = states[s].super_id) {
+            const auto& st = states[s];
+
+            if (not have_completion(st))
+                continue;
+
+            if (st.condition.type != hsm_t::condition_type::none)
+                break;
+
+            if (st.if_transition == invalid_state_id)
+                continue;
+
+            auto target = st.if_transition;
+            while (states[target].sub_id != invalid_state_id)
+                target = states[target].sub_id;
+
+            if (have_completion(states[target]))
+                next[i] = target;
+
+            break;
         }
-
-        s = states[s].super_id;
     }
 
-    return -1;
+    std::array<state_id, max_number_of_state> visited_from;
+    visited_from.fill(invalid_state_id);
+
+    for (int i = 0; i != max_number_of_state; ++i) {
+        const auto start = static_cast<state_id>(i);
+        auto       s     = start;
+
+        while (s != invalid_state_id and visited_from[s] == invalid_state_id) {
+            visited_from[s] = start;
+            s               = next[s];
+        }
+
+        if (s != invalid_state_id and visited_from[s] == start)
+            return simulation_errc::hsm_completion_cycle_error;
+    }
+
+    return simulation_errc::none;
+}
+
+simulation_errc hierarchical_state_machine::find_error() const noexcept
+{
+    const auto is_valid = [](const state_id id) noexcept {
+        return id < max_number_of_state;
+    };
+
+    if (not is_valid(top_state) or
+        states[top_state].super_id != invalid_state_id)
+        return simulation_errc::hsm_top_state_error;
+
+    const auto is_used = [&](const state_id id) noexcept {
+        return id == top_state or states[id].super_id != invalid_state_id;
+    };
+
+    for (int i = 0; i != max_number_of_state; ++i) {
+        const auto  id = static_cast<state_id>(i);
+        const auto& s  = states[i];
+
+        if (not is_used(id))
+            continue;
+
+        auto depth = 0;
+        for (auto p = id; p != top_state; p = states[p].super_id)
+            if (not is_valid(states[p].super_id) or ++depth >= max_depth)
+                return simulation_errc::hsm_hierarchy_error;
+
+        if (s.super_id != invalid_state_id) {
+            const auto first = states[s.super_id].sub_id;
+            if (not is_valid(first) or states[first].super_id != s.super_id)
+                return simulation_errc::hsm_initial_state_error;
+        }
+
+        if (s.sub_id != invalid_state_id and
+            (not is_valid(s.sub_id) or states[s.sub_id].super_id != id))
+            return simulation_errc::hsm_initial_state_error;
+
+        for (const auto t : { s.if_transition, s.else_transition })
+            if (t != invalid_state_id and (id == top_state or t == top_state or
+                                           not is_valid(t) or not is_used(t)))
+                return simulation_errc::hsm_transition_error;
+    }
+
+    return find_completion_cycle(*this);
 }
 
 } // namespace irt

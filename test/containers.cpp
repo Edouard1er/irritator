@@ -8,10 +8,50 @@
 
 #include <boost/ut.hpp>
 
+#include <array>
+#include <memory>
 #include <numeric>
 #include <string_view>
 
 using namespace std::literals;
+
+/// A bump memory resource: each pair (Length, ID) owns its own buffer.
+template<std::size_t Length, int ID = 0>
+struct arena_resource {
+    struct data {
+        alignas(std::max_align_t) std::array<std::byte, Length> buffer;
+        std::size_t used        = 0;
+        std::size_t deallocated = 0;
+
+        void* allocate(std::size_t bytes, std::size_t alignment) noexcept
+        {
+            void*       p     = buffer.data() + used;
+            std::size_t space = buffer.size() - used;
+            if (not std::align(alignment, bytes, p, space))
+                return nullptr;
+            used = buffer.size() - space + bytes;
+            return p;
+        }
+
+        void deallocate(void*, std::size_t bytes, std::size_t) noexcept
+        {
+            deallocated += bytes;
+        }
+
+        void release() noexcept { used = 0; }
+
+        std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
+        {
+            return { used, deallocated };
+        }
+    };
+
+    static data& instance() noexcept
+    {
+        static data d;
+        return d;
+    }
+};
 
 struct counted {
     static inline int live = 0;
@@ -92,51 +132,6 @@ public:
         move_op++;
         return *this;
     }
-
-    static void reset() noexcept
-    {
-        counters::default_ctor  = 0;
-        counters::copy_ctor     = 0;
-        counters::move_ctor     = 0;
-        counters::in_place_ctor = 0;
-        counters::dtor          = 0;
-        counters::copy_op       = 0;
-        counters::move_op       = 0;
-    }
-};
-
-struct expected_tester {
-    struct a_error {};
-    bool make_error = false;
-
-    explicit expected_tester(bool error)
-      : make_error(error)
-    {}
-
-    irt::expected<int> make() noexcept
-    {
-        if (make_error)
-            return irt::error_code(std::errc::not_enough_memory);
-
-        return 1;
-    }
-};
-
-struct expected_tester_2 {
-    struct a_error {};
-    bool make_error = false;
-
-    explicit expected_tester_2(bool error)
-      : make_error(error)
-    {}
-
-    irt::expected<int> make() noexcept
-    {
-        if (make_error)
-            return irt::error_code(std::errc::not_enough_memory);
-
-        return 2;
-    }
 };
 
 struct count_ctor_assign {
@@ -177,18 +172,6 @@ struct count_ctor_assign {
     }
 
     ~count_ctor_assign() noexcept { count_dtor++; }
-
-    int value() const noexcept { return a; }
-
-    static void reset() noexcept
-    {
-        count_ctor        = 0;
-        count_move_ctor   = 0;
-        count_copy_ctor   = 0;
-        count_move_assign = 0;
-        count_copy_assign = 0;
-        count_dtor        = 0;
-    }
 
     static inline int count_ctor;
     static inline int count_move_ctor;
@@ -272,238 +255,26 @@ int main()
 {
     using namespace boost::ut;
 
-    "tester_expected"_test = [] {
-        expected_tester t(false);
+    "clamped-value-keeps-its-bounds"_test = [] {
+        using capacity = irt::clamped_value<int, 512, 1024>;
+        static_assert(std::is_trivially_copyable_v<capacity>);
+        static_assert(capacity::lower_bound() == 512);
+        static_assert(capacity::upper_bound() == 1024);
 
-        auto ret = t.make().and_then([](auto /*v*/) -> irt::expected<int> {
-            expected_tester_2 t2(false);
-            return t2.make();
-        });
+        expect(eq(capacity{}.value(), 512));
+        expect(eq(capacity{ 0 }.value(), 512));
+        expect(eq(capacity{ 600 }.value(), 600));
+        expect(eq(capacity{ 2048 }.value(), 1024));
 
-        expect(ret.has_value() >> fatal);
-        expect(eq(ret.value(), 2));
-    };
+        capacity source{ 600 };
+        capacity moved{ std::move(source) };
+        expect(eq(moved.value(), 600));
+        expect(ge(source.value(), capacity::lower_bound()));
 
-    "tester_expected_2"_test = [] {
-        expected_tester t(false);
-
-        auto ret = t.make().and_then([](auto /*v*/) -> irt::expected<int> {
-            expected_tester_2 t2(true);
-            return t2.make();
-        });
-
-        expect(not ret.has_value() >> fatal);
-    };
-
-    "tester_expected_3"_test = [] {
-        expected_tester t(false);
-
-        auto ret =
-          t.make()
-            .and_then([](auto /*v*/) -> irt::expected<int> {
-                expected_tester_2 t2(true);
-                return t2.make();
-            })
-            .or_else([](auto /*ec*/) -> irt::expected<int> { return 3; });
-
-        expect(ret.has_value() >> fatal);
-        expect(eq(ret.value(), 3));
-    };
-
-    "tester_expected_4"_test = [] {
-        expected_tester t(false);
-
-        auto ret = t.make()
-                     .and_then(
-                       [](auto v, int plus_1) -> irt::expected<int> {
-                           return v + plus_1;
-                       },
-                       1)
-                     .and_then(
-                       [](auto v, int plus_2) -> irt::expected<int> {
-                           return v + plus_2;
-                       },
-                       2);
-
-        expect(ret.has_value() >> fatal);
-        expect(eq(ret.value(), 4));
-    };
-
-    "tester_expected_5"_test = [] {
-        auto u = []() -> irt::expected<std::unique_ptr<int>> {
-            return std::make_unique<int>(1234);
-        };
-
-        auto ret =
-          u()
-            .and_then(
-              [](auto ptr, int minus) -> irt::expected<std::unique_ptr<int>> {
-                  *ptr -= minus;
-                  return ptr;
-              },
-              4)
-            .and_then(
-              [](auto ptr, int minus) -> irt::expected<std::unique_ptr<int>> {
-                  *ptr -= minus;
-                  return ptr;
-              },
-              1000);
-
-        expect(ret.has_value() >> fatal);
-        expect(!!ret.value() >> fatal);
-        expect(ret.value().get() >> fatal);
-        expect(eq(*ret.value().get(), 230));
-    };
-
-    "counters-expected"_test = [] {
-        ::counters::reset();
-
-        auto fn_1 = [](int a, int b) noexcept -> irt::expected<counters> {
-            if (a == b)
-                return {};
-            else
-                return irt::error_code(1, irt::category::generic);
-        };
-
-        {
-            auto ret_1 = fn_1(0, 1);
-            auto ret_2 = fn_1(1, 1);
-            expect(ret_1.has_error());
-            expect(ret_2.has_value());
-        }
-
-        expect(eq(counters::default_ctor, 1));
-        expect(eq(counters::copy_ctor, 0));
-        expect(eq(counters::move_ctor, 0));
-        expect(eq(counters::in_place_ctor, 0));
-        expect(eq(counters::dtor, 1));
-        expect(eq(counters::copy_op, 0));
-        expect(eq(counters::move_op, 0));
-
-        counters::reset();
-
-        auto fn_2 = [](int a, int b) noexcept -> irt::expected<counters> {
-            if (a == b)
-                return irt::expected<counters>();
-            else
-                return irt::error_code(1, irt::category::generic);
-        };
-
-        {
-            auto ret_1 = fn_2(0, 1);
-            auto ret_2 = fn_2(1, 1);
-            expect(ret_1.has_error());
-            expect(ret_2.has_value());
-        }
-    };
-
-    "test_expected_all_functions"_test = [] {
-        {
-            expected_tester t(false);
-            auto ret = t.make().and_then([](int /*v*/) -> irt::expected<int> {
-                expected_tester_2 t2(false);
-                return t2.make();
-            });
-
-            expect(ret.has_value() >> fatal);
-            expect(eq(ret.value(), 2));
-        }
-
-        {
-            expected_tester t(false);
-            auto            ret = t.make().map([](int v) { return v * 10; });
-
-            expect(ret.has_value() >> fatal);
-            expect(eq(ret.value(), 10));
-        }
-
-        {
-            expected_tester t(true);
-            auto ret = t.make().map_error([](irt::error_code /*ec*/) {
-                return irt::make_error(std::errc::not_enough_memory);
-            });
-
-            expect(!ret.has_value() >> fatal);
-            expect(ret.error().value() ==
-                   static_cast<std::int16_t>(std::errc::not_enough_memory));
-        }
-
-        {
-            expected_tester t(true);
-            auto            ret = t.make().or_else(
-              [](irt::error_code /*ec*/) -> irt::expected<int> { return 42; });
-
-            expect(ret.has_value() >> fatal);
-            expect(eq(ret.value(), 42));
-        }
-
-        {
-            expected_tester t(true);
-            int             val = t.make().unwrap_or(100);
-
-            expect(eq(val, 100));
-        }
-
-        {
-            expected_tester t(true);
-            int val = t.make().unwrap_or_else([](irt::error_code ec) {
-                return static_cast<int>(ec.value()) * 10;
-            });
-
-            expect(eq(val, irt::ordinal(std::errc::not_enough_memory) * 10));
-        }
-
-        {
-            expected_tester t(false);
-            auto            ret =
-              t.make()
-                .and_then([](int /*v*/) -> irt::expected<int> {
-                    expected_tester_2 t2(false);
-                    return t2.make();
-                })
-                .map([](int v) { return v * 5; })
-                .map_error([](irt::error_code /*ec*/) {
-                    return irt::make_error(std::errc::not_enough_memory);
-                })
-                .or_else([](irt::error_code /*ec*/) -> irt::expected<int> {
-                    return 99;
-                });
-
-            expect(ret.has_value() >> fatal);
-            expect(eq(ret.value(), 10));
-        }
-
-        {
-            expected_tester t(true);
-            int             val =
-              t.make()
-                .and_then([](int /*v*/) -> irt::expected<int> {
-                    expected_tester_2 t2(false);
-                    return t2.make();
-                })
-                .map_error([](irt::error_code /*ec*/) {
-                    return irt::make_error(std::errc::not_enough_memory);
-                })
-                .unwrap_or_else([](irt::error_code ec) {
-                    return static_cast<int>(ec.value()) + 100;
-                });
-
-            expect(
-              eq(val, static_cast<int>(std::errc::not_enough_memory) + 100));
-        }
-
-        {
-            irt::expected<void> maybe_void =
-              irt::make_error(std::errc::not_enough_memory);
-            bool error_handled = false;
-            maybe_void.unwrap_or_else([&](irt::error_code ec) {
-                error_handled = true;
-                expect(
-                  eq(ec.value(),
-                     static_cast<std::int16_t>(std::errc::not_enough_memory)));
-            });
-            expect(error_handled >> fatal);
-        }
+        capacity assigned;
+        assigned = std::move(moved);
+        expect(eq(assigned.value(), 600));
+        expect(ge(moved.value(), capacity::lower_bound()));
     };
 
     "bitflags"_test = [] {
@@ -526,20 +297,17 @@ int main()
         expect(eq(f[test_1::e], true));
         expect(eq(f[test_1::f], true));
 
-        expect(eq(
-          f.all_of(
-            test_1::a, test_1::b, test_1::c, test_1::d, test_1::e, test_1::f),
-          false));
+        expect(eq(f.all_of(test_1::a, test_1::b, test_1::c, test_1::d,
+                           test_1::e, test_1::f),
+                  false));
 
-        expect(eq(
-          f.none_of(
-            test_1::a, test_1::b, test_1::c, test_1::d, test_1::e, test_1::f),
-          false));
+        expect(eq(f.none_of(test_1::a, test_1::b, test_1::c, test_1::d,
+                            test_1::e, test_1::f),
+                  false));
 
-        expect(eq(
-          f.any_of(
-            test_1::a, test_1::b, test_1::c, test_1::d, test_1::e, test_1::f),
-          true));
+        expect(eq(f.any_of(test_1::a, test_1::b, test_1::c, test_1::d,
+                           test_1::e, test_1::f),
+                  true));
 
         expect(eq(f.all_of(), true));
         expect(eq(f.all_of(test_1::a, test_1::b), false));
@@ -700,10 +468,10 @@ int main()
     };
 
     "allocator"_test = [] {
-        using a1 = irt::allocator<irt::monotonic_small_buffer<64u>>;
-        using a2 = irt::allocator<irt::monotonic_small_buffer<64u>>;
-        using b1 = irt::allocator<irt::monotonic_small_buffer<32u>>;
-        using b2 = irt::allocator<irt::monotonic_small_buffer<32u>>;
+        using a1 = irt::allocator<arena_resource<64u>>;
+        using a2 = irt::allocator<arena_resource<64u>>;
+        using b1 = irt::allocator<arena_resource<32u>>;
+        using b2 = irt::allocator<arena_resource<32u>>;
 
         using sub_1 = a1::memory_resource_type;
         using sub_2 = a2::memory_resource_type;
@@ -722,10 +490,10 @@ int main()
         expect(neq(ptr_2, ptr_3));
         expect(neq(ptr_2, ptr_4));
 
-        using id_a1 = irt::allocator<irt::monotonic_small_buffer<64u, 1>>;
-        using id_a2 = irt::allocator<irt::monotonic_small_buffer<64u, 1>>;
-        using id_b1 = irt::allocator<irt::monotonic_small_buffer<64u, 2>>;
-        using id_b2 = irt::allocator<irt::monotonic_small_buffer<64u, 2>>;
+        using id_a1 = irt::allocator<arena_resource<64u, 1>>;
+        using id_a2 = irt::allocator<arena_resource<64u, 1>>;
+        using id_b1 = irt::allocator<arena_resource<64u, 2>>;
+        using id_b2 = irt::allocator<arena_resource<64u, 2>>;
 
         using id_sub_1 = id_a1::memory_resource_type;
         using id_sub_2 = id_a2::memory_resource_type;
@@ -994,8 +762,8 @@ int main()
         expect(v2[5] == 5);
     };
 
-    "vector<T>-monotonic_allocator"_test = [] {
-        using fixed_alloc = irt::allocator<irt::monotonic_small_buffer<8192u>>;
+    "vector<T>-arena_allocator"_test = [] {
+        using fixed_alloc = irt::allocator<arena_resource<8192u>>;
 
         irt::vector<int, fixed_alloc> v(8, irt::reserve_tag);
         expect(v.empty());
@@ -2532,11 +2300,11 @@ int main()
 
     "id_data_array_reisze"_test = [] {
         enum class my_id : std::uint32_t {};
-        using A = irt::allocator<irt::new_delete_memory_resource>;
-        using IDAv =
-          irt::id_data_array<void, my_id, A, counted>; // m_ids = id_array
-        using IDAi =
-          irt::id_data_array<int, my_id, A, counted>; // m_ids = data_array
+        using A    = irt::allocator<irt::new_delete_memory_resource>;
+        using IDAv = irt::id_data_array<void, my_id, A,
+                                        counted>; // m_ids = id_array
+        using IDAi = irt::id_data_array<int, my_id, A,
+                                        counted>; // m_ids = data_array
 
         {
             IDAv a;
@@ -2595,12 +2363,9 @@ int main()
 
         enum class ex1_id : uint32_t;
 
-        irt::id_data_array<void,
-                           ex1_id,
+        irt::id_data_array<void, ex1_id,
                            irt::allocator<irt::new_delete_memory_resource>,
-                           pos3d,
-                           color,
-                           name>
+                           pos3d, color, name>
           d;
         expect(d.reserve(1024) >> fatal);
         expect(ge(d.capacity(), 1024u));
@@ -2616,9 +2381,7 @@ int main()
         const auto idx = irt::get_index(id);
         expect(eq(idx, 0));
 
-        d.for_each([](const auto /*id*/,
-                      const auto& p,
-                      const auto& c,
+        d.for_each([](const auto /*id*/, const auto& p, const auto& c,
                       const auto& n) noexcept {
             expect(eq(p.x, 0.f));
             expect(eq(p.x, 0.f));
@@ -2646,9 +2409,7 @@ int main()
         expect(eq(idx2, 1));
         expect(eq(d.ssize(), 2));
 
-        d.for_each([](const auto /*id*/,
-                      const auto& p,
-                      const auto& c,
+        d.for_each([](const auto /*id*/, const auto& p, const auto& c,
                       const auto& n) noexcept {
             expect(eq(p.x, 0.f));
             expect(eq(p.x, 0.f));
@@ -2657,20 +2418,15 @@ int main()
             expect(n.sv() == "HelloWorld!");
         });
 
-        irt::id_data_array<void,
-                           ex1_id,
+        irt::id_data_array<void, ex1_id,
                            irt::allocator<irt::new_delete_memory_resource>,
-                           pos3d,
-                           color,
-                           name>
+                           pos3d, color, name>
           e(d);
 
         expect(eq(d.ssize(), 2));
         expect(eq(e.ssize(), 2));
 
-        d.for_each([](const auto /*id*/,
-                      const auto& p,
-                      const auto& c,
+        d.for_each([](const auto /*id*/, const auto& p, const auto& c,
                       const auto& n) noexcept {
             expect(eq(p.x, 0.f));
             expect(eq(p.x, 0.f));
@@ -2679,9 +2435,7 @@ int main()
             expect(n.sv() == "HelloWorld!");
         });
 
-        e.for_each([](const auto /*id*/,
-                      const auto& p,
-                      const auto& c,
+        e.for_each([](const auto /*id*/, const auto& p, const auto& c,
                       const auto& n) noexcept {
             expect(eq(p.x, 0.f));
             expect(eq(p.x, 0.f));
@@ -2690,17 +2444,12 @@ int main()
             expect(n.sv() == "HelloWorld!");
         });
 
-        irt::id_data_array<void,
-                           ex1_id,
+        irt::id_data_array<void, ex1_id,
                            irt::allocator<irt::new_delete_memory_resource>,
-                           pos3d,
-                           color,
-                           name>
+                           pos3d, color, name>
           f(std::move(e));
 
-        f.for_each([](const auto /*id*/,
-                      const auto& p,
-                      const auto& c,
+        f.for_each([](const auto /*id*/, const auto& p, const auto& c,
                       const auto& n) noexcept {
             expect(eq(p.x, 0.f));
             expect(eq(p.x, 0.f));
@@ -2709,12 +2458,9 @@ int main()
             expect(n.sv() == "HelloWorld!");
         });
 
-        irt::id_data_array<pos3d,
-                           ex1_id,
+        irt::id_data_array<pos3d, ex1_id,
                            irt::allocator<irt::new_delete_memory_resource>,
-                           pos3d,
-                           color,
-                           name>
+                           pos3d, color, name>
           g(16);
 
         auto& p1 = g.alloc(1.f, 2.f, 3.f);
@@ -3368,8 +3114,8 @@ int main()
 
             other_data = data;
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), other_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       other_data.begin());
 
             expect(is_equal);
         }
@@ -3380,8 +3126,8 @@ int main()
 
             other_data = data;
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), other_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       other_data.begin());
 
             expect(is_equal);
         }
@@ -3421,10 +3167,17 @@ int main()
             vec data(sorted_vec.begin(), sorted_vec.end());
             vec other_data(data);
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-assign-overloaded"
+#endif
             other_data = other_data;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), other_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       other_data.begin());
 
             expect(is_equal);
         }
@@ -3432,10 +3185,17 @@ int main()
             svec data(sorted_vec.begin(), sorted_vec.end());
             svec other_data(data);
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-assign-overloaded"
+#endif
             other_data = other_data;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), other_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       other_data.begin());
 
             expect(is_equal);
         }
@@ -3507,8 +3267,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3521,8 +3281,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3599,8 +3359,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3613,8 +3373,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3637,8 +3397,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3652,8 +3412,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3698,8 +3458,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3712,8 +3472,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3751,8 +3511,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3767,8 +3527,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.begin(), data.end(), compare_data.begin());
+            bool is_equal = std::equal(data.begin(), data.end(),
+                                       compare_data.begin());
 
             expect(is_equal);
         }
@@ -3816,8 +3576,8 @@ int main()
 
             expect(eq(compare_data.size(), data.size()));
 
-            bool is_equal =
-              std::equal(data.cbegin(), data.cend(), compare_data.cbegin());
+            bool is_equal = std::equal(data.cbegin(), data.cend(),
+                                       compare_data.cbegin());
 
             expect(is_equal);
         }
@@ -3980,11 +3740,9 @@ int main()
         enum class my_id : irt::u32;
         using name = irt::small_string<32>;
 
-        irt::data_vector_array<void,
-                               my_id,
+        irt::data_vector_array<void, my_id,
                                irt::allocator<irt::new_delete_memory_resource>,
-                               position,
-                               name>
+                               position, name>
           data(8);
 
         expect(eq(data.size(), 0u));
@@ -4059,11 +3817,9 @@ int main()
         enum class my_id : irt::u32;
         using name = irt::small_string<32>;
 
-        irt::data_vector_array<position,
-                               my_id,
+        irt::data_vector_array<position, my_id,
                                irt::allocator<irt::new_delete_memory_resource>,
-                               position,
-                               name>
+                               position, name>
           data(8);
 
         expect(eq(data.size(), 0u));

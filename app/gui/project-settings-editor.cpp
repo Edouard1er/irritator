@@ -200,104 +200,555 @@ static bool show_registred_obseravation_path(application&    app,
     return old_observation_dir != ed.pj.observation_dir;
 }
 
+/// The journal of the commands beside the project file: "name.pirt" gives
+/// "name.irj".
+static std::optional<path> journal_file(application&          app,
+                                        const project_editor& ed) noexcept
+{
+    return app.mod.files.read(
+      [&](const auto& fs, auto) noexcept -> std::optional<path> {
+          const auto pirt = make_file(fs, ed.pj.project_file);
+          if (not pirt.has_value())
+              return std::nullopt;
+
+          auto stem = pirt->sv();
+          if (stem.ends_with(file_type_names[ordinal(file_type::project_file)]))
+              stem.remove_suffix(
+                file_type_names[ordinal(file_type::project_file)].size());
+
+          path ret;
+          format(ret, "{}.irj", stem);
+          return ret;
+      });
+}
+
+static void save_journal_file(application& app, project_editor& ed) noexcept
+{
+    const auto p = journal_file(app, ed);
+    if (not p.has_value()) {
+        log(log_level::error,
+            [](auto& m) noexcept { m = "journal: save the project first"; });
+        return;
+    }
+
+    auto f = file::open(*p, file_mode{ file_open_options::write });
+    if (f.has_value()) {
+        if (auto ret = save_journal(ed.pj, ed.sim_player.journal, *f,
+                                    json_pretty_print::indent_2);
+            ret.has_value()) {
+            log(log_level::info, [&](auto& m) noexcept {
+                format(m, "journal: {} commands written in {}",
+                       ed.sim_player.journal.entries().size(), p->sv());
+            });
+            return;
+        }
+    }
+
+    log(log_level::error, [&](auto& m) noexcept {
+        format(m, "journal: can not write {}", p->sv());
+    });
+}
+
+static bool load_journal_file(application& app, project_editor& ed) noexcept
+{
+    const auto p = journal_file(app, ed);
+    if (not p.has_value()) {
+        log(log_level::error,
+            [](auto& m) noexcept { m = "journal: the project has no file"; });
+        return false;
+    }
+
+    auto f = file::open(*p, file_mode{ file_open_options::read });
+    if (f.has_value()) {
+        if (auto ret = load_journal(ed.pj, ed.sim_player.journal, *f);
+            ret.has_value()) {
+            log(log_level::info, [&](auto& m) noexcept {
+                format(m, "journal: {} commands read from {}",
+                       ed.sim_player.journal.entries().size(), p->sv());
+            });
+            return true;
+        }
+    }
+
+    log(log_level::error, [&](auto& m) noexcept {
+        format(m, "journal: can not read {}", p->sv());
+    });
+    return false;
+}
+
+template<class Fn>
+static bool submit(application&     app,
+                   const project_id pj_id,
+                   project_editor&  ed,
+                   Fn               fn) noexcept
+{
+    auto& c = ed.sim_player;
+
+    if (c.busy.test_and_set(std::memory_order_acquire))
+        return false;
+
+    app.add_simulation_task(
+      pj_id,
+      [&ed, fn,
+       history = c.view != player_controller::kind::complete]() noexcept {
+          auto&      c  = ed.sim_player;
+          const auto t0 = std::chrono::steady_clock::now();
+
+          // The commands of the user are applied between two steps, before
+          // the work of the task. A refused edition (player not started or
+          // finalized) drops them: kept, they would be submitted again at
+          // each frame and applied to another simulation.
+          c.result = success();
+          if (not c.commands.empty()) {
+              c.result = c.player.edit([&]() noexcept {
+                  return c.journal.apply(c.commands, c.player.step());
+              });
+              c.commands.clear();
+          }
+
+          // The complete mode keeps no keyframe, the others keep them. It is
+          // a no-op when the player is already in the right mode.
+          if (not c.result.has_error())
+              c.result = c.player.keep_history(history);
+          if (not c.result.has_error())
+              c.result = fn(c.player);
+          if (history and not c.result.has_error())
+              c.result = c.player.flush_observers();
+
+          if (not c.result.has_error()) {
+              if (c.player.finalized())
+                  c.result = ed.pj.close_observations();
+              else if (not history)
+                  c.result = ed.pj.flush_observations();
+          }
+
+          c.work += std::chrono::steady_clock::now() - t0;
+
+          c.fresh.step        = c.player.step();
+          c.fresh.furthest    = c.player.furthest_step();
+          c.fresh.earliest    = c.player.earliest_step();
+          c.fresh.t           = c.player.current_time();
+          c.fresh.begin       = c.player.begin_time();
+          c.fresh.end         = c.player.end_time();
+          c.fresh.target      = c.pacer.target();
+          c.fresh.lateness_ms = std::chrono::duration_cast<
+                                  std::chrono::milliseconds>(
+                                  c.pacer.lateness(c.player.next_time()))
+                                  .count();
+          c.fresh
+            .work_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         c.work)
+                         .count();
+          c.fresh.resyncs   = c.resyncs;
+          c.fresh.started   = c.player.started();
+          c.fresh.finished  = c.player.finished();
+          c.fresh.can_back  = c.player.can_step_back();
+          c.fresh.keyframes = c.player.keyframe_number();
+          c.fresh.bytes     = c.player.memory_usage();
+          c.fresh.journal   = c.journal.entries().size();
+          c.has_result      = true;
+          c.busy.clear(std::memory_order_release); // always last instruction
+      });
+
+    return true;
+}
+
 static bool EnhancedButton(const application& app,
                            const char*        label,
                            const ImVec2       button_size,
                            const char*        msg) noexcept
+
 {
     ImGui::PushFont(app.icons);
     const auto click = ImGui::Button(label, button_size);
     ImGui::PopFont();
-
     if (msg and ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", msg);
-
     return click;
 }
 
-static void show_simulation_action_buttons(application&    app,
-                                           project_editor& ed) noexcept
+void project_editor::schedule_player(application& app) noexcept
 {
-    const auto item_x         = ImGui::GetStyle().ItemSpacing.x;
-    const auto region_x       = ImGui::GetContentRegionAvail().x;
-    const auto button_x       = (region_x - 4.f * item_x) / 5.f;
-    const auto small_button_x = (region_x - 2.f * item_x) / 3.f;
-    const auto button         = ImVec2{ button_x, 0.f };
-    const auto small_button   = ImVec2{ small_button_x, 0.f };
+    using mode = player_controller::mode;
 
-    const bool can_be_initialized = any_equal(
-      ed.pj.simulation_state, simulation_status::not_started,
-      simulation_status::initialized, simulation_status::paused,
-      simulation_status::finished);
+    const auto pj_id = app.pjs.get_id(*this);
 
-    const bool can_be_started = ed.pj.simulation_state ==
-                                simulation_status::initialized;
+    if (sim_player.busy.test(std::memory_order_acquire))
+        return;
 
-    const bool can_be_paused = ed.pj.simulation_state ==
-                               simulation_status::running;
+    if (sim_player.has_result) {
+        sim_player.has_result = false;
+        sim_player.shown      = sim_player.fresh;
 
-    const bool can_be_restarted = ed.pj.simulation_state ==
-                                  simulation_status::paused;
+        if (sim_player.result.has_error()) {
+            sim_player.current = mode::paused;
+            log(log_level::error, [&](auto& m) noexcept {
+                format(m, "Simulation player error: {}",
+                       sim_player.result.error());
+            });
+        }
+    }
 
-    ImGui::BeginDisabled(not can_be_initialized);
-    if (EnhancedButton(app, "\ue0c8", button,
-                       "Initialize simulation models and data."))
-        ed.init_simulation(app);
+    // The journal belongs to the task while the player is busy.
+    if (std::exchange(sim_player.need_save_journal, false))
+        save_journal_file(app, *this);
+
+    // The simulation belongs to the task while the player is busy: it is
+    // built again here, between two tasks.
+    if (std::exchange(sim_player.need_rebuild, false)) {
+        // No task runs: the main thread is the consumer of the queue.
+        sim_player.commands.clear();
+
+        // A new game, or a replay of the commands of the journal.
+        const auto replay = std::exchange(sim_player.need_replay, false);
+        const auto load   = std::exchange(sim_player.need_load_journal, false);
+        if (not replay and not load)
+            sim_player.journal.clear();
+
+        {
+            // The tasks of the views that read the simulation wait.
+            const auto structure = sim_player.player
+                                     .lock_structure_for_rebuild();
+
+            if (pj.simulation_init(app.mod).has_error()) {
+                sim_player.current = mode::paused;
+                return;
+            }
+
+            // After the build: the names of the journal are resolved in it.
+            if (load and not load_journal_file(app, *this))
+                sim_player.journal.clear();
+        }
+
+        sim_player.player.reset();
+
+        if (sim_player.current == mode::complete) {
+            sim_player.need_start = true;
+        } else {
+            sim_player.current = mode::paused;
+            submit(app, pj_id, *this, [](auto& p) { return p.start(); });
+            return;
+        }
+    }
+
+    switch (sim_player.current) {
+    case mode::paused:
+        // A task without work: it applies the commands of the user.
+        if (not sim_player.commands.empty())
+            submit(app, pj_id, *this,
+                   [](auto&) noexcept -> status { return success(); });
+        break;
+
+    case mode::play:
+        if (sim_player.shown.finished)
+            sim_player.current = mode::paused;
+        else
+            submit(app, pj_id, *this,
+                   [steps  = sim_player.steps_per_frame,
+                    budget = sim_player.frame_budget](auto& p) {
+                       return p.advance(budget, steps);
+                   });
+        break;
+
+    case mode::reverse:
+        if (not sim_player.shown.can_back)
+            sim_player.current = mode::paused;
+        else
+            submit(app, pj_id, *this,
+                   [steps  = sim_player.steps_per_frame,
+                    budget = sim_player.frame_budget](auto& p) {
+                       return p.retreat(budget, steps);
+                   });
+        break;
+
+    case mode::realtime:
+        if (sim_player.shown.finished) {
+            sim_player.current = mode::paused;
+            break;
+        }
+
+        submit(app, pj_id, *this,
+               [&pacer = sim_player.pacer, &resyncs = sim_player.resyncs,
+                unit     = sim_player.unit_duration,
+                budget   = sim_player.task_duration,
+                max_late = sim_player.max_lateness,
+                reset    = std::exchange(sim_player.pace_reset, false)](
+                 auto& p) noexcept -> status {
+                   const auto now = realtime_pacer::clock::now();
+
+                   if (reset)
+                       pacer.rebase(p.current_time(), now);
+
+                   if (pacer.unit_duration() != unit)
+                       pacer.set_unit_duration(unit, now);
+
+                   if (pacer.resync_if_late(p.next_time(), max_late, now))
+                       ++resyncs;
+
+                   return p.advance_until(pacer.target(now), budget);
+               });
+        break;
+
+    case mode::complete:
+        // need_start: the user asks for a new run, even if the last one is
+        // finished (shown.finished is the state of the last run).
+        if (sim_player.shown.finished and not sim_player.need_start) {
+            sim_player.current = mode::paused;
+            break;
+        }
+
+        submit(app, pj_id, *this,
+               [&work = sim_player.work, budget = sim_player.complete_budget,
+                restart = std::exchange(sim_player.need_start, false)](
+                 auto& p) noexcept -> status {
+                   if (restart) {
+                       work = std::chrono::nanoseconds::zero();
+
+                       if (auto ret = p.start(); ret.has_error())
+                           return ret;
+                   }
+
+                   return p.advance(budget);
+               });
+        break;
+    }
+}
+
+static void show_restart_button(const application& app,
+                                player_controller& c) noexcept
+{
+    if (EnhancedButton(app, "\ue0b4##restart", ImVec2{},
+                       "Build the simulation again and start it")) {
+        c.current      = player_controller::mode::paused;
+        c.need_rebuild = true;
+    }
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(c.shown.journal == 0);
+    if (ImGui::Button("Replay")) {
+        c.current      = player_controller::mode::paused;
+        c.need_rebuild = true;
+        c.need_replay  = true;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Build the simulation again and replay the %u "
+                          "commands of the journal",
+                          static_cast<unsigned>(c.shown.journal));
+
+    ImGui::SameLine();
+    if (ImGui::Button("Save journal"))
+        c.need_save_journal = true;
     ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Write the commands in the .irj file of the project");
+
+    ImGui::SameLine();
+    if (ImGui::Button("Load journal")) {
+        c.current           = player_controller::mode::paused;
+        c.need_rebuild      = true;
+        c.need_load_journal = true;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Read the .irj file of the project, build the "
+                          "simulation again and replay the commands");
+}
+
+static void show_debug_player(application&     app,
+                              project_editor&  ed,
+                              const project_id pj_id) noexcept
+{
+    using mode = player_controller::mode;
+
+    auto& c = ed.sim_player;
+
+    if (not c.shown.started) {
+        if (EnhancedButton(app, "\ue0a9##start", ImVec2{}, "Start the player"))
+            c.need_rebuild = true;
+        return;
+    }
+
+    const auto size = ImGui::ComputeButtonSize(5);
+    const auto busy = c.busy.test(std::memory_order_acquire);
+
+    ImGui::BeginDisabled(busy);
+    if (EnhancedButton(app, "\ue0c5##c", size, "Beginning")) {
+        c.current = mode::paused;
+        submit(app, pj_id, ed, [](auto& p) { return p.go_to(0); });
+    }
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(not can_be_started);
-    if (EnhancedButton(app, "\ue0a9", button, "Start and run the simulation"))
-        ed.run_simulation(app);
-    ImGui::EndDisabled();
+    if (EnhancedButton(app, "\ue02f##c", size, "Back")) {
+        c.current = mode::paused;
+        submit(app, pj_id, ed, [](auto& p) { return p.step_back(); });
+    }
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(not can_be_paused);
-    if (EnhancedButton(app, "\ue09e", button, "Pause the simulation"))
-        ed.pause_simulation();
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-
-    ImGui::BeginDisabled(not can_be_restarted);
-    if (EnhancedButton(app, "\ue030", button,
-                       "Restart the simulation after pause")) {
-        ed.pj.simulation_state = simulation_status::run_requiring;
-        ed.force_pause         = false;
+    if (EnhancedButton(app, "\ue030##c", size, "Forward")) {
+        c.current = mode::paused;
+        submit(app, pj_id, ed, [](auto& p) { return p.step_forward(); });
     }
     ImGui::EndDisabled();
 
     ImGui::SameLine();
 
-    // ImGui::BeginDisabled(can_be_stopped);
-    // if (EnhancedButton(
-    //       app,
-    //       "\ue0cb",
-    //       button,
-    //       "Stop the simulation (can not be restart at the same state"))
-    //     ed.force_stop = true;
-    // ImGui::EndDisabled();
+    if (EnhancedButton(app, c.current == mode::play ? "\ue09e##c" : "\ue034##c",
+                       size, "Play"))
+        c.current = (c.current == mode::play) ? mode::paused : mode::play;
 
-    if (ed.pj.flags[project::simulation_flag::debug] and can_be_restarted) {
-        if (EnhancedButton(app, "\ue0c6", small_button,
-                           "Advance simulation step by step"))
-            ed.pj.simulation_step();
+    ImGui::SameLine();
 
-        ImGui::SameLine();
+    if (EnhancedButton(app,
+                       c.current == mode::reverse ? "\ue09e##r" : "\ue033##r",
+                       size, "Reverse"))
+        c.current = (c.current == mode::reverse) ? mode::paused : mode::reverse;
 
-        ImGui::BeginDisabled(ed.pj.empty_snapshots());
-        if (EnhancedButton(app, "\ue0b3", small_button,
-                           "Rewind into simulation states"))
-            ed.pj.simulation_back();
+    auto zero = static_cast<ImU64>(0);
+    auto last = static_cast<ImU64>(c.shown.furthest);
 
-        ImGui::SameLine();
+    if (not c.dragging)
+        c.target = c.shown.step;
 
-        if (EnhancedButton(app, "\ue05c", small_button,
-                           "Forward into simulation states"))
-            ed.pj.simulation_advance();
-        ImGui::EndDisabled();
+    ImGui::SliderScalar("step", ImGuiDataType_U64, &c.target, &zero, &last);
+    c.dragging = ImGui::IsItemActive();
+    if (ImGui::IsItemDeactivatedAfterEdit() and
+        not c.busy.test(std::memory_order_acquire)) {
+        c.current = mode::paused;
+        submit(app, pj_id, ed,
+               [target = c.target](auto& p) { return p.go_to(target); });
+    }
+
+    ImGui::TextFormat("step {}, time {:g}", c.shown.step, c.shown.t);
+    if (busy)
+        ImGui::TextFormat("Work in progress...");
+
+    show_restart_button(app, c);
+}
+
+static void show_realtime_player(application& app, project_editor& ed) noexcept
+{
+    using mode = player_controller::mode;
+
+    auto& c = ed.sim_player;
+
+    if (not c.shown.started) {
+        if (EnhancedButton(app, "\ue0a9##start", ImVec2{}, "Start the player"))
+            c.need_rebuild = true;
+        return;
+    }
+
+    const auto size = ImGui::ComputeButtonSize(5);
+
+    if (EnhancedButton(app,
+                       c.current == mode::realtime ? "\ue09e##t" : "\ue038##t",
+                       size, "Real time")) {
+        if (c.current == mode::realtime) {
+            c.current = mode::paused;
+        } else {
+            c.current    = mode::realtime;
+            c.pace_reset = true;
+        }
+    }
+
+    ImGui::TextFormat("step {}, time {:g}", c.shown.step, c.shown.t);
+
+    if (c.current == mode::realtime) {
+        ImGui::TextFormat("target {:.3f}, lateness {} ms, resync {}",
+                          c.shown.target, c.shown.lateness_ms, c.shown.resyncs);
+        if (c.shown.lateness_ms > 0)
+            ImGui::TextFormat("The simulation is slower than the real time.");
+    }
+
+    show_restart_button(app, c);
+}
+
+static void show_complete_player(application& app, project_editor& ed) noexcept
+{
+    using mode = player_controller::mode;
+
+    auto& c = ed.sim_player;
+
+    const auto size     = ImGui::ComputeButtonSize(2);
+    const auto running  = c.current == mode::complete;
+    const auto finished = c.shown.started and c.shown.finished;
+    const auto resume   = c.shown.started and not finished;
+
+    if (running) {
+        if (EnhancedButton(app, "\ue09e##full", size, "Pause"))
+            c.current = mode::paused;
+    } else {
+        if (EnhancedButton(app, "\ue034##full", size,
+                           resume ? "Resume" : "Run")) {
+            // Resume continues the current simulation: no rebuild.
+            c.need_rebuild = not resume;
+            c.current      = mode::complete;
+        }
+    }
+
+    ImGui::SameLine();
+
+    ImGui::BeginDisabled(not c.shown.started);
+    if (EnhancedButton(app, "\ue0b4##full", size, "Restart")) {
+        c.need_rebuild = true;
+        c.current      = mode::complete;
+    }
+    ImGui::EndDisabled();
+
+    if (std::isfinite(c.shown.end) and c.shown.end > c.shown.begin) {
+        const auto ratio = (c.shown.t - c.shown.begin) /
+                           (c.shown.end - c.shown.begin);
+
+        ImGui::ProgressBar(static_cast<float>(std::clamp(ratio, 0.0, 1.0)),
+                           ImVec2{ -FLT_MIN, 0.f });
+    }
+
+    ImGui::TextFormat("step {}, time {:g}", c.shown.step, c.shown.t);
+
+    if (c.shown.work_ms > 0) {
+        const auto seconds = static_cast<double>(c.shown.work_ms) / 1000.0;
+
+        ImGui::TextFormat("{:.2f} s, {:.0f} steps/s", seconds,
+                          static_cast<double>(c.shown.step) / seconds);
+    }
+
+    if (finished)
+        ImGui::TextUnformatted("The simulation is finished.");
+}
+
+static void show_simulation_player(application&     app,
+                                   project_editor&  ed,
+                                   const project_id pj_id) noexcept
+{
+    using kind = player_controller::kind;
+
+    static constexpr const char* names[] = { "Debug", "Real time", "Complete" };
+
+    auto selected = static_cast<int>(ed.sim_player.view);
+    for (auto i = 0; i != 3; ++i) {
+        if (i != 0)
+            ImGui::SameLine();
+
+        ImGui::RadioButton(names[i], &selected, i);
+    }
+
+    if (selected != static_cast<int>(ed.sim_player.view)) {
+        ed.sim_player.view    = enum_cast<kind>(selected);
+        ed.sim_player.current = player_controller::mode::paused;
+    }
+
+    switch (ed.sim_player.view) {
+    case kind::debug:
+        show_debug_player(app, ed, pj_id);
+        break;
+
+    case kind::realtime:
+        show_realtime_player(app, ed);
+        break;
+
+    case kind::complete:
+        show_complete_player(app, ed);
+        break;
     }
 }
 
@@ -329,6 +780,9 @@ static bool show_project_simulation_settings(application&    app,
 
             app.add_gui_task([&app, pj_id]() {
                 auto& ed = app.pjs.get(pj_id);
+
+                // The task of the simulation can add a model to a tree node.
+                const auto structure = ed.sim_player.player.lock_structure();
 
                 app.mod.files.read([&](const auto& fs, auto) noexcept {
                     app.mod.ids.read([&](const auto& ids, auto) noexcept {
@@ -379,7 +833,8 @@ static bool show_project_simulation_settings(application&    app,
         ed.pj.sim.limits.set_bound(begin, end);
     ImGui::EndDisabled();
 
-    ImGui::BeginDisabled(not ed.pj.flags[project::simulation_flag::real_time]);
+    ImGui::BeginDisabled(ed.sim_player.view !=
+                         player_controller::kind::realtime);
     {
         i64 value = ed.one_simulation_time_duration.count();
 
@@ -390,11 +845,13 @@ static bool show_project_simulation_settings(application&    app,
                 ++up;
             }
         }
+
         ImGui::SameLine();
         HelpMarker("Duration in milliseconds per unit of simulation time. "
                    "Default is to "
                    "run 1 unit time of simulation in one second.");
     }
+
     ImGui::EndDisabled();
 
     {
@@ -411,23 +868,11 @@ static bool show_project_simulation_settings(application&    app,
                    "value may increase CPU load.");
     }
 
-    const auto started = any_equal(ed.pj.simulation_state,
-                                   simulation_status::not_started,
-                                   simulation_status::initialized);
-
     auto flags     = ed.pj.flags;
-    auto debug     = ed.pj.flags[project::simulation_flag::debug];
-    auto real_time = ed.pj.flags[project::simulation_flag::real_time];
     auto write_irb = ed.pj.flags[project::simulation_flag::write_irtb];
 
-    ImGui::BeginDisabled(not started);
-    if (ImGui::Checkbox("Debug", &debug))
-        flags.set(project::simulation_flag::debug, debug);
-    if (ImGui::Checkbox("Real time", &real_time))
-        flags.set(project::simulation_flag::real_time, real_time);
     if (ImGui::Checkbox("Write on disk", &write_irb))
         flags.set(project::simulation_flag::write_irtb, write_irb);
-    ImGui::EndDisabled();
 
     if (flags != ed.pj.flags) {
         ed.pj.flags            = flags; /* Disable start button */
@@ -444,7 +889,9 @@ static bool show_project_simulation_settings(application&    app,
     ImGui::SameLine();
     HelpMarker("Display the simulation phase. Only for debug.");
 
-    show_simulation_action_buttons(app, ed);
+    ed.sim_player.unit_duration = ed.one_simulation_time_duration;
+    ed.sim_player.task_duration = ed.simulation_task_duration;
+    show_simulation_player(app, ed, app.pjs.get_id(ed));
 
     ImGui::SeparatorText("Observation");
 
@@ -467,16 +914,12 @@ static bool show_project_simulation_settings(application&    app,
     }
 
     ImGui::SameLine();
-    HelpMarker(
-      "None: do nothing.\n"
-      "Graph: writes the simulation graph using a dot format into the "
-      "observation directory path defined above"
-      "Binary or Text: writes graph and all transition for all models "
-      "during "
-      "the simulation. A csv file format is used and the file is opened "
-      "into "
-      "the observation directroy defined above.\nPlease note, the file "
-      "may be large.");
+    HelpMarker("None: do nothing.\n Graph: writes the simulation graph using a "
+               " dot format into the  observation directory path defined "
+               "above.\n Binary or Text: writes graph  and all transition for "
+               "all models during the simulation. A csv file  format is used "
+               "and the file is opened  into the observation directroy  "
+               "defined above.\nPlease note, the file may be large.");
 
     app.sim_to_cpp.show(std::as_const(ed));
 
@@ -506,6 +949,15 @@ void project_editor::show_settings_and_hierarchy(application& app) noexcept
                     if (selection != m_selected_tree_node)
                         next_selection = selection;
                 }
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("Input data")) {
+                if (ImGui::BeginChild("###input-data",
+                                      ImGui::GetContentRegionAvail()))
+                    app.data_ed.show(app, *this);
+
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }

@@ -8,7 +8,6 @@
 #include <irritator/macros.hpp>
 #include <irritator/modeling-helpers.hpp>
 #include <irritator/modeling.hpp>
-#include <irritator/timeline.hpp>
 
 #include <optional>
 
@@ -21,33 +20,44 @@
 
 namespace irt {
 
-project_editor::project_editor(const std::string_view default_name,
+project_editor::project_editor(const modeling&        mod,
+                               const std::string_view default_name,
                                project&&              project_) noexcept
-  : pj(std::move(project_))
+  : output_context{ ImPlot::CreateContext() }
+  , pj(std::move(project_))
+  , sim_player{ pj }
   , graph_eds{ 16 }
   , visualisation_eds{ 64, reserve_tag }
 {
     set_title_name(default_name);
 
-    output_context = ImPlot::CreateContext();
+    if (const auto ret = pj.simulation_init(mod); ret.has_error()) {
+        log(log_level::error, [&](auto& m) {
+            format(m, "fail to open project-editor: {}", ret.error());
+        });
+
+        // @TODO prepare to close the window.
+    }
 }
 
 void project_editor::set_title_name(const std::string_view name) noexcept
 {
     format(title, "{}##project", name);
+    format(observations_title, "Observations - {}##project-observations", name);
     pj.name = name;
 }
 
 project_editor::~project_editor() noexcept
 {
-    if (output_context) {
-        ImPlot::DestroyContext(output_context);
-    }
-}
+    // A task blocked in a rewind waits for this lock: release it before
+    // waiting for the task.
+    sim_player.frame_lock = {};
 
-bool project_editor::is_selected(tree_node_id id) const noexcept
-{
-    return m_selected_tree_node == id;
+    while (sim_player.busy.test(std::memory_order_acquire))
+        std::this_thread::yield();
+
+    if (output_context)
+        ImPlot::DestroyContext(output_context);
 }
 
 void project_editor::select(application& app, tree_node_id id) noexcept
@@ -281,14 +291,6 @@ static bool show_local_simulation_plot_observers_table(
     return is_modified > 0;
 }
 
-static auto get_global_parameter(const auto&            tn,
-                                 const std::string_view uid) noexcept
-  -> global_parameter_id
-{
-    auto* ptr = tn.parameters_ids.get(uid);
-    return ptr ? *ptr : undefined<global_parameter_id>();
-}
-
 static bool show_local_simulation_settings(application&    app,
                                            project_editor& ed,
                                            tree_node&      tn) noexcept
@@ -397,7 +399,8 @@ static void show_local_variables_plot(application&       app,
         const auto  opts = v_obs.subs.template get<plot_type_options>(id);
         const auto& name = v_obs.subs.template get<name_str>(id);
 
-        app.plot_obs.show_plot_line(*obs, opts, name.c_str());
+        app.plot_obs.show_plot_line(ed.sim_player.curves.get(obs_id), opts,
+                                    name.c_str());
     }
 }
 
@@ -791,7 +794,8 @@ static void show_subplots(application&       app,
             const auto  opts = vobs.subs.template get<plot_type_options>(id);
             const auto& name = vobs.subs.template get<name_str>(id);
 
-            app.plot_obs.show_plot_line(*obs, opts, name.c_str());
+            app.plot_obs.show_plot_line(ed.sim_player.curves.get(obs_id), opts,
+                                        name.c_str());
         }
 
         ImPlot::EndPlot();
@@ -926,14 +930,14 @@ static void show_component_observations(application&    app,
                     ImPlot::EndPlot();
                 }
                 ImGui::PopID();
-            }
 
-            ++pos;
-            if (pos >= *sim_ed.tree_node_observation) {
-                pos = 0;
-                ImGui::TableNextRow();
+                ++pos;
+                if (pos >= *sim_ed.tree_node_observation) {
+                    pos = 0;
+                    ImGui::TableNextRow();
+                }
+                ImGui::TableNextColumn();
             }
-            ImGui::TableNextColumn();
         }
 
         ImGui::EndTable();
@@ -1047,8 +1051,80 @@ static void show_simulation_editor_treenode(application&    app,
     }
 }
 
+/// The observations of the selected component, or of all the project
+/// without selection.
+static void show_scope_observations(application&    app,
+                                    project_editor& ed,
+                                    tree_node*      selected) noexcept
+{
+    if (selected)
+        show_component_observations(app, ed, *selected);
+    else
+        (void)show_project_observations(app, ed);
+}
+
+/// "Project > root > ... > selected": the scope of the tabs. A click on the
+/// project or on a parent changes the selection.
+static void show_scope_breadcrumb(application& app, project_editor& ed) noexcept
+{
+    auto next = ed.m_selected_tree_node;
+
+    if (ImGui::SmallButton("Project"))
+        next = undefined<tree_node_id>();
+
+    small_vector<const tree_node*, max_component_stack_size> path;
+    for (const auto* tn = ed.pj.tree_nodes.try_to_get(ed.m_selected_tree_node);
+         tn and path.can_alloc(1); tn = tn->tree.get_parent())
+        path.emplace_back(tn);
+
+    app.mod.ids.read([&](const auto& ids, auto) noexcept {
+        for (auto i = static_cast<int>(path.size()) - 1; i >= 0; --i) {
+            const auto& tn = *path[i];
+
+            const auto& compo = ids.components[tn.id];
+            const auto  name  = format_n<127>("{} ({})", compo.name.sv(),
+                                              tn.unique_id.sv());
+
+            ImGui::SameLine();
+            ImGui::TextUnformatted(">");
+            ImGui::SameLine();
+
+            ImGui::PushID(i);
+            if (i == 0) {
+                ImGui::TextFormat("{} - {}", name.sv(),
+                                  component_type_names[ordinal(compo.type)]);
+            } else if (ImGui::SmallButton(name.c_str())) {
+                next = ed.pj.tree_nodes.get_id(tn);
+            }
+            ImGui::PopID();
+        }
+    });
+
+    if (next != ed.m_selected_tree_node)
+        ed.select(app, next);
+}
+
+void project_editor::show_observations_window_content(application& app) noexcept
+{
+    if (not sim_player.simulation_readable()) {
+        ImGui::TextUnformatted("Restoring the simulation...");
+        return;
+    }
+
+    show_scope_observations(app, *this,
+                            pj.tree_nodes.try_to_get(m_selected_tree_node));
+}
+
 auto project_editor::show(application& app) noexcept -> show_result_t
 {
+    // Before the window of the project: its early returns do not skip it.
+    if (show_observations_window) {
+        ImGui::SetNextWindowSize(ImVec2(600.f, 400.f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin(observations_title.c_str(), &show_observations_window))
+            show_observations_window_content(app);
+        ImGui::End();
+    }
+
     if (not is_dock_init) {
         ImGui::SetNextWindowDockID(app.get_main_dock_id());
         is_dock_init = true;
@@ -1056,6 +1132,13 @@ auto project_editor::show(application& app) noexcept -> show_result_t
 
     bool is_open = true;
     if (not ImGui::Begin(title.c_str(), &is_open)) {
+        ImGui::End();
+        return is_open ? show_result_t::success
+                       : show_result_t::request_to_close;
+    }
+
+    if (not sim_player.simulation_readable()) {
+        ImGui::TextUnformatted("Restoring the simulation...");
         ImGui::End();
         return is_open ? show_result_t::success
                        : show_result_t::request_to_close;
@@ -1075,55 +1158,42 @@ auto project_editor::show(application& app) noexcept -> show_result_t
 
         ImGui::TableSetColumnIndex(1);
         if (ImGui::BeginChild("##ed-sim", ImGui::GetContentRegionAvail())) {
-            auto* selected = pj.tree_nodes.try_to_get(m_selected_tree_node);
+            show_scope_breadcrumb(app, *this);
 
+            auto* selected = pj.tree_nodes.try_to_get(m_selected_tree_node);
+            if (m_selected_tree_node != old_selected_tree_node)
+                graph_ed.request_update();
+
+            // The same tabs for the two scopes: the active tab stays when the
+            // selection changes.
             if (ImGui::BeginTabBar("##SimulationTabBar")) {
+                if (ImGui::BeginTabItem("Graph")) {
+                    if (selected)
+                        show_simulation_editor_treenode(app, *this, *selected);
+                    else
+                        app.flat_sim.display(app, *this);
+                    ImGui::EndTabItem();
+                }
+
                 if (ImGui::BeginTabItem("Parameters")) {
-                    show_project_parameters(app, *this);
+                    if (selected)
+                        show_local_simulation_settings(app, *this, *selected);
+                    else
+                        show_project_parameters(app, *this);
                     ImGui::EndTabItem();
                 }
 
                 if (ImGui::BeginTabItem("Observations")) {
-                    show_project_observations(app, *this);
-                    ImGui::EndTabItem();
-                }
-
-                if (selected) {
-                    if (m_selected_tree_node != old_selected_tree_node) {
-                        const auto compo_id = selected->id;
-                        app.mod.ids.read([&](const auto& ids, auto) noexcept {
-                            const auto& c = ids.components[compo_id];
-                            if (c.type == component_type::graph) {
-                                auto& graph_compo = ids.graph_components.get(
-                                  c.id.graph_id);
-                                graph_ed.update(app, graph_compo.g);
-                            }
-                        });
+                    if (show_observations_window) {
+                        ImGui::TextUnformatted(
+                          "Shown in the observations window.");
+                        if (ImGui::Button("Back to the tab"))
+                            show_observations_window = false;
+                    } else {
+                        if (ImGui::Button("Open in a window"))
+                            show_observations_window = true;
+                        show_scope_observations(app, *this, selected);
                     }
-
-                    if (ImGui::BeginTabItem("Component parameters")) {
-                        show_local_simulation_settings(app, *this, *selected);
-                        ImGui::EndTabItem();
-                    }
-
-                    if (ImGui::BeginTabItem("Component observations")) {
-                        show_component_observations(app, *this, *selected);
-                        ImGui::EndTabItem();
-                    }
-
-                    if (ImGui::BeginTabItem("Component graph")) {
-                        show_simulation_editor_treenode(app, *this, *selected);
-                        ImGui::EndTabItem();
-                    }
-                }
-
-                if (ImGui::BeginTabItem("Full simulation graph")) {
-                    app.flat_sim.display(app, *this);
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Input data")) {
-                    app.data_ed.show(app, *this);
                     ImGui::EndTabItem();
                 }
 

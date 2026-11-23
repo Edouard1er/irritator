@@ -27,7 +27,7 @@ component::component(const component& other) noexcept
   , name{ other.name }
   , id{ other.id }
   , type{ other.type }
-  , state{ other.state }
+  , file_status{ other.file_status }
   , srcs{ other.srcs }
 {}
 
@@ -41,7 +41,7 @@ component::component(component&& other) noexcept
   , name{ other.name }
   , id{ other.id }
   , type{ other.type }
-  , state{ other.state }
+  , file_status{ other.file_status }
   , srcs{ std::exchange(other.srcs, external_source_definition{}) }
 {}
 
@@ -55,7 +55,7 @@ component& component::operator=(const component& other) noexcept
         name                   = other.name;
         id                     = other.id;
         type                   = other.type;
-        state                  = other.state;
+        file_status            = other.file_status;
         srcs                   = other.srcs;
     }
 
@@ -74,7 +74,7 @@ component& component::operator=(component&& other) noexcept
         name                   = other.name;
         id                     = other.id;
         type                   = other.type;
-        state                  = other.state;
+        file_status            = other.file_status;
         srcs = std::exchange(other.srcs, external_source_definition{});
     }
 
@@ -149,23 +149,6 @@ modeling::modeling(const modeling_reserve_definition& res) noexcept
   : ids(res)
   , files(res.regs.value(), res.dirs.value(), res.files.value())
 {}
-
-dir_path_id registred_path::search(
-  const data_array<dir_path, dir_path_id>& data,
-  const std::string_view                   dir_name) noexcept
-{
-    for (const auto& elem : data)
-        if (elem.path.sv() == dir_name)
-            return data.get_id(elem);
-
-    return undefined<dir_path_id>();
-}
-
-bool registred_path::exists(const data_array<dir_path, dir_path_id>& data,
-                            const std::string_view dir_name) noexcept
-{
-    return search(data, dir_name) != undefined<dir_path_id>();
-}
 
 static status browse_directory(file_access&          fs,
                                registred_path&       reg_dir,
@@ -332,7 +315,7 @@ static auto load_component(const file_access& files,
                            const component_id compo_id) noexcept -> status
 {
     if (not ids.exists(compo_id))
-        return make_error(modeling_errc::component_load_error);
+        return make_error(modeling_errc::component_not_found);
 
     auto& compo = ids.components[compo_id];
 
@@ -340,13 +323,9 @@ static auto load_component(const file_access& files,
         auto f = file::open(filename, file_mode{ file_open_options::read });
 
         if (f.has_value()) {
-            json_dearchiver j;
-
-            if (not j(files, ids, filename.sv(), compo_id, compo, *f)) {
+            if (not load_component(files, ids, compo_id, *f, filename.sv())) {
                 return error_code(modeling_errc::component_load_error);
             }
-
-            compo.state = component_status::unmodified;
 
             auto desc_filename = filename;
             desc_filename.replace_extension(file_type::txt_file);
@@ -361,14 +340,17 @@ static auto load_component(const file_access& files,
                 desc.resize(fileview.size());
             }
         } else {
-            compo.state = component_status::unreadable;
+            compo.file_status = component_file_status::unreadable;
+            log(log_level::error, [&](auto& m) noexcept {
+                format(m, "modeling: fail to open {}", filename.sv());
+            });
             return f.error();
         }
     } catch (const std::bad_alloc& /*e*/) {
-        compo.state = component_status::unreadable;
+        compo.file_status = component_file_status::unreadable;
         return make_error(modeling_errc::memory_error);
     } catch (...) {
-        compo.state = component_status::unreadable;
+        compo.file_status = component_file_status::unreadable;
         return make_error(modeling_errc::memory_error);
     }
 
@@ -407,6 +389,8 @@ status modeling::fill_components() noexcept
 
                       const auto compo_id = ids.alloc_component();
                       ids.component_file_paths[compo_id].file = f_id;
+                      ids.components[compo_id]
+                        .file_status = component_file_status::pending;
                   }
               }
 
@@ -441,60 +425,40 @@ status modeling::fill_components() noexcept
             return file_read_status.error();
 
         return files.read([&](const auto& fs, auto) noexcept -> status {
-            auto have_unread_component = ids.ssize() > 0;
+            // A component is read once all the components it depends on are
+            // read: loop until a pass reads nothing new.
+            for (auto have_read = true; have_read;) {
+                have_read = false;
 
-            while (have_unread_component) {
-                auto component_read   = 0;
-                have_unread_component = false;
-
-                for (auto id : ids) {
+                for (const auto id : ids) {
                     auto& compo = ids.components[id];
-                    if (compo.state == component_status::unmodified)
+                    if (compo.file_status != component_file_status::pending)
                         continue;
 
-                    auto& filepath = ids.component_file_paths[id];
-                    if (const auto f = make_file(fs, filepath); f.has_value()) {
-                        if (const auto ret = load_component(fs, ids, *f, id);
-                            ret.has_error()) {
-                            switch (compo.state) {
-                            case component_status::unread:
-                                log(log_level::warning, [&](auto& m) noexcept {
-                                    format(
-                                      m,
-                                      "modeling: need to read dependency for "
-                                      "component {} ({})",
-                                      compo.name.sv(), ordinal(id));
-                                });
-                                have_unread_component = true;
-                                break;
-
-                            case component_status::modified:
-                                have_unread_component = true;
-                                break;
-
-                            case component_status::unmodified:
-                                have_unread_component = true;
-                                break;
-
-                            case component_status::unreadable:
-                                log(log_level::warning, [&](auto& m) noexcept {
-                                    format(
-                                      m,
-                                      "modeling: fail to read component `{}'",
-                                      compo.name.sv());
-                                });
-                                break;
-                            }
-                        } else {
-                            ++component_read;
-                        }
-                    } else {
-                        have_unread_component = true;
+                    const auto f = make_file(fs, ids.component_file_paths[id]);
+                    if (not f.has_value()) {
+                        compo.file_status = component_file_status::unreadable;
+                        continue;
                     }
-                }
 
-                if (component_read == 0)
-                    return success();
+                    if (load_component(fs, ids, *f, id).has_value())
+                        have_read = true;
+                }
+            }
+
+            for (const auto id : ids) {
+                auto& compo = ids.components[id];
+                if (compo.file_status == component_file_status::pending) {
+                    compo.file_status = component_file_status::unreadable;
+
+                    const auto f = make_file(fs, ids.component_file_paths[id]);
+                    log(log_level::error, [&](auto& m) noexcept {
+                        format(m,
+                               "modeling: {} depends on an unreadable "
+                               "component",
+                               f.has_value() ? f->sv() : compo.name.sv());
+                    });
+                }
             }
 
             return success();
@@ -504,74 +468,6 @@ status modeling::fill_components() noexcept
     });
 
     return success();
-}
-
-void modeling::browse_file_system() noexcept
-{
-    files.write([&](file_access& fs) { fs.browse_registreds(); });
-}
-
-void file_access::remove(const file_path_id id) noexcept
-{
-    if (auto* f = file_paths.try_to_get(id)) {
-        if (auto* d = dir_paths.try_to_get(f->parent)) {
-            if (auto* r = registred_paths.try_to_get(d->parent)) {
-                if (const auto opt = make_file(*r, *d, *f); opt.has_value()) {
-                    const auto std_path = opt->to_std_path();
-                    auto       ec       = std::error_code{};
-
-                    std::filesystem::remove(std_path, ec);
-
-                    file_paths.free(*f);
-
-                    auto it = std::ranges::find(d->children, id);
-                    if (it != std::ranges::end(d->children))
-                        d->children.erase(it);
-                }
-            }
-        }
-    }
-}
-
-void file_access::refresh(const dir_path_id id) noexcept
-{
-    if (auto* d = dir_paths.try_to_get(id)) {
-        if (auto* r = registred_paths.try_to_get(d->parent)) {
-            try {
-                std::error_code       ec;
-                std::filesystem::path dir{ r->path.sv() };
-                dir /= d->path.sv();
-
-                if (std::filesystem::is_directory(dir, ec)) {
-                    auto it = std::filesystem::directory_iterator{ dir, ec };
-                    auto et = std::filesystem::directory_iterator{};
-
-                    while (it != et) {
-                        if (it->is_regular_file()) {
-                            const auto type = get_extension(
-                              it->path().filename().string());
-                            if (type != file_type::undefined_file) {
-                                const auto f = find_file_in_directory(
-                                  id, it->path().string());
-                                if (is_undefined(f)) {
-                                    const auto new_file = alloc_file(
-                                      id, it->path().filename().string(), type);
-
-                                    d->children.push_back(new_file);
-                                }
-                            }
-                        }
-
-                        it = it.increment(ec);
-                    }
-                } else {
-                    d->flags.set(fs_flag::access_error);
-                }
-            } catch (const std::exception& /*e*/) {
-                d->flags.set(fs_flag::access_error);
-            }
-        }
-    }
 }
 
 auto file_access::find_file_in_directory(const dir_path_id      id,
@@ -711,39 +607,6 @@ registred_path_id file_access::alloc_registred(const std::string_view name,
     return undefined<registred_path_id>();
 }
 
-bool file_access::exists(const registred_path_id id) const noexcept
-{
-    if (auto* reg = registred_paths.try_to_get(id)) {
-        try {
-            std::error_code       ec;
-            std::filesystem::path p{ reg->path.sv() };
-            return std::filesystem::exists(p, ec);
-        } catch (...) {
-        }
-    }
-
-    return false;
-}
-
-bool file_access::exists(const dir_path_id id) const noexcept
-{
-    if (const auto* d = dir_paths.try_to_get(id)) {
-        if (const auto* r = registred_paths.try_to_get(d->parent)) {
-            try {
-                std::error_code       ec;
-                std::filesystem::path p{ r->path.sv() };
-                if (std::filesystem::exists(p, ec)) {
-                    p /= d->path.sv();
-                    return std::filesystem::exists(p, ec);
-                }
-            } catch (...) {
-            }
-        }
-    }
-
-    return false;
-}
-
 bool file_access::create_directories(const registred_path_id id) const noexcept
 {
     if (auto* reg = registred_paths.try_to_get(id)) {
@@ -807,34 +670,6 @@ void file_access::remove_directory(const dir_path_id id) noexcept
     }
 }
 
-void file_access::remove_files(const dir_path_id id) noexcept
-{
-    if (auto* d = dir_paths.try_to_get(id)) {
-        if (d->path.empty())
-            return;
-
-        if (const auto* r = registred_paths.try_to_get(d->parent)) {
-            try {
-                std::filesystem::path p(r->path.sv());
-                p /= d->path.sv();
-
-                for (const auto f_id : d->children) {
-                    if (auto* f = file_paths.try_to_get(f_id)) {
-                        const auto file = p / f->path.sv();
-
-                        std::error_code ec;
-                        if (std::filesystem::exists(file, ec))
-                            std::filesystem::remove(file, ec);
-                    }
-                }
-            } catch (...) {
-            }
-        }
-
-        d->children.clear();
-    }
-}
-
 void file_access::remove_file(const file_path_id id) noexcept
 {
     if (const auto* f = file_paths.try_to_get(id)) {
@@ -844,7 +679,9 @@ void file_access::remove_file(const file_path_id id) noexcept
                 debug::ensure(not d->path.empty());
                 debug::ensure(not r->path.empty());
 
-                if (not(f->path.empty() and d->path.empty() and
+                // An empty part would make the path relative to the
+                // current directory and remove another file.
+                if (not(f->path.empty() or d->path.empty() or
                         r->path.empty())) {
                     std::error_code ec;
 
@@ -868,54 +705,6 @@ void file_access::remove_file(const file_path_id id) noexcept
     }
 }
 
-void file_access::move_file(const dir_path_id  to,
-                            const file_path_id id) noexcept
-{
-    if (auto* f = file_paths.try_to_get(id)) {
-        if (to != f->parent) {
-            const auto old_id = f->parent;
-
-            if (auto* new_d = dir_paths.try_to_get(to)) {
-                f->parent = to;
-                new_d->children.emplace_back(file_paths.get_id(*f));
-
-                if (auto* old_d = dir_paths.try_to_get(old_id)) {
-                    const auto to_del = std::ranges::remove_if(
-                      old_d->children,
-                      [&](const auto fid) { return id == fid; });
-
-                    if (to_del.begin() != to_del.end())
-                        old_d->children.erase(to_del.begin(), to_del.end());
-                }
-            }
-        }
-    }
-}
-
-void file_access::free(const file_path_id file) noexcept
-{
-    file_paths.free(file);
-}
-
-void file_access::free(const dir_path_id dir) noexcept
-{
-    if (auto* d = dir_paths.try_to_get(dir))
-        for (const auto f_id : d->children)
-            if (auto* f = file_paths.try_to_get(f_id))
-                f->parent = undefined<dir_path_id>();
-
-    dir_paths.free(dir);
-}
-
-void file_access::free(const registred_path_id reg_dir) noexcept
-{
-    if (auto* r = registred_paths.try_to_get(reg_dir))
-        for (const auto d_id : r->children)
-            free(d_id);
-
-    registred_paths.free(reg_dir);
-}
-
 expected<path> file_access::get_fs_path(const file_path_id id) const noexcept
 {
     try {
@@ -932,36 +721,6 @@ expected<path> file_access::get_fs_path(const file_path_id id) const noexcept
             return make_error(modeling_errc::directory_error);
         }
         return make_error(modeling_errc::file_error);
-    } catch (...) {
-        return make_error(modeling_errc::file_error);
-    }
-}
-
-expected<path> file_access::get_fs_path(const dir_path_id id) const noexcept
-{
-    try {
-        if (auto* dir = dir_paths.try_to_get(id)) {
-            if (auto* reg = registred_paths.try_to_get(dir->parent)) {
-                path p{ reg->path.sv() };
-                p /= dir->path.sv();
-                return p;
-            }
-            return make_error(modeling_errc::recorded_directory_error);
-        }
-        return make_error(modeling_errc::directory_error);
-    } catch (...) {
-        return make_error(modeling_errc::file_error);
-    }
-}
-
-expected<path> file_access::get_fs_path(
-  const registred_path_id id) const noexcept
-{
-    try {
-        if (auto* reg = registred_paths.try_to_get(id)) {
-            return path{ reg->path.sv() };
-        }
-        return make_error(modeling_errc::recorded_directory_error);
     } catch (...) {
         return make_error(modeling_errc::file_error);
     }
@@ -1088,8 +847,8 @@ expected<component_id> component_access::copy(
         dst.y.get<position>(new_id)    = pos;
     });
 
-    dst.name  = src.name;
-    dst.state = src.state;
+    dst.name        = src.name;
+    dst.file_status = component_file_status::modified;
 
     return dst_id;
 }
@@ -1146,7 +905,7 @@ component_id component_access::alloc_component() noexcept
     auto& new_compo = components[new_compo_id];
     format(new_compo.name, "component-{}", get_index(new_compo_id));
     new_compo.type  = component_type::none;
-    new_compo.state = component_status::modified;
+    new_compo.file_status = component_file_status::modified;
     new_compo.x.clear();
     new_compo.y.clear();
 
@@ -1351,7 +1110,7 @@ void component_access::clear(const component_id compo_id) noexcept
     }
 
     compo.type  = component_type::none;
-    compo.state = component_status::modified;
+    compo.file_status = component_file_status::modified;
 }
 
 void component_access::free(const component_id compo_id) noexcept
@@ -1368,7 +1127,7 @@ status modeling::save(const component_access& ids,
                       const component_id      id) noexcept
 {
     if (not ids.exists(id))
-        return make_error(modeling_errc::component_load_error);
+        return make_error(modeling_errc::component_not_found);
 
     const auto filenames = make_component_files(fs, ids, id);
 
@@ -1380,8 +1139,7 @@ status modeling::save(const component_access& ids,
     if (cfile.has_error()) [[unlikely]]
         return cfile.error();
 
-    json_archiver j;
-    if (auto ret = j(fs, ids, id, *cfile); ret.has_error())
+    if (auto ret = save_component(fs, ids, id, *cfile); ret.has_error())
         return ret.error();
 
     auto dfile = file::open(filenames->description,

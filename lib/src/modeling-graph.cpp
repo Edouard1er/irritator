@@ -12,34 +12,9 @@
 #include <irritator/modeling.hpp>
 
 #include <algorithm>
+#include <tuple>
 
 namespace irt {
-
-void graph_component::swap(graph_component& other) noexcept
-{
-    g.swap(other.g);
-    input_connections.swap(other.input_connections);
-    output_connections.swap(other.output_connections);
-    top_left_limit.swap(other.top_left_limit);
-    bottom_right_limit.swap(other.bottom_right_limit);
-
-    std::swap(dot, other.dot);
-    std::swap(scale, other.scale);
-    std::swap(small, other.small);
-    std::swap(g_type, other.g_type);
-
-    std::swap(rng, other.rng);
-    std::swap(type, other.type);
-}
-
-bool graph_component::exists_child(const std::string_view name) const noexcept
-{
-    for (const auto id : g.nodes)
-        if (g.node_names[id] == name)
-            return true;
-
-    return false;
-}
 
 name_str graph_component::make_unique_name_id(
   const graph_node_id v) const noexcept
@@ -93,7 +68,7 @@ static auto get_edges(
   const component_access&                             ids,
   const graph_component&                              graph,
   const table<graph_node_id, child_id>&               vertex,
-  const u16                                           index,
+  const graph_edge_id                                 index,
   const data_array<graph_component::child, child_id>& cache) noexcept
   -> std::optional<get_edges_result>
 {
@@ -194,19 +169,37 @@ void graph_component::reset_position() noexcept
     bottom_right_limit = { -INFINITY, -INFINITY };
 }
 
-static constexpr auto exists_connection(
-  const data_array<connection, connection_id>& cache_connections,
-  const child_id                               src_id,
-  const port_id                                p_src,
-  const child_id                               dst_id,
-  const port_id                                p_dst) noexcept -> bool
+static status remove_duplicated_connections(
+  data_array<connection, connection_id>& cache_connections) noexcept
 {
-    for (const auto& elem : cache_connections)
-        if (elem.src == src_id and elem.dst == dst_id and
-            elem.index_src.compo == p_src and elem.index_dst.compo == p_dst)
-            return true;
+    const auto key = [&](const connection_id id) noexcept {
+        const auto& c = cache_connections.get(id);
+        return std::make_tuple(
+          c.src, c.index_src.compo, c.dst, c.index_dst.compo);
+    };
 
-    return false;
+    vector<connection_id> sorted;
+    if (not sorted.reserve(cache_connections.size()))
+        return make_error(modeling_errc::graph_connection_container_full);
+
+    for (const auto& c : cache_connections)
+        sorted.emplace_back(cache_connections.get_id(c));
+
+    std::sort(sorted.begin(), sorted.end(), [&](const auto a, const auto b) {
+        const auto ka = key(a);
+        const auto kb = key(b);
+        return ka != kb ? ka < kb : a < b;
+    });
+
+    std::size_t kept = 0;
+    for (std::size_t i = 1; i < sorted.size(); ++i) {
+        if (key(sorted[kept]) == key(sorted[i]))
+            cache_connections.free(sorted[i]);
+        else
+            kept = i;
+    }
+
+    return success();
 }
 
 enum connection_add_result : u8 { done, nomem, noexist };
@@ -322,10 +315,6 @@ static connection_add_result named_suffix_connection_add(
                   const auto dname = c_dst.x.get<port_str>(did).sv();
                   const auto dual  = split(dname, '_');
                   if (dual.first == sname.sv()) {
-                      if (exists_connection(
-                            cache_connections, edge.src, sid, edge.dst, did))
-                          continue;
-
                       if (connection_add(
                             edge.src, sid, edge.dst, did, cache_connections) ==
                           connection_add_result::nomem)
@@ -367,8 +356,7 @@ static status build_graph_connections(
     switch (graph.type) {
     case graph_component::connection_type::in_out:
         for (const auto id : graph.g.edges) {
-            const auto idx       = get_index(id);
-            const auto edges_opt = get_edges(ids, graph, vertex, idx, cache);
+            const auto edges_opt = get_edges(ids, graph, vertex, id, cache);
 
             if (edges_opt.has_value()) {
                 in_out_connection_add(ids, *edges_opt, cache_connections);
@@ -378,8 +366,7 @@ static status build_graph_connections(
 
     case graph_component::connection_type::name:
         for (const auto id : graph.g.edges) {
-            const auto idx       = get_index(id);
-            const auto edges_opt = get_edges(ids, graph, vertex, idx, cache);
+            const auto edges_opt = get_edges(ids, graph, vertex, id, cache);
 
             if (edges_opt.has_value()) {
                 named_connection_add(ids, graph, *edges_opt, cache_connections);
@@ -389,14 +376,14 @@ static status build_graph_connections(
 
     case graph_component::connection_type::name_suffix:
         for (const auto id : graph.g.edges) {
-            const auto idx       = get_index(id);
-            const auto edges_opt = get_edges(ids, graph, vertex, idx, cache);
+            const auto edges_opt = get_edges(ids, graph, vertex, id, cache);
 
             if (edges_opt.has_value()) {
                 named_suffix_connection_add(ids, *edges_opt, cache_connections);
             }
         }
-        break;
+
+        return remove_duplicated_connections(cache_connections);
     }
 
     return success();

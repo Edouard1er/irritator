@@ -47,15 +47,6 @@ static bool show_parameter(qss_cos_tag,
 }
 
 template<typename ExternalSourceType>
-static bool show_parameter(qss_integer_tag,
-                           application& /*app*/,
-                           ExternalSourceType& /*srcs*/,
-                           parameter& /*p*/) noexcept
-{
-    return false;
-}
-
-template<typename ExternalSourceType>
 static bool show_parameter(qss_compare_tag,
                            application& /*app*/,
                            ExternalSourceType& /*srcs*/,
@@ -102,6 +93,68 @@ static bool show_parameter(counter_tag,
     }
 
     return up;
+}
+
+template<typename Tag>
+static bool show_priority_parameter(parameter& p) noexcept
+{
+    auto up = false;
+
+    for (std::size_t port = 0; port < std::size(Tag::x_names); ++port) {
+        const auto type_i = p.integers[port];
+        const auto type   = 0 <= type_i and
+                              type_i < std::ssize(priority_selection_names)
+                              ? enum_cast<priority_selection>(type_i)
+                              : priority_selection::maximum;
+
+        small_string<64> combo_label(priority_selection_names[ordinal(type)]);
+        small_string<16> port_label(Tag::x_names[port]);
+
+        if (ImGui::BeginCombo(port_label.c_str(), combo_label.c_str())) {
+            for (sz i = 0; i < std::size(priority_selection_names); ++i) {
+                const bool is_selected = ordinal(type) == i;
+
+                combo_label = priority_selection_names[i];
+                if (ImGui::Selectable(combo_label.c_str(), is_selected)) {
+                    p.integers[port] = static_cast<i64>(i);
+                    up               = true;
+                }
+
+                if (is_selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    }
+
+    return up;
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(qss_priority_2_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    return show_priority_parameter<qss_priority_2_tag>(p);
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(qss_priority_3_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    return show_priority_parameter<qss_priority_3_tag>(p);
+}
+
+template<typename ExternalSourceType>
+static bool show_parameter(qss_priority_4_tag,
+                           application& /*app*/,
+                           ExternalSourceType& /*srcs*/,
+                           parameter& p) noexcept
+{
+    return show_priority_parameter<qss_priority_4_tag>(p);
 }
 
 template<typename ExternalSourceType>
@@ -200,6 +253,45 @@ static bool show_parameter(qss_wsum_4_tag,
     return b1 or b2 or b3 or b4;
 }
 
+static bool show_fifo_parameter(parameter& p) noexcept
+{
+    auto up = false;
+
+    const auto overflow_i = p.integers[queue_tag::i_overflow];
+    const auto overflow   = 0 <= overflow_i and
+                              overflow_i < std::ssize(fifo_overflow_names)
+                              ? enum_cast<fifo_overflow>(overflow_i)
+                              : fifo_overflow::grow;
+
+    small_string<32> label(fifo_overflow_names[ordinal(overflow)]);
+    if (ImGui::BeginCombo("overflow", label.c_str())) {
+        for (sz i = 0; i < std::size(fifo_overflow_names); ++i) {
+            const bool is_selected = ordinal(overflow) == i;
+
+            label = fifo_overflow_names[i];
+            if (ImGui::Selectable(label.c_str(), is_selected)) {
+                p.integers[queue_tag::i_overflow] = static_cast<i64>(i);
+                up                                = true;
+            }
+
+            if (is_selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    auto capacity = p.integers[queue_tag::i_capacity];
+    if (ImGui::InputScalar("capacity", ImGuiDataType_S64, &capacity) and
+        0 < capacity and capacity < std::numeric_limits<i32>::max()) {
+        p.integers[queue_tag::i_capacity] = capacity;
+        up                                = true;
+    }
+    ImGui::SetItemTooltip("The initial number of messages with the grow "
+                          "overflow, the maximal number otherwise.");
+
+    return up;
+}
+
 template<typename ExternalSourceType>
 static bool show_parameter(queue_tag,
                            application& /*app*/,
@@ -208,14 +300,17 @@ static bool show_parameter(queue_tag,
 {
     auto value = p.reals[0];
 
+    auto up = false;
     if (ImGui::InputReal("delay", &value)) {
         if (not std::isnormal(value) or not std::signbit(value)) {
             p.reals[queue_tag::sigma] = value;
-            return true;
+            up                        = true;
         }
     }
 
-    return false;
+    const auto fifo = show_fifo_parameter(p);
+
+    return up or fifo;
 }
 
 template<typename ExternalSourceType>
@@ -224,9 +319,11 @@ static bool show_parameter(dynamic_queue_tag,
                            ExternalSourceType& srcs,
                            parameter&          p) noexcept
 {
-
-    return show_external_sources_combo(
+    const auto src = show_external_sources_combo(
       "Time", srcs, p.integers[dynamic_queue_tag::source_ta]);
+    const auto fifo = show_fifo_parameter(p);
+
+    return src or fifo;
 }
 
 template<typename ExternalSourceType>
@@ -235,13 +332,11 @@ static bool show_parameter(priority_queue_tag,
                            ExternalSourceType& srcs,
                            parameter&          p) noexcept
 {
-    const auto b1 =
-      ImGui::InputReal("priority delta", &p.reals[priority_queue_tag::sigma]);
-
-    const auto b2 = show_external_sources_combo(
+    const auto src = show_external_sources_combo(
       "Time", srcs, p.integers[priority_queue_tag::source_ta]);
+    const auto fifo = show_fifo_parameter(p);
 
-    return b1 or b2;
+    return src or fifo;
 }
 
 template<typename ExternalSourceType>
@@ -475,18 +570,6 @@ static bool show_parameter(qss_flipflop_tag,
                            parameter& /*p*/) noexcept
 {
     return false;
-}
-
-template<typename ExternalSourceType>
-static bool show_parameter(qss_filter_tag,
-                           application& /*app*/,
-                           ExternalSourceType& /*srcs*/,
-                           parameter& p) noexcept
-{
-    const auto b1 = ImGui::InputReal("lower threshold", &p.reals[0]);
-    const auto b2 = ImGui::InputReal("upper threshold", &p.reals[1]);
-
-    return b1 or b2;
 }
 
 template<typename ExternalSourceType>
@@ -1148,6 +1231,71 @@ bool show_parameter_editor(application&     app,
       app,
       srcs,
       p);
+}
+
+// The ports of the simulation_wrapper depend on the factors and the
+// selections of its simulation component: they are numbered.
+static constexpr std::string_view port_numbers[] = {
+    "0",  "1",  "2",  "3",  "4",  "5",  "6",  "7",  "8",  "9",  "10",
+    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21",
+    "22", "23", "24", "25", "26", "27", "28", "29", "30", "31",
+};
+
+static constexpr std::string_view port_number(const u32 port) noexcept
+{
+    return port < std::size(port_numbers) ? port_numbers[port]
+                                          : std::string_view("?");
+}
+
+u32 input_port_count(const model& mdl) noexcept
+{
+    return dispatch(mdl, []<typename Dynamics>(const Dynamics& dyn) -> u32 {
+        if constexpr (has_input_port<Dynamics>)
+            return static_cast<u32>(length(dyn.x));
+        else
+            return 0u;
+    });
+}
+
+u32 output_port_count(const model& mdl) noexcept
+{
+    return dispatch(mdl, []<typename Dynamics>(const Dynamics& dyn) -> u32 {
+        if constexpr (has_output_port<Dynamics>)
+            return static_cast<u32>(length(dyn.y));
+        else
+            return 0u;
+    });
+}
+
+std::string_view input_port_name(const model& mdl, const u32 port) noexcept
+{
+    return dispatch(
+      mdl, [port]<typename Dynamics>(const Dynamics&) -> std::string_view {
+          if constexpr (std::is_same_v<Dynamics, simulation_wrapper>) {
+              constexpr std::string_view names[] = { "init", "run" };
+              return port < 2 ? names[port] : port_number(port);
+          } else if constexpr (has_input_port<Dynamics>) {
+              const auto names = get_input_port_names<Dynamics>();
+              return port < names.size() ? names[port] : std::string_view();
+          } else {
+              return std::string_view();
+          }
+      });
+}
+
+std::string_view output_port_name(const model& mdl, const u32 port) noexcept
+{
+    return dispatch(
+      mdl, [port]<typename Dynamics>(const Dynamics&) -> std::string_view {
+          if constexpr (std::is_same_v<Dynamics, simulation_wrapper>) {
+              return port_number(port);
+          } else if constexpr (has_output_port<Dynamics>) {
+              const auto names = get_output_port_names<Dynamics>();
+              return port < names.size() ? names[port] : std::string_view();
+          } else {
+              return std::string_view();
+          }
+      });
 }
 
 } // irt

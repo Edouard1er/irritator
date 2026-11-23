@@ -15,9 +15,11 @@
 #include <irritator/macros.hpp>
 #include <irritator/random.hpp>
 #include <irritator/thread.hpp>
-#include <irritator/timeline.hpp>
 
+#include <array>
+#include <atomic>
 #include <optional>
+#include <utility>
 
 namespace irt {
 
@@ -32,7 +34,7 @@ enum class graph_component_id : u32;
 enum class grid_component_id : u32;
 enum class simulation_component_id : u32;
 enum class tree_node_id : u64;
-enum class child_id : u32;
+enum class child_id : u64;
 enum class connection_id : u64;
 enum class variable_observer_id : u64;
 enum class grid_observer_id : u64;
@@ -40,8 +42,8 @@ enum class graph_observer_id : u64;
 enum class global_parameter_id : u64;
 enum class global_observable_id : u64;
 
-enum class graph_node_id : irt::u32;
-enum class graph_edge_id : irt::u32;
+enum class graph_node_id : irt::u64;
+enum class graph_edge_id : irt::u64;
 
 using port_str           = small_string<8>;
 using description_str    = small_string<1024>;
@@ -113,13 +115,20 @@ enum class component_type : u8 {
 
 constexpr int component_type_count = ordinal(component_type::simulation) + 1;
 
-enum class component_status : u8 {
-    unread,     ///< The component is not read (It is referenced by another
-                ///< component).
-    modified,   ///< The component is not saved.
-    unmodified, ///< or you show an internal component.
-    unreadable  ///< When an error occurred during load-component.
+/// Synchronization between a component in memory and its file.
+enum class component_file_status : u8 {
+    pending,    ///< Not read yet, or waiting for the components it depends on.
+    unreadable, ///< The file can not be opened or its content is invalid.
+    saved,      ///< Same content as its file.
+    modified,   ///< Changed since the last read or save, or not saved yet.
 };
+
+/// The component is read: its ports and content can be used.
+constexpr bool is_loaded(const component_file_status s) noexcept
+{
+    return s == component_file_status::saved or
+           s == component_file_status::modified;
+}
 
 enum class modeling_status : u8 { modified, unmodified };
 
@@ -232,7 +241,8 @@ public:
     real                           r1      = 0.0;
     real                           r2      = 0.0;
     time                           timeout = time_domain<time>::infinity;
-    external_source_definition::id src;
+    external_source_definition::id
+      src = undefined<external_source_definition::id>();
 };
 
 inline void hsm_component::clear() noexcept
@@ -257,8 +267,8 @@ inline void hsm_component::clear() noexcept
 class generic_component
 {
 public:
-    using child_limiter      = static_bounded_value<i32, 64, 64 * 16>;
-    using connection_limiter = static_bounded_value<i32, 64 * 4, 64 * 16 * 4>;
+    using child_limiter      = clamped_value<i32, 64, 64 * 16>;
+    using connection_limiter = clamped_value<i32, 64 * 4, 64 * 16 * 4>;
 
     generic_component() noexcept;
 
@@ -341,14 +351,6 @@ public:
     child& alloc(const component_id id) noexcept;
     child& alloc(const dynamics_type type) noexcept;
 
-    /** Copy the @c generic_component children and connections into this
-     * generic_component.
-     *
-     * @param src The source.
-     * @return @c success() or @c modeling_errc error.
-     */
-    status copy(const generic_component& src) noexcept;
-
     /** Grow the children @a data_array and resize theq
      *  @a children_positions, @a children_names and @a children_parameters
      *  vectors to match the new capacity.
@@ -365,13 +367,6 @@ public:
                children_names.resize(children.capacity()) and
                children_parameters.resize(children.capacity());
     }
-
-    bool exists_input_connection(const port_id          x,
-                                 const child&           dst,
-                                 const connection::port port) const noexcept;
-    bool exists_output_connection(const port_id          y,
-                                  const child&           src,
-                                  const connection::port port) const noexcept;
 
     bool exists(const child&           src,
                 const connection::port p_src,
@@ -403,16 +398,6 @@ public:
                           const child&           src,
                           const connection::port port) noexcept;
 
-    /// @brief Copy a child into another `generic_component`.
-    ///
-    /// @param c [in] The identifier to copy.
-    /// @param dst [in,out] The `generic_component` destination.
-    ///
-    /// @return Identifier of the newly allocated child. Can return
-    /// error if `dst` can not allocate a new child.
-    expected<child_id> copy_to(const child&       c,
-                               generic_component& dst) const noexcept;
-
     bool     exists_child(const std::string_view name) const noexcept;
     child_id find_child(const std::string_view name) const noexcept;
     name_str make_unique_name_id(const child_id from_id) const noexcept;
@@ -421,8 +406,7 @@ public:
 class grid_component
 {
 public:
-    using limit  = bounded_value<i32>;
-    using slimit = static_bounded_value<i32, 1, 1024>;
+    using slimit = clamped_value<i32, 1, 1024>;
 
 private:
     i32                  m_row    = slimit::lower_bound();
@@ -474,8 +458,8 @@ public:
 
     void resize(slimit rows, slimit cols, component_id id) noexcept
     {
-        m_row    = rows;
-        m_column = cols;
+        m_row    = rows.value();
+        m_column = cols.value();
 
         m_children.resize(m_row * m_column);
         std::fill_n(m_children.data(), m_children.size(), id);
@@ -487,8 +471,8 @@ public:
 
     /**
      * @brief Compute the number of cells in the grid.
-     * @return A integer between @a limit::lower_bound() squared to @a
-     * limit::upper_bound() squared.
+     * @return A integer between @a slimit::lower_bound() squared to @a
+     * slimit::upper_bound() squared.
      */
     constexpr i32 cells_number() const noexcept { return m_column * m_row; }
 
@@ -507,29 +491,6 @@ public:
         return c * m_row + r;
     }
 
-    constexpr std::pair<i32, i32> pos(std::integral auto p) const noexcept
-    {
-        debug::ensure(is_coord_valid(p % m_row, p / m_row));
-
-        return std::make_pair(p % m_row, p / m_row);
-    }
-
-    constexpr u64 unique_id(i32 pos_) const noexcept
-    {
-        auto pair = pos(pos_);
-
-        return u32s_to_u64(static_cast<u32>(pair.first),
-                           static_cast<u32>(pair.second));
-    }
-
-    constexpr std::pair<int, int> unique_id(u64 id) const noexcept
-    {
-        auto unpack = u64_to_u32s(id);
-
-        return std::make_pair(static_cast<int>(unpack.first),
-                              static_cast<int>(unpack.second));
-    }
-
     struct input_connection {
         input_connection() noexcept = default;
 
@@ -539,14 +500,6 @@ public:
           , col(col_)
           , id(id_)
         {}
-
-        void clear() noexcept
-        {
-            x   = undefined<port_id>();
-            row = -1;
-            col = -1;
-            id  = undefined<port_id>();
-        }
 
         port_id x   = undefined<port_id>(); //! The port_id in this component.
         i32     row = -1;                   //! The row in children vector.
@@ -565,32 +518,12 @@ public:
           , id(id_)
         {}
 
-        void clear() noexcept
-        {
-            y   = undefined<port_id>();
-            row = -1;
-            col = -1;
-            id  = undefined<port_id>();
-        }
-
         port_id y   = undefined<port_id>(); //! The port_id in this component.
         i32     row = -1;                   //! The row in children vector.
         i32     col = -1;                   //! The col in children vector.
         port_id
           id = undefined<port_id>(); //! The port_id of the @c children[idx].
     };
-
-    //! @brief Check if the input connection already exits.
-    bool exists_input_connection(const port_id x,
-                                 const i32     row,
-                                 const i32     col,
-                                 const port_id id) const noexcept;
-
-    //! @brief Check if the output connection already exits.
-    bool exists_output_connection(const port_id x,
-                                  const i32     row,
-                                  const i32     col,
-                                  const port_id id) const noexcept;
 
     //! @brief Tries to add this input connection if it does not already exist.
     //! @return `success()` or `connection_already_exists`.
@@ -682,9 +615,6 @@ public:
      */
     void clear() noexcept;
 
-    /** Swap the content of the graph with @a other. */
-    void swap(graph& g) noexcept;
-
     expected<void> init_scale_free_graph(double       alpha,
                                          double       beta,
                                          component_id id,
@@ -704,14 +634,18 @@ public:
     expected<graph_node_id> alloc_node() noexcept;
 
     /**
-     * Add a new edge in graph if the @a src and @a dst exists and the edge
-     * doe not already exist.
-     * @param src
-     * @param dst
-     * @return
+     * Add a new edge in graph in constant time. Multiple edges between the
+     * same nodes are allowed: use @a exists_edge before or
+     * @a remove_duplicated_edges after to build a strict graph.
      */
     expected<graph_edge_id> alloc_edge(graph_node_id src,
                                        graph_node_id dst) noexcept;
+
+    /**
+     * Keep only the first edge of each pair of nodes, the order of the nodes
+     * is ignored in undirected graph. Runs in O(E log E).
+     */
+    expected<void> remove_duplicated_edges() noexcept;
 
     /** Return true if an edge exists in vector.
      * The input and output ports names are not used in the comparison result.
@@ -769,13 +703,6 @@ public:
           , id(id_)
         {}
 
-        void clear() noexcept
-        {
-            x  = undefined<port_id>();
-            v  = graph_node_id{ 0 };
-            id = undefined<port_id>();
-        }
-
         port_id x = undefined<port_id>();     //! The port_id in this component.
         graph_node_id v = graph_node_id{ 0 }; //! The index in children vector.
         port_id
@@ -790,13 +717,6 @@ public:
           , v(v_)
           , id(id_)
         {}
-
-        void clear() noexcept
-        {
-            y  = undefined<port_id>();
-            v  = graph_node_id{ 0 };
-            id = undefined<port_id>();
-        }
 
         port_id y = undefined<port_id>(); //! The port_id in this component.
         graph_node_id v = graph_node_id{
@@ -815,8 +735,6 @@ public:
 
     struct dot_file_param {
         file_path_id file = undefined<file_path_id>();
-
-        void reset() noexcept { file = undefined<file_path_id>(); }
     };
 
     struct scale_free_param {
@@ -824,14 +742,6 @@ public:
         double       beta  = 1.e3;
         component_id id    = undefined<component_id>();
         int          nodes = 32;
-
-        void reset() noexcept
-        {
-            alpha = 2.5;
-            beta  = 1.e3;
-            id    = undefined<component_id>();
-            nodes = 32;
-        }
     };
 
     struct small_world_param {
@@ -839,14 +749,6 @@ public:
         i32          k           = 6;
         component_id id          = undefined<component_id>();
         int          nodes       = 32;
-
-        void reset() noexcept
-        {
-            probability = 3e-2;
-            k           = 6;
-            id          = undefined<component_id>();
-            nodes       = 32;
-        }
     };
 
     dot_file_param    dot;
@@ -869,9 +771,6 @@ public:
 
     graph_component() noexcept;
 
-    void swap(graph_component& other) noexcept;
-
-    bool     exists_child(const std::string_view name) const noexcept;
     name_str make_unique_name_id(const graph_node_id v) const noexcept;
 
     /** Compute top-left and bottom-right limits according to the position and
@@ -1022,7 +921,7 @@ struct component {
     } id = {};
 
     component_type   type  = component_type::none;
-    component_status state = component_status::unread;
+    component_file_status file_status = component_file_status::pending;
 
     /**< Each component stores potential external source. */
     external_source_definition srcs;
@@ -1033,26 +932,6 @@ struct dir_path;
 struct file_path;
 
 struct registred_path {
-    /**
-     * Linear search a directory with the name @a dir_name in the @a
-     * children vector.
-     * @param data A @a data_array of @a dir_path.
-     * @param dir_name The name to search.
-     * @return The directory identifier or @a undefined otherwise.
-     */
-    dir_path_id search(const data_array<dir_path, dir_path_id>& data,
-                       const std::string_view dir_name) noexcept;
-
-    /**
-     * Returns true if a directory with the name @a dir_name in the @a
-     * children vector exists in this @a registred_path.
-     * @param data A @a data_array of @a dir_path.
-     * @param dir_name The name to search.
-     * @return @a true is the directory exists, false otherwise.
-     */
-    bool exists(const data_array<dir_path, dir_path_id>& data,
-                const std::string_view                   dir_name) noexcept;
-
     registred_path_str path; /**< Stores an absolute path in utf8 format. */
     name_str           name; /**< Stores a user name, the same name as in the
                                 configuration file. */
@@ -1070,13 +949,6 @@ struct dir_path {
     vector<file_path_id> children;
 
     fs_flags flags;
-
-    bool exist(const file_path_id id) const noexcept
-    {
-        return std::ranges::any_of(
-          children,
-          [id](const auto f_id) noexcept -> bool { return f_id == id; });
-    }
 };
 
 struct file_path {
@@ -1109,7 +981,6 @@ struct tree_node {
 
         enum class type : u8 { empty, model, tree_node } type = type::empty;
 
-        constexpr auto is_empty() const noexcept { return type == type::empty; }
         constexpr auto is_model() const noexcept { return type == type::model; }
         constexpr auto is_tree_node() const noexcept
         {
@@ -1220,25 +1091,13 @@ struct tree_node {
         return it == unique_id_to_model_id.data.end() ? std::string_view{}
                                                       : it->id.sv();
     }
-
-    auto get_unique_id(const tree_node_id tn_id) const noexcept
-      -> std::string_view
-    {
-        auto it = std::find_if(
-          unique_id_to_tree_node_id.data.begin(),
-          unique_id_to_tree_node_id.data.end(),
-          [tn_id](const auto& elem) noexcept { return elem.value == tn_id; });
-
-        return it == unique_id_to_tree_node_id.data.end() ? std::string_view{}
-                                                          : it->id.sv();
-    }
 };
 
 struct project_reserve_definition {
-    constrained_value<int, 256, INT_MAX> nodes;
-    constrained_value<int, 256, INT_MAX> grids;
-    constrained_value<int, 256, INT_MAX> graphs;
-    constrained_value<int, 256, INT_MAX> vars;
+    clamped_value<int, 256, INT_MAX> nodes;
+    clamped_value<int, 256, INT_MAX> grids;
+    clamped_value<int, 256, INT_MAX> graphs;
+    clamped_value<int, 256, INT_MAX> vars;
 };
 
 enum class simulation_status : u8 {
@@ -1311,8 +1170,10 @@ struct command {
         model_id     mdl_id;
     };
 
+    /// The constant model @c mdl_id sends @c value at the current date.
     struct send_message_t {
         model_id mdl_id;
+        real     value;
     };
 
     union data_t {
@@ -1331,18 +1192,46 @@ struct command {
     data_t       data;
 };
 
+/**
+ * The commands of one producer (the user interface, a game) applied by the
+ * thread that owns the simulation, between two steps (see @c
+ * simulation_player::edit() and @c project::apply_commands()): the simulation
+ * is never changed during a step and needs no lock.
+ *
+ * Single producer, single consumer: @c push() is called by one thread, @c
+ * consume() by one other thread.
+ */
+class command_queue
+{
+public:
+    static constexpr std::size_t capacity = 64;
+
+    /// @return false if the queue is full: the command is not added.
+    bool push(const command& cmd) noexcept;
+
+    bool empty() const noexcept;
+
+    /// Calls @c fn for each command pushed before the call, in order.
+    template<typename Fn>
+    void consume(Fn&& fn) noexcept;
+
+    /// Drops the commands pushed before the call. Only for the consumer, as
+    /// @c consume(): the commands of a simulation that is built again name
+    /// models that do not exist anymore.
+    void clear() noexcept;
+
+private:
+    std::array<command, capacity> m_buffer{};
+
+    // Counters that only grow: the index is the counter modulo capacity.
+    std::atomic<std::size_t> m_head{ 0 }; ///< written by the consumer
+    std::atomic<std::size_t> m_tail{ 0 }; ///< written by the producer
+};
+
 class project
 {
 public:
-    static constexpr std::size_t command_buffer_size = 32;
-
     enum class simulation_flag : u8 {
-        debug, /**< enable the debug mode (stores simulation in @c snaps. Stores
-                  simulation into @c snaps and @c current_snap. Use can use @c
-                  advance() and @c back() function to navigate into simulation.
-                */
-        real_time,  /**< real time simulation. Makes a link between simulation
-                       time and real time. */
         write_irtb, /**< flush observation into @c irb file. */
     };
 
@@ -1358,21 +1247,7 @@ public:
                          simulation_status::finishing);
     }
 
-    bool push(const command& cmd) noexcept;
-    bool empty_snapshots() const noexcept;
-    bool empty_commands() const noexcept;
-
 private:
-    /// spsc queue to store simulation commands. Only for live and debug mode.
-    /// write by the main thread and read by the simulation thread.
-    circular_buffer<command, command_buffer_size> commands;
-
-    /// spsc queue to store simulations snapshot. Only for debug mode.
-    simulation_snapshot_handler snaps{ 128 };
-
-    /// position into the @c snaps queue.
-    std::optional<std::int32_t> current_snap;
-
     void save_simulation_graph(const std::string_view file_name) noexcept;
 
 public:
@@ -1383,30 +1258,39 @@ public:
     status simulation_init_observation(const modeling& mod) noexcept;
     status simulation_init(const modeling& mod) noexcept;
 
-    status simulation_step() noexcept;
-    void   simulation_back() noexcept;
-    void   simulation_advance() noexcept;
-    status simulation_apply_command() noexcept;
+    /// Applies all the commands of the queue to the simulation, between two
+    /// steps (see @c simulation_player::edit()).
+    ///
+    /// @return The error of the first command that fails: the next commands
+    /// are applied.
+    status apply_commands(command_queue& queue) noexcept;
 
-    status simulation_run_for(unordered_task_list&            utl,
-                              const std::chrono::milliseconds task_duration,
-                              std::atomic_bool& force_pause) noexcept;
+    status apply_command(const command& cmd) noexcept;
 
-    status simulation_complete_run(unordered_task_list& utl) noexcept;
+    /// Writes the raw samples of the observers to the @c .irb file (only with
+    /// @c simulation_flag::write_irtb). Give it to the player of the
+    /// simulation (@c simulation_player::set_observation_sink()): the samples
+    /// replayed after a rewind are not written again.
+    observation_sink& observation_file_sink() noexcept { return obs_files; }
 
-    status simulation_live_run(
-      unordered_task_list&            utl,
-      const std::chrono::milliseconds one_simulation_time_duration,
-      const std::chrono::milliseconds task_duration,
-      std::atomic_bool&               force_pause) noexcept;
+    /// Writes to the disk the samples kept by the buffers of the @c .irb file.
+    status flush_observations() noexcept;
 
-    status simulation_finish(unordered_task_list& utl) noexcept;
+    /// Writes the end of the manifest, then closes the observation files.
+    /// Call it once the simulation is finalized. Nothing happens if the files
+    /// are already closed.
+    status close_observations() noexcept;
 
-    void simulation_observation_for_imm_observers(
-      unordered_task_list& tasks) noexcept;
-    void simulation_observation_for_all_observers(
-      unordered_task_list& tasks) noexcept;
-    void simulation_finalize_observation(unordered_task_list& tasks) noexcept;
+    /// Empty paths without @c simulation_flag::write_irtb.
+    const path& observation_irb_path() const noexcept
+    {
+        return obs_files.bin_path;
+    }
+
+    const path& observation_manifest_path() const noexcept
+    {
+        return obs_files.json_path;
+    }
 
 private:
     status simulation_new_model(const command::new_model_t& data) noexcept;
@@ -1417,8 +1301,6 @@ private:
       const command::new_observer_t& data) noexcept;
     status simulation_free_observer(
       const command::free_observer_t& data) noexcept;
-    status simulation_send_message(
-      const command::send_message_t& data) noexcept;
     status simulation_new_connection(
       const command::new_connection_t& data) noexcept;
     status simulation_free_connection(
@@ -1426,10 +1308,6 @@ private:
 
 public:
     project() noexcept = default;
-
-    static expected<project> load(const file_access&      fs,
-                                  const component_access& cs,
-                                  const std::span<char>   buffer) noexcept;
 
     static expected<project> load(const file_access&      fs,
                                   const component_access& cs,
@@ -1448,20 +1326,11 @@ public:
                const file_access&      fs,
                const component_id      compo_id) noexcept;
 
-    /// Build the complete @c tree_node hierarchy from the @c component
-    /// head.
-    status rebuild(const component_access& ids, const file_access& fs) noexcept;
-
     /// Remove @c tree_node hierarchy and clear the @c component head.
     void clear() noexcept;
 
     auto head() const noexcept -> component_id;
     auto tn_head() const noexcept -> tree_node_id;
-
-    template<typename Function, typename... Args>
-    void for_each_children(tree_node& tn,
-                           Function&& f,
-                           Args&&... args) noexcept;
 
     /// Return the size and the capacity of the tree_nodes data_array.
     auto tree_nodes_size() const noexcept -> std::pair<int, int>;
@@ -1471,9 +1340,6 @@ public:
                              const tree_node& to,
                              const model_id   mdl_id) noexcept
       -> relative_id_path;
-
-    auto get_model(const relative_id_path& path) noexcept
-      -> std::pair<tree_node_id, model_id>;
 
     auto get_model(const tree_node& tn, const relative_id_path& path) noexcept
       -> std::pair<tree_node_id, model_id>;
@@ -1495,11 +1361,6 @@ public:
     void build_unique_id_path(const tree_node&       model_unique_id_parent,
                               const std::string_view model_unique_id,
                               unique_id_path&        out) const noexcept;
-
-    /** Search a model with name attribute equals to @c id from the root
-     * tree-node (the top of the hierarchy). */
-    auto get_model_path(const std::string_view id) const noexcept
-      -> std::optional<std::pair<tree_node_id, model_id>>;
 
     /** Search a model from the @c path. The first element is the root node
      * (top of the hierarchy), next element are tree nodes and finally, at
@@ -1551,9 +1412,6 @@ public:
                   show_in_output>
       observables;
 
-    /// Experimental frames replicas
-    vector<u64> seeds;
-
     /**
        @brief Alloc a new variable observer and assign a name.
        @return The new instance. Be carreful, use `can_alloc()` before
@@ -1575,16 +1433,6 @@ public:
      */
     graph_observer& alloc_graph_observer() noexcept;
 
-    /** Get the observation directory used by all text observation
-     * files. If the @c observation_dir is undefined this function returns
-     * an empty string.
-     *
-     * @param mod The modeling object to get the observation directory.
-     * @return A string_view to the observation directory.
-     */
-    std::optional<path> get_observation_dir(
-      const irt::modeling& mod) const noexcept;
-
     registred_path_id observation_dir; /**< The output directory used by all
                                           text observation file. If undefined,
                                           the current repertory is used. */
@@ -1597,16 +1445,31 @@ private:
     component_id m_head    = undefined<component_id>();
     tree_node_id m_tn_head = undefined<tree_node_id>();
 
-    struct observation_files {
+    class observation_files final : public observation_sink
+    {
+    public:
         file json_irtb;
         file bin_irtb;
+        path json_path;
+        path bin_path;
+
+        /// Number of raw samples written for each observer, indexed by
+        /// @c get_index(observer_id).
+        struct written_samples {
+            observer_id id    = undefined<observer_id>();
+            u64         count = 0;
+        };
+
+        vector<written_samples> written;
 
         observation_files() noexcept = default;
 
         observation_files(observation_files&&) noexcept            = default;
         observation_files& operator=(observation_files&&) noexcept = default;
 
-        observation_files(const observation_files&) noexcept {}
+        observation_files(const observation_files&) noexcept
+          : observation_sink()
+        {}
         observation_files& operator=(const observation_files&) noexcept
         {
             (void)json_irtb.close();
@@ -1614,13 +1477,26 @@ private:
 
             return *this;
         }
+
+        status consume(const observation_batch& batch) noexcept override;
+        void   rewind(const simulation& /*sim*/) noexcept override {}
     };
 
     observation_files obs_files;
 
-    u32  m_simulation_id  = 0;
-    u32  m_simulation_run = 0;
+    u32 m_simulation_id  = 0;
+    u32 m_simulation_run = 0;
 };
+
+/// Converts the observation files of a run to a CSV file with the columns
+/// `t,model_id,name,value`, in the order of the chunks of @c irb: the memory
+/// does not depend on the size of the files. The raw samples are resampled
+/// with the time step and the interpolation of the @c manifest, like the
+/// curves of the simulation. An empty path or a missing file gives empty
+/// names and the raw samples.
+status write_observations_csv(const path& irb,
+                              const path& manifest,
+                              const path& csv) noexcept;
 
 class grid_observer
 {
@@ -1655,13 +1531,8 @@ public:
     status init(project& pj, const modeling& mod) noexcept;
 
     /**
-     * @brief Clear the @c observers and @c values vectors.
-     */
-    void clear() noexcept;
-
-    /**
-     * @brief For each observer in @c observers get the last value from history
-     * buffer.
+     * @brief For each observer in @c observers get the last observed value
+     * (@c observer::last_value()).
      *
      * @param pj Get access of @c project::observations and @c
      * project::simulation::observers
@@ -1708,13 +1579,8 @@ public:
     status init(project& pj, const modeling& mod) noexcept;
 
     /**
-     * @brief Clear the @c observers and @c values vectors.
-     */
-    void clear() noexcept;
-
-    /**
-     * @brief For each observer in @c observers get the last value from history
-     * buffer.
+     * @brief For each observer in @c observers get the last observed value
+     * (@c observer::last_value()).
      *
      * @param pj Get access of @c project::observations and @c
      * project::simulation::observers
@@ -1735,11 +1601,7 @@ enum class plot_type_options : u8 {
 class variable_observer
 {
 public:
-    name_str                               name;
-    static_bounded_value<i32, 8, 64>       max_observers          = 8;
-    static_bounded_value<i32, 8, 512>      raw_buffer_size        = 64;
-    static_bounded_value<i32, 1024, 65536> linearized_buffer_size = 32768;
-    static_bounded_floating_point<float, 1, 100, 1, 10> time_step = .01f;
+    name_str name;
 
     fraction timestep = { 1, 100 }; //!< Affect resampler::m_dt.
 
@@ -1777,9 +1639,6 @@ public:
     //! @details Do nothing if `tn` and `mdl` is not found.
     void erase(const tree_node_id tn, const model_id mdl) noexcept;
 
-    //! @brief Remove a `sub_id` from `id_array`.
-    void erase(const sub_id id) noexcept;
-
     //! @brief Push data in all vectors if pair (`tn`, `mdl`) does not
     //! already exists.
     sub_id push_back(const tree_node_id      tn,
@@ -1790,18 +1649,17 @@ public:
 
     bool     exists(const sub_id id) const noexcept { return subs.exists(id); }
     unsigned size() const noexcept { return subs.size(); }
-    int      ssize() const noexcept { return subs.ssize(); }
 };
 
 struct modeling_reserve_definition {
-    constrained_value<int, 512, INT_MAX> components{};
-    constrained_value<int, 512, INT_MAX> grid_compos{};
-    constrained_value<int, 512, INT_MAX> graph_compos{};
-    constrained_value<int, 512, INT_MAX> generic_compos{};
-    constrained_value<int, 512, INT_MAX> hsm_compos{};
-    constrained_value<int, 16, INT_MAX>  regs{};
-    constrained_value<int, 32, INT_MAX>  dirs{};
-    constrained_value<int, 512, INT_MAX> files{};
+    clamped_value<int, 512, INT_MAX> components{};
+    clamped_value<int, 512, INT_MAX> grid_compos{};
+    clamped_value<int, 512, INT_MAX> graph_compos{};
+    clamped_value<int, 512, INT_MAX> generic_compos{};
+    clamped_value<int, 512, INT_MAX> hsm_compos{};
+    clamped_value<int, 16, INT_MAX>  regs{};
+    clamped_value<int, 32, INT_MAX>  dirs{};
+    clamped_value<int, 512, INT_MAX> files{};
 };
 
 /** A wrapper to a simulation project. Stores a references to the project file
@@ -1829,6 +1687,10 @@ public:
      * The @c unique_id_path and the @c tree_node_id are removes from
      * simulations factors and selections. */
     status copy_to(embedded_simulation& sim) const noexcept;
+
+    /// The factors change the first real parameter of the model: only these
+    /// dynamics use it as a value or a delay.
+    static bool can_be_factor(const dynamics_type type) noexcept;
 
     using factor_t = id_data_array<void,
                                    factor_id,
@@ -1888,26 +1750,15 @@ struct component_access {
     data_array<hierarchical_state_machine, hsm_id> hsms;
     data_array<graph, graph_id>                    graphs;
 
-    component_id alloc() noexcept { return ids.alloc(); }
-
     void free(const component_id id) noexcept;
     void clear(const component_id id) noexcept;
 
     bool exists(const component_id id) const noexcept { return ids.exists(id); }
 
-    bool can_alloc(int number) const noexcept { return ids.can_alloc(number); }
-
-    template<size_t Num, size_t Denum>
-    bool grow() noexcept
-    {
-        return ids.grow<Num, Denum>();
-    }
-
     iterator       begin() noexcept { return ids.begin(); }
     iterator       end() noexcept { return ids.end(); }
     const_iterator begin() const noexcept { return ids.begin(); }
     const_iterator end() const noexcept { return ids.end(); }
-    unsigned       capacity() const noexcept { return ids.capacity(); }
     unsigned       size() const noexcept { return ids.size(); }
     int            ssize() const noexcept { return ids.ssize(); }
 
@@ -1936,12 +1787,6 @@ struct component_access {
     component_id alloc_graph_component() noexcept;
     component_id alloc_hsm_component() noexcept;
     component_id alloc_sim_component() noexcept;
-
-    status import(const generic_component& grid,
-                  generic_component&       dst) noexcept;
-    status import(const graph_component& graph,
-                  generic_component&     dst) noexcept;
-    status import(const grid_component& grid, generic_component& dst) noexcept;
 };
 
 struct file_access {
@@ -1961,14 +1806,6 @@ struct file_access {
 
     int browse_registred(const registred_path_id id) noexcept;
     int browse_registreds() noexcept;
-
-    /// Removes the :;c file_path from :c file_paths and remove the file
-    /// from the filesystem.
-    void remove(const file_path_id id) noexcept;
-
-    /// Update the @c dir_path::children vector according to the
-    /// filesystem.
-    void refresh(const dir_path_id id) noexcept;
 
     /// Search a existing filename in the @c dir_path::children and with
     /// the type @c type. Use @c undefined_file to select any file with
@@ -2013,8 +1850,6 @@ struct file_access {
     registred_path_id alloc_registred(const std::string_view name,
                                       const int              priority) noexcept;
 
-    bool exists(const registred_path_id dir) const noexcept;
-    bool exists(const dir_path_id dir) const noexcept;
     bool create_directories(const registred_path_id id) const noexcept;
     bool create_directories(const dir_path_id id) const noexcept;
 
@@ -2022,22 +1857,10 @@ struct file_access {
     /// remove directory from filesystem.
     void remove_directory(const dir_path_id id) noexcept;
 
-    /// Removes any files in the @c dir_path file system.
-    void remove_files(const dir_path_id id) noexcept;
-
     /// Removes @c file_id from the file system.
     void remove_file(const file_path_id file) noexcept;
 
-    /// Move a file from a file system to another.
-    void move_file(const dir_path_id to, const file_path_id file) noexcept;
-
-    void free(const file_path_id file) noexcept;
-    void free(const dir_path_id dir) noexcept;
-    void free(const registred_path_id dir) noexcept;
-
     expected<path> get_fs_path(const file_path_id id) const noexcept;
-    expected<path> get_fs_path(const dir_path_id id) const noexcept;
-    expected<path> get_fs_path(const registred_path_id id) const noexcept;
 
     struct full_file_access_result {
         registred_path_id reg_id  = undefined<registred_path_id>();
@@ -2070,21 +1893,9 @@ public:
      */
     status fill_components() noexcept;
 
-    /**
-     * Browse the file system to search components, projects and data file in
-     * registred paths. The @c fill_components function use this function.
-     */
-    void browse_file_system() noexcept;
-
     status save(const component_access& ids,
                 const file_access&      fs,
                 const component_id      id) noexcept;
-
-    status import(const component_id         src,
-                  const component_id         dst,
-                  const std::span<position>  positions  = {},
-                  const std::span<name_str>  names      = {},
-                  const std::span<parameter> parameters = {}) noexcept;
 
     shared_buffer<component_access> ids;
     shared_buffer<file_access>      files;
@@ -2176,34 +1987,99 @@ inline tree_node::tree_node(component_id           id_,
   , unique_id(uid)
 {}
 
+/**
+ * The journal of the commands applied to the simulation of a project: each
+ * command with the step after which it was applied and the date of the
+ * clock. The player of the simulation applies them again when it replays the
+ * steps (see @c simulation_player::set_edition_replay()): the history is kept
+ * through the editions, and a game can be replayed after a new build of the
+ * simulation (@c project::simulation_init() then @c
+ * simulation_player::start()), or saved (@c save_journal()).
+ *
+ * To start a new game, @c clear() the journal before the start.
+ */
+class command_journal final : public edition_replay
+{
+public:
+    struct entry {
+        u64     step = 0;
+        time    t    = 0;
+        command cmd;
+    };
+
+    explicit command_journal(project& pj) noexcept
+      : m_pj(pj)
+    {}
+
+    /**
+     * Applies the commands of @c queue (see @c project::apply_commands()) and
+     * records the commands that succeed at the step @c step and at the date
+     * of the clock. Call it inside @c simulation_player::edit() with @c
+     * simulation_player::step().
+     */
+    status apply(command_queue& queue, u64 step) noexcept;
+
+    time   edition_time(u64 step) const noexcept override;
+    status replay(u64 step) noexcept override;
+    void   forget_after(u64 step) noexcept override;
+
+    /// Sorted by step, then in the order of the editions.
+    std::span<const entry> entries() const noexcept
+    {
+        return std::span(m_entries.data(), m_entries.size());
+    }
+
+    /// Adds an entry after the others (a journal read from a file).
+    /// @return false if @c e is before the last entry or without memory.
+    bool push(const entry& e) noexcept;
+
+    void clear() noexcept { m_entries.clear(); }
+
+private:
+    project&      m_pj;
+    vector<entry> m_entries;
+};
+
 /*
    Project part
  */
 
-template<typename Function, typename... Args>
-inline void project::for_each_children(tree_node& tn,
-                                       Function&& f,
-                                       Args&&... args) noexcept
+inline bool command_queue::push(const command& cmd) noexcept
 {
-    auto* child = tn.tree.get_child();
-    if (!child)
-        return;
+    const auto tail = m_tail.load(std::memory_order_relaxed);
+    const auto head = m_head.load(std::memory_order_acquire);
 
-    vector<tree_node*> stack;
-    stack.emplace_back(child);
-    while (!stack.empty()) {
-        auto cur = stack.back();
-        stack.pop_back();
+    if (tail - head >= capacity)
+        return false;
 
-        std::invoke(std::forward<Function>(f), *child,
-                    std::forward<Args>(args)...);
+    m_buffer[tail % capacity] = cmd;
+    m_tail.store(tail + 1u, std::memory_order_release);
 
-        if (auto* sibling = cur->tree.get_sibling(); sibling)
-            stack.emplace_back(sibling);
+    return true;
+}
 
-        if (auto* child = cur->tree.get_child(); child)
-            stack.emplace_back(child);
-    }
+inline bool command_queue::empty() const noexcept
+{
+    return m_head.load(std::memory_order_acquire) ==
+           m_tail.load(std::memory_order_acquire);
+}
+
+template<typename Fn>
+inline void command_queue::consume(Fn&& fn) noexcept
+{
+    auto       head = m_head.load(std::memory_order_relaxed);
+    const auto tail = m_tail.load(std::memory_order_acquire);
+
+    for (; head != tail; ++head)
+        fn(std::as_const(m_buffer[head % capacity]));
+
+    m_head.store(head, std::memory_order_release);
+}
+
+inline void command_queue::clear() noexcept
+{
+    m_head.store(m_tail.load(std::memory_order_acquire),
+                 std::memory_order_release);
 }
 
 } // namespace irt

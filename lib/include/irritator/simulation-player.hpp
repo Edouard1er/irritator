@@ -1,0 +1,628 @@
+// Copyright (c) 2026 INRAE Distributed under the Boost Software License,
+// Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+
+#ifndef ORG_VLEPROJECT_IRRITATOR_SIMULATION_PLAYER_HPP
+#define ORG_VLEPROJECT_IRRITATOR_SIMULATION_PLAYER_HPP
+
+#include <irritator/binary-simulation.hpp>
+#include <irritator/thread.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <limits>
+#include <mutex>
+#include <shared_mutex>
+#include <span>
+#include <thread>
+
+namespace irt {
+
+/// The observers part of a step, sequential version: after @c
+/// simulation::run(), the observers whose raw buffer is nearly full are
+/// resampled
+/// (@c simulation::immediate_observers) and, at the end of the simulation, all
+/// the observers.
+///
+/// The @c simulation_player does the same thing (in parallel if it can), so
+/// use this function to build a reference with a plain @c run() loop: a
+/// loop of @c sim.run() + @c sim.tick_resamplers() (all the observers at each
+/// step) does not give the same outputs.
+inline void tick_resamplers_after_run(simulation& sim) noexcept
+{
+    if (sim.current_time_expired()) {
+        sim.tick_resamplers();
+    } else if (not sim.immediate_observers.empty()) {
+        sim.tick_resamplers(std::span<const observer_id>(
+          sim.immediate_observers.data(),
+          static_cast<std::size_t>(sim.immediate_observers.size())));
+    }
+}
+
+/// Options of the @c simulation_player.
+struct simulation_player_options {
+    /// A snapshot every @c keyframe_interval steps.
+    u32 keyframe_interval = 64;
+
+    /// Maximum number of keyframes (at least 2).
+    u32 max_keyframes = 256;
+
+    /// Minimum number of observers in a chunk of work for the parallel tick.
+    /// The tick is parallel only if there are at least two chunks: with fewer
+    /// observers, the cost of a round trip in the task list is higher than
+    /// the work.
+    u32 observers_per_chunk = 512;
+};
+
+/// Moves a simulation forward and backward in "steps" (one call of
+/// @c simulation::run() followed by @c tick_resamplers()), for a user
+/// interface: step forward, step back, go to a step, play, play backward.
+///
+/// How it works
+/// - Going forward is the simulation itself.
+/// - Going back restores a snapshot and replays the simulation forward.
+/// - A snapshot (a keyframe) is kept every @c options::keyframe_interval
+///   steps. Going back to a step costs at most the replay of one interval.
+///   When @c options::max_keyframes is reached, every other keyframe is
+///   dropped (the first and the last are kept): the oldest part of the history
+///   becomes sparser, so going far back is slower, but the memory is bounded.
+/// - The steps between a keyframe and the step where the user stops are kept
+///   too (the "window"), so a series of @c step_back() is one restore each,
+///   not a replay each.
+///
+/// Rules
+/// - The player does not own the simulation and is not thread safe: call it
+///   from the thread that owns the simulation.
+/// - The simulation must only be changed by the player. The user edits it
+///   between two steps with @c edit(). With an @c edition_replay (a journal
+///   of the editions, see @c set_edition_replay()) the player does the
+///   editions again when it replays the steps, so the history is kept.
+///   Without it the edition is not part of the replay: the history is
+///   forgotten. @c forget_future() only forgets the steps after the current
+///   one.
+/// - The observers are resampled after each @c run() as
+///   @c tick_resamplers_after_run() does. With a @c task_manager and enough
+///   observers the work is shared between the calling thread and the unordered
+///   workers (one helper task by worker at most). The unordered list works in
+///   batch (@c add(), @c submit(), @c wait_completion()) for one producer: it
+///   must be used by this player only (the helpers live on the stack of the
+///   tick, which waits for them), and the player must never be called from a
+///   task of its own list (the helpers could never start: deadlock). The task
+///   manager must outlive the player and must not be shut down during a tick.
+///
+/// @TODO
+/// - Using @c hierarchy<keyframe> to more feature?
+class simulation_player
+{
+public:
+    using step_type = u64;
+    using options   = simulation_player_options;
+
+    /// Sequential player: the observers are resampled by the calling thread.
+    explicit simulation_player(simulation&   sim,
+                               const options opt = options{}) noexcept;
+
+    /// The observers can be resampled in parallel by the unordered workers of
+    /// the task manager @c tm, using the unordered list @c list_index (the
+    /// list of this simulation only, see the rules above). If @c list_index is
+    /// out of range, the tick is sequential.
+    simulation_player(simulation&   sim,
+                      task_manager& tm,
+                      const size_t  list_index,
+                      const options opt = options{}) noexcept;
+
+    /// Changes the unordered list used to resample the observers in parallel
+    /// (see the constructor), when the list of the simulation is known after
+    /// the construction. Call it when no step is running.
+    void set_task_list(task_manager& tm, const size_t list_index) noexcept;
+
+    simulation_player(const simulation_player&)            = delete;
+    simulation_player& operator=(const simulation_player&) = delete;
+
+    /* * * * * * * *
+     *
+     * simulation handler
+     *
+     * * * * * * * */
+
+    /// Initializes the simulation (@c simulation::initialize()) and goes to
+    /// the step 0. Use it again to restart: the restart is as exact as
+    /// @c simulation::initialize() is, which must reset everything a run
+    /// changes, the state of the resamplers included. To come back to the
+    /// initial state for sure, use @c go_to(0) (a snapshot) while the history
+    /// is kept.
+    ///
+    /// After the end of the simulation (see @c finalized()), the sources of
+    /// the models were emptied by @c simulation::finalize(): @c start() first
+    /// restores the first keyframe, a state before finalize. Only a state
+    /// finalized by @c forget_history() at the end can not start again: build
+    /// the simulation again from its definition.
+    status start() noexcept;
+
+    /// Forgets the state of the player (history, steps, end of the
+    /// simulation): the player is not started. Call it when the simulation is
+    /// built again from its definition, before @c start(): otherwise
+    /// @c start() could restore a keyframe of the previous simulation.
+    void reset() noexcept;
+
+    /// One step forward. Nothing happens when the simulation is finished. The
+    /// step that finishes the simulation also finalizes it, see @c finalized().
+    status step_forward() noexcept;
+
+    /// One step back (nothing at the step 0).
+    status step_back() noexcept;
+
+    /// Goes to the step @c n, forward or backward. Forward, the simulation
+    /// stops at the end of the simulation.
+    status go_to(const step_type n) noexcept;
+
+    /// Steps forward until the budget is spent, @c max_steps steps are done
+    /// or the simulation is finished: call it at each frame of a "play" mode,
+    /// with a budget smaller than the duration of a frame. Without
+    /// @c max_steps the player runs as fast as it can, which is too fast to
+    /// follow when a step is cheap: give a small @c max_steps (1 to 10) to
+    /// control the speed of the playback.
+    status advance(const std::chrono::nanoseconds budget,
+                   const step_type                max_steps =
+                     std::numeric_limits<step_type>::max()) noexcept;
+
+    /// Steps back until the budget is spent, @c max_steps steps are done or
+    /// the step 0 is reached: the "play backward" mode (see @c advance() for
+    /// @c max_steps).
+    status retreat(const std::chrono::nanoseconds budget,
+                   const step_type                max_steps =
+                     std::numeric_limits<step_type>::max()) noexcept;
+
+    /// Forgets the steps after the current one (the user can not go forward
+    /// to them any more). It does NOT make the past consistent with an edition
+    /// of the simulation: a rewind restores the whole state of the past
+    /// (models, parameters, connections), without the edition. After an
+    /// edition, use @c forget_history().
+    status forget_future() noexcept;
+
+    /// Date of the next event, @c infinity if there is none. It is capped by
+    /// the end of the simulation: the "event" that finishes the simulation is
+    /// the one at the end date.
+    time next_time() const noexcept;
+
+    /// Real time mode: steps forward while the date of the next event is
+    /// lower than or equal to @c target, until the budget is spent or
+    /// @c max_steps steps are done.
+    ///
+    /// Every event with a date lower than or equal to @c target is done at
+    /// the end of the call (if the budget is enough). The simulation clock
+    /// (@c current_time()) is then moved to @c target: the state of the
+    /// simulation is the state at the date @c target, and it is the right
+    /// moment to edit the simulation (a model created now is initialized at
+    /// @c target).
+    ///
+    /// If the simulation has no end (@c is_live()), the simulation does not
+    /// finish when there is no more event: the clock goes on and the player
+    /// waits for an edition. Otherwise, when there is no more event, the
+    /// simulation is finished (as with @c step_forward()).
+    status advance_until(const time                     target,
+                         const std::chrono::nanoseconds budget,
+                         const step_type                max_steps =
+                           std::numeric_limits<step_type>::max()) noexcept;
+
+    /// Call it after an edition of the simulation (value, model, connection,
+    /// event) at the current step. The steps before can not be replayed: the
+    /// edition is not part of the replay (it is not a step), so all the
+    /// history is dropped and the current state is the new beginning:
+    /// @c earliest_step() equals @c step().
+    status forget_history() noexcept;
+
+    /// Applies the edition @c fn (a @c status function, for example @c
+    /// command_journal::apply()) between two steps, then makes the history
+    /// consistent.
+    ///
+    /// - With an @c edition_replay that records the edition, the editions
+    ///   after the current step are forgotten before @c fn (a new edition
+    ///   replaces the future), and the history before is kept: a rewind does
+    ///   the edition again. The steps after the current one are forgotten
+    ///   (@c forget_future()).
+    /// - Without it, the history is forgotten (@c forget_history()).
+    /// - Without history (@c keeps_history()), nothing is to forget and no
+    ///   snapshot is taken, so an edition at each frame costs nothing more.
+    ///
+    /// Errors: @c simulation_errc::player_edit_error if the player is not
+    /// started or if the simulation is finalized (@c finalized()), the error
+    /// of @c fn otherwise. After an error of @c fn the history is forgotten
+    /// too: a part of the edition may be done.
+    ///
+    /// @c fn runs with the lock of the structure (see @c try_lock_structure()):
+    /// an edition can allocate or free models, the views must not read the
+    /// simulation meanwhile.
+    template<typename Fn>
+    status edit(Fn&& fn) noexcept;
+
+    /// Grows at each @c edit() and @c reset(): a view that keeps the
+    /// identifiers of the models builds them again when it changes. Read it
+    /// with the lock of @c try_lock_structure() held.
+    u64 edit_count() const noexcept
+    {
+        return m_edit_count.load(std::memory_order_acquire);
+    }
+
+    /// "Complete simulation" mode: with @c false the following steps do not
+    /// take any keyframe, so the memory does not grow with the length of the
+    /// simulation (the only snapshot kept is the one of the current step).
+    /// There is no way back: @c earliest_step() follows @c step(), so
+    /// @c can_step_back() is false, @c go_to() does nothing backward, and
+    /// @c start() is the way to run again.
+    ///
+    /// With @c true (default), the current step becomes the beginning of the
+    /// history, as after @c forget_history(). The change costs one snapshot at
+    /// most, and nothing if there is nothing to forget. Call it from the thread
+    /// that owns the simulation, as the other functions.
+    status keep_history(const bool value) noexcept;
+
+    /// True (default) if the steps take keyframes, see @c keep_history().
+    bool keeps_history() const noexcept { return m_keep_history; }
+
+    /// While the lock is held, a rewind can not rebuild the containers of the
+    /// simulation (models, observers...). The lock is empty if a rewind is in
+    /// progress: the simulation must not be read.
+    std::shared_lock<std::shared_mutex> try_lock_structure() const noexcept
+    {
+        return std::shared_lock(m_restore_mutex, std::try_to_lock);
+    }
+
+    /// Waits for the end of a rewind or of an edition, then keeps the
+    /// containers of the simulation as they are while the lock is held: for
+    /// a thread that reads the simulation outside of the steps (a layout of a
+    /// view, a save). The values of the models still change if a step runs.
+    std::shared_lock<std::shared_mutex> lock_structure() const noexcept
+    {
+        return std::shared_lock(m_restore_mutex);
+    }
+
+    /// For the owner of the simulation that builds it again outside of the
+    /// player (@c project::simulation_init()): the readers of @c
+    /// lock_structure() wait. No step must run.
+    std::unique_lock<std::shared_mutex> lock_structure_for_rebuild() noexcept
+    {
+        return std::unique_lock(m_restore_mutex);
+    }
+
+    /* * * * * * * *
+     *
+     * observers
+     *
+     * * * * * * * */
+
+    /// The consumer of the outputs of the observers (a file, the curves of a
+    /// user interface): the player gives it the outputs after each tick of
+    /// the observers, and tells it the rewinds. Without a consumer, the outputs
+    /// are dropped. Call it when no step is running.
+    void set_observation_sink(observation_sink* sink) noexcept
+    {
+        m_sink = sink;
+    }
+
+    /// Moves the raw samples of all the observers to the consumer (the
+    /// curves, see @c set_observation_sink()). The steps do it lazily, for
+    /// speed: an observer is resampled only when its raw buffer is nearly full,
+    /// or at the end of the simulation. That is too late for an interactive use
+    /// (debug, real time): a model that emits a sample from time to time shows
+    /// its curve after hundreds of steps. Call it at the end of each slice of
+    /// work (a frame) in these modes. It does not change the simulation, only
+    /// the moment when the consumer receives the points, so the states of the
+    /// player (keyframes, rewinds) stay valid. The tick is parallel like the
+    /// other ticks. Nothing happens if the player is not started.
+    status flush_observers() noexcept;
+
+    /// Minimum number of observers resampled together for a parallel tick
+    /// (see @c simulation_player_options::observers_per_chunk). 0 without
+    /// task list or unordered worker: the tick is always sequential.
+    std::size_t parallel_tick_threshold() const noexcept
+    {
+        return m_utl != nullptr and m_helpers > 0 ? 2u * m_chunk : 0u;
+    }
+
+    /// Return true iff simulation started.
+    bool started() const noexcept { return m_started; }
+
+    /// Return the current step [earliest_step..furthest_step]: The user can go
+    /// to it with @c go_to().
+    step_type step() const noexcept { return m_step; }
+
+    /// The last step that was reached: the user can go forward to it with
+    /// @c go_to() without running new steps.
+    step_type furthest_step() const noexcept { return m_furthest; }
+
+    /// The first step that can be reached backward: 0 until the first
+    /// @c forget_history().
+    step_type earliest_step() const noexcept { return m_floor; }
+
+    /// True if @c step_back() can go back: started and after the first step
+    /// that can be reached (@c earliest_step()).
+    bool can_step_back() const noexcept { return m_started and m_step > m_floor; }
+
+    /// True if the simulation is at its end (time limit or no more events).
+    bool finished() const noexcept;
+
+    /// The journal of the editions that the player does again when it replays
+    /// the steps (see @c edit()), @c nullptr for none. It must outlive the
+    /// player or be removed. Call it when no step is running.
+    void set_edition_replay(edition_replay* replay) noexcept
+    {
+        m_replay          = replay;
+        m_edition_pending = false;
+    }
+
+    /// True if @c simulation::finalize() was called for the current state. The
+    /// player calls it itself, once, as soon as the simulation is finished (a
+    /// step forward, or a rewind or a jump that lands on the last step). A
+    /// finalized simulation does not run any more; going back restores a state
+    /// that is not finalized, and the next arrival at the end finalizes it
+    /// again. Do not call @c simulation::finalize() yourself.
+    bool finalized() const noexcept { return m_finalized; }
+
+    time current_time() const noexcept { return m_sim.current_time(); }
+
+    /// Limits of the simulation (a progress bar: end is infinite if is_live()).
+    time begin_time() const noexcept { return m_sim.limits.begin(); }
+    time end_time() const noexcept { return m_sim.limits.end(); }
+
+    std::size_t keyframe_number() const noexcept
+    {
+        return static_cast<std::size_t>(m_keyframes.size());
+    }
+
+    /// True if the simulation has no end date: it never finishes by itself.
+    bool is_live() const noexcept
+    {
+        return time_domain<time>::is_infinity(m_sim.limits.end());
+    }
+
+    /// True if step_forward() can do a step: started, not finished and, for a
+    /// simulation without end, something to run.
+    bool can_step_forward() const noexcept
+    {
+        return m_started and not finished() and
+               not(is_live() and m_sim.models.size() == 0);
+    }
+
+    /// Bytes used by the keyframes and by the window.
+    std::size_t memory_usage() const noexcept;
+
+private:
+    struct keyframe {
+        step_type  step      = 0;
+        bool       finalized = false; // the snapshot is a finalized state
+        vector<u8> data;
+    };
+
+    simulation&          m_sim;
+    unordered_task_list* m_utl    = nullptr; // nullptr: sequential tick
+    observation_sink*    m_sink   = nullptr;
+    edition_replay*      m_replay = nullptr;
+
+    binary_writer      m_writer;    // reused: no allocation for a snapshot
+    vector<keyframe>   m_keyframes; // sorted by step, the first is the step 0
+    vector<vector<u8>> m_window;    // snapshots of the steps
+                                    // [m_window_first, m_window_first + size)
+    step_type m_window_first = 0;
+    step_type m_step         = 0;
+    step_type m_furthest     = 0;
+    step_type m_floor        = 0; // first reachable step (forget_history)
+    u32       m_interval;
+    u32       m_max_keyframes;
+    u32       m_chunk;
+    u32       m_helpers = 0; // unordered workers of the task manager
+    bool      m_started = false;
+    bool      m_keep_history = true; // false: no keyframe, see keep_history()
+    bool      m_finalized    = false; // simulation::finalize() done, see above
+
+    // The editions recorded after the current step are not applied yet: a
+    // replay by advance_until() waits for their date.
+    bool m_edition_pending = false;
+
+    vector<observer_id> m_obs_ids; // work buffer of the parallel tick
+
+    mutable std::shared_mutex m_restore_mutex;
+    std::atomic<u64>          m_edit_count{ 0 };
+
+    /// The work of one parallel tick, shared between the calling thread and
+    /// the helpers: each one claims chunks until there is none. It lives on
+    /// the stack of the tick, which waits for the end of the helpers.
+    struct tick_job {
+        simulation*              sim         = nullptr;
+        const observer_id*       ids         = nullptr;
+        std::size_t              count       = 0;
+        std::size_t              chunk       = 1;
+        std::size_t              chunk_count = 0;
+        time                     now         = 0;
+        std::atomic<std::size_t> next{ 0 }; // next chunk to claim
+
+        void work() noexcept;
+    };
+
+    status do_step() noexcept;
+
+    /// @c step_forward() that leaves the editions of the new step pending if
+    /// @c apply_editions is false (see @c advance_until()).
+    status step_forward(const bool apply_editions) noexcept;
+
+    /// Does again the editions recorded after the current step, if any. The
+    /// keyframe of the step, taken before, is taken again.
+    status apply_pending_editions() noexcept;
+
+    /// Finalizes the simulation once, if it is finished.
+    status finalize_if_finished() noexcept;
+    status snapshot_to(vector<u8>& out) noexcept;
+    status restore_from(const vector<u8>& data) noexcept;
+    status push_keyframe() noexcept;
+
+    /// After @c run(): see @c tick_resamplers_after_run().
+    status tick_observers() noexcept;
+
+    /// Resamples all the observers (parallel if there are enough).
+    status tick_all_observers(const time now) noexcept;
+
+    /// Gives the outputs of the observers @c ids to the consumer.
+    status drain_observers(const std::span<const observer_id> ids) noexcept;
+    status drain_all_observers() noexcept;
+
+    /// True if the tick of @c n observers is worth the task list.
+    bool parallel_tick(const std::size_t n) const noexcept;
+
+    /// Resamples @c ids (without duplicates) with the task list.
+    void tick_parallel(const std::span<const observer_id> ids,
+                       const time                         now) noexcept;
+
+    /// Takes a keyframe when the simulation goes beyond the last one (a
+    /// replay of a known part of the history does not take any).
+    status keyframe_if_needed() noexcept;
+
+    /// Keeps the first, the last and one over two in between.
+    void thin_keyframes() noexcept;
+
+    /// Restores the nearest keyframe before the step @c n and replays the
+    /// simulation up to @c n. If @c fill_window, the intermediate steps are
+    /// kept for the next calls.
+    status rewind_to(const step_type n, const bool fill_window) noexcept;
+};
+
+/// Maps the wall clock to the simulation time for the "real time" mode: one
+/// unit of simulation time lasts @c unit_duration() of real time.
+///
+/// The pacer only does arithmetic (no thread, no sleep, no simulation): a
+/// simulation is real time when it only runs the events whose date is lower
+/// than or equal to @c target(). The wall clock is a parameter of every
+/// function (default: @c steady_clock::now()) to be testable.
+///
+/// Not thread safe: use it from the task that runs the simulation.
+class realtime_pacer
+{
+public:
+    using clock      = std::chrono::steady_clock;
+    using time_point = clock::time_point;
+    using duration   = std::chrono::nanoseconds;
+
+    explicit realtime_pacer(
+      const duration unit = std::chrono::seconds(1)) noexcept
+      : m_unit(std::max(unit, duration(1)))
+    {}
+
+    /// Real duration of one unit of simulation time.
+    duration unit_duration() const noexcept { return m_unit; }
+
+    /// Says that the simulation time @c sim_now is reached at @c wall_now.
+    /// Use it at the start, after a pause (otherwise the simulation runs
+    /// fast to catch up with the real time) and after a long delay.
+    void rebase(const time       sim_now,
+                const time_point wall_now = clock::now()) noexcept
+    {
+        m_sim_ref  = sim_now;
+        m_wall_ref = wall_now;
+    }
+
+    /// Changes the real duration of one unit of simulation time. The target
+    /// does not jump: the new speed applies from @c wall_now.
+    void set_unit_duration(const duration   unit,
+                           const time_point wall_now = clock::now()) noexcept
+    {
+        rebase(target(wall_now), wall_now);
+        m_unit = std::max(unit, duration(1));
+    }
+
+    /// The simulation time that the simulation must have reached at @c
+    /// wall_now: all the events with a date lower than or equal to it are
+    /// due.
+    time target(const time_point wall_now = clock::now()) const noexcept
+    {
+        const auto elapsed = wall_now - m_wall_ref;
+
+        return m_sim_ref + static_cast<double>(elapsed.count()) /
+                             static_cast<double>(m_unit.count());
+    }
+
+    /// The wall clock date of the simulation time @c t (to sleep until the
+    /// next event for instance).
+    time_point wall_of(const time t) const noexcept
+    {
+        const auto ns = (t - m_sim_ref) * static_cast<double>(m_unit.count());
+
+        return m_wall_ref + std::chrono::duration_cast<duration>(
+                              std::chrono::duration<double, std::nano>(ns));
+    }
+
+    /// How late is the event at @c next_event_time: zero if it is not due
+    /// yet. The date of the last event is not a good parameter: nothing is
+    /// late when there is no event.
+    duration lateness(const time       next_event_time,
+                      const time_point wall_now = clock::now()) const noexcept
+    {
+        const auto late = target(wall_now) - next_event_time;
+
+        if (not(late > 0.0))
+            return duration::zero();
+
+        return std::chrono::duration_cast<duration>(
+          std::chrono::duration<double, std::nano>(
+            late * static_cast<double>(m_unit.count())));
+    }
+
+    /// If the next event is more than @c max_lateness late (the simulation is
+    /// slower than the real time, or the process was suspended), forgets the
+    /// delay: the simulation goes on from there at the real speed instead of
+    /// running flat out to catch up. Returns true if the delay is forgotten.
+    bool resync_if_late(const time       next_event_time,
+                        const duration   max_lateness,
+                        const time_point wall_now = clock::now()) noexcept
+    {
+        if (lateness(next_event_time, wall_now) <= max_lateness)
+            return false;
+
+        rebase(next_event_time, wall_now);
+        return true;
+    }
+
+private:
+    time       m_sim_ref  = 0.0;
+    time_point m_wall_ref = clock::now();
+    duration   m_unit;
+};
+
+template<typename Fn>
+status simulation_player::edit(Fn&& fn) noexcept
+{
+    if (not m_started or m_finalized)
+        return make_error(simulation_errc::player_edit_error);
+
+    if (m_replay) {
+        // The editions of this step not done yet (a replay by advance_until()
+        // waits for their date) are after the new one: they go with the
+        // future.
+        m_replay->forget_after(m_edition_pending and m_step > 0u ? m_step - 1u
+                                                                 : m_step);
+        m_edition_pending = false;
+    }
+
+    auto ret = [&]() noexcept -> status {
+        std::unique_lock lock(m_restore_mutex);
+        m_edit_count.fetch_add(1, std::memory_order_release);
+        return fn();
+    }();
+
+    if (not m_keep_history) {
+        m_window.clear();
+        m_floor    = m_step;
+        m_furthest = m_step;
+    } else {
+        // With a replay, the keyframe of the step is taken again with the
+        // edition: the steps before are replayed with it.
+        const auto r = m_replay ? forget_future() : forget_history();
+        if (r.has_error() and not ret.has_error())
+            ret = r;
+    }
+
+    return ret;
+}
+
+} // namespace irt
+
+#endif

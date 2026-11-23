@@ -122,7 +122,7 @@ struct split_name {
         if (pos != std::string_view::npos and
             std::cmp_less(pos + 1, str.size())) {
             left  = str.substr(0, pos);
-            right = str.substr(pos + 1, std::string::npos);
+            right = str.substr(pos + 1);
         } else {
             left = str;
         }
@@ -343,30 +343,6 @@ name_str grid_component::make_unique_name_id(int row, int col) const noexcept
     return ret;
 }
 
-bool grid_component::exists_input_connection(const port_id x,
-                                             const i32     row,
-                                             const i32     col,
-                                             const port_id id) const noexcept
-{
-    for (const auto& con : input_connections)
-        if (x == con.x and row == con.row and col == con.col and id == con.id)
-            return true;
-
-    return false;
-}
-
-bool grid_component::exists_output_connection(const port_id y,
-                                              const i32     row,
-                                              const i32     col,
-                                              const port_id id) const noexcept
-{
-    for (const auto& con : output_connections)
-        if (y == con.y and row == con.row and col == con.col and id == con.id)
-            return true;
-
-    return false;
-}
-
 expected<input_connection_id> grid_component::connect_input(
   const port_id x,
   const i32     row,
@@ -385,7 +361,7 @@ expected<input_connection_id> grid_component::connect_input(
 
         if (input_connections.capacity() == capacity)
             return make_error(
-              modeling_errc::generic_input_connection_container_full);
+              modeling_errc::grid_input_connection_container_full);
     }
 
     return input_connections.get_id(input_connections.alloc(x, row, col, id));
@@ -409,7 +385,7 @@ expected<output_connection_id> grid_component::connect_output(
 
         if (output_connections.capacity() == capacity)
             return make_error(
-              modeling_errc::generic_output_connection_container_full);
+              modeling_errc::grid_output_connection_container_full);
     }
 
     return output_connections.get_id(output_connections.alloc(y, row, col, id));
@@ -431,9 +407,11 @@ expected<void> grid_component::build_cache(
     cache.reserve(children);
     cache_connections.reserve(connections);
 
-    if (not(cache.can_alloc(children) and
-            cache_connections.can_alloc(connections)))
-        return make_error(modeling_errc::generic_children_container_full);
+    if (not cache.can_alloc(children))
+        return make_error(modeling_errc::grid_children_container_full);
+
+    if (not cache_connections.can_alloc(connections))
+        return make_error(modeling_errc::grid_connection_container_full);
 
     const auto vec = build_grid_children(*this, ids, cache, cache_names);
     build_grid_connections(

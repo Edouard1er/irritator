@@ -10,23 +10,24 @@
 #include <irritator/global.hpp>
 #include <irritator/helpers.hpp>
 #include <irritator/modeling.hpp>
+#include <irritator/simulation-player.hpp>
 #include <irritator/thread.hpp>
-#include <irritator/timeline.hpp>
 
 #include <filesystem>
 
 #include "dialog.hpp"
 
 #define IMGUI_DEFINE_MATH_OPERATORS
-#include "imnodes.h"
 #include "implot.h"
+#include "node-editor.hpp"
+#include "projection-3d.hpp"
 #include <imgui.h>
 
 namespace irt {
 
 class application;
 class component_editor;
-struct project_editor;
+class project_editor;
 
 enum class notification_id : u32;
 enum class plot_copy_id : u32;
@@ -44,7 +45,6 @@ enum class graph_editor_id : u32;
 enum class text_file_viewer_id : u32;
 
 enum class task_status : u8 { not_started, started, finished };
-enum class main_task : u8 { simulation_0 = 0, simulation_1, simulation_2, gui };
 
 enum class simulation_plot_type : u8 { none, plotlines, plotscatters };
 
@@ -155,7 +155,14 @@ private:
 
     u32 loop_number = 0u;
 
+    ImGuiTextFilter filter;
+
+    /// Indexed by the log category: errors, warnings, infos and debugs.
+    std::array<bool, 4> visible_categories = { true, true, true, true };
+    std::array<u32, 4>  categories_count   = {};
+
     bool clear_expected   = false;
+    bool copy_expected    = false;
     bool auto_scroll      = true;
     bool scroll_to_bottom = false;
 };
@@ -165,13 +172,6 @@ class plot_observation_widget
 public:
     plot_observation_widget() noexcept = default;
 
-    /** Display all observers data using an ImPlot::PlotLineG or
-     * ImPlot::PlotScatterG for continuous data or ImPlot::PlotStairsG or
-     * ImPlot::PlotBarG for discrete data into and ImPlot::BeginPlot() /
-     * ImPlot::EndPlot().
-     */
-    void show(project& app) noexcept;
-
     /** Display the observer data using an ImPlot::PlotLineG or
      * ImPlot::PlotScatterG for continuous data or ImPlot::PlotStairsG or
      * ImPlot::PlotBarG for discrete data.
@@ -179,60 +179,9 @@ public:
      * @attention Use this function after the call to ImPlot::BeginPlot() and
      * before the call to ImPlot::EndPlot().
      */
-    void show_plot_line(const observer&         obs,
-                        const plot_type_options options,
-                        const char*             name) noexcept;
-};
-
-/** A class to compute 3D projection of 3D points using three rotation
- * matrix.
- *
- * The three rotation matrix are computed using the @c angles vector that can
- * be changed by the user using ImGui widgets or dragging mouse with right
- * button.
- */
-class projection_3d
-{
-public:
-    /** Computes the new projection of the @c dots vector using the @c center
-     * vector and the three rotation maxtrix @c rot_x, @c rot_y and @c rot_z.
-     *
-     * @param x The x coordinate of the point to project.
-     * @param y The y coordinate of the point to project.
-     * @param z The z coordinate of the point to project.
-     * @return The new x, y and z coordinates of the projected point.
-     */
-    auto compute(float x, float y, float z) noexcept -> std::array<float, 3>;
-
-    /** Compute the new x, y and z rotation matrix (repectively @c rot_x, rot_y
-     * and rot_z) using the three angle parameters @c rx, @c ry and @c rz.
-     *
-     * @param angles The vector of three angles (rx, ry, rz) in radian.
-     * @param center The center of the object to display.
-     */
-    auto update_matrices(const std::array<float, 3>& angles,
-                         const std::array<float, 3>& center) noexcept -> void;
-
-    /** Get the current angles used to compute the rotation matrix. */
-    std::array<float, 3> angles() const noexcept { return m_angles; }
-
-    /** Get the current center of the object to display. */
-    std::array<float, 3> center() const noexcept { return m_center; }
-
-private:
-    /** Users can changes angles values from -M_PI to +M_PI using the ImGui
-     * widgets or dragging mouse withg right button.
-     *
-     * @attention Attributes can be removed. The angles are in radian.
-     */
-    std::array<float, 3> m_angles{ 0, 0, 0 };
-
-    /** The center of the object to display. */
-    std::array<float, 3> m_center{ 0, 0, 0 };
-
-    std::array<float, 9> m_rot_x{ 0, 0, 0 };
-    std::array<float, 9> m_rot_y{ 0, 0, 0 };
-    std::array<float, 9> m_rot_z{ 0, 0, 0 };
+    void show_plot_line(std::span<const resampled_sample> points,
+                        const plot_type_options           options,
+                        const char*                       name) noexcept;
 };
 
 enum class window_status : u8 {
@@ -275,16 +224,6 @@ struct grid_observation_widget {
     void show(grid_observer& grid,
               const project& pj,
               const ImVec2&  size) noexcept;
-};
-
-// Callback function use into ImPlot::Plot like functions that use ring_buffer
-// to read a large buffer instead of a vector.
-inline ImPlotPoint ring_buffer_getter(int idx, void* data)
-{
-    auto* ring  = reinterpret_cast<ring_buffer<observation>*>(data);
-    auto  index = ring->index_from_begin(idx);
-
-    return ImPlotPoint{ (*ring)[index].x, (*ring)[index].y };
 };
 
 /**
@@ -354,9 +293,6 @@ struct plot_copy {
 };
 
 struct plot_copy_widget {
-    /** Display all plot_copy data into a ImPlot widget. */
-    void show(const char* name) noexcept;
-
     /** Display a @c plot_copy using @c ImPlot::PlogLineG or @c
      * ImPlot::PlotScatterG but without @c ImPlot::BeginPlot and @c
      * ImPlot::EndPlot */
@@ -374,11 +310,6 @@ public:
     void show() noexcept;
 
     bool is_open = false;
-
-    void save_obs(const project_id                pj_id,
-                  const variable_observer_id      vobs,
-                  const variable_observer::sub_id svobs) noexcept;
-    void save_copy(const plot_copy_id id) noexcept;
 
     void add_project(const project_id id) noexcept;
     void remove_project(const project_id id) noexcept;
@@ -410,34 +341,22 @@ private:
     } m_need_save = save_option::none;
 };
 
-/** A class shared between modeling, simulation and observation layer.
- *
- * The @c graph_editor use a ImGui::BeginChild()/ImGui::EndChild() to display to
- * display the graph.
+/** Displays the graph component of a simulation, colored by its components
+ * or by the values of a @c graph_observer. The 3D positions of the vertices
+ * are projected in 2D: dragging the background with the right button rotates
+ * the graph.
  */
 class graph_editor
 {
 public:
-    constexpr static inline auto selection_buffer_size = 128u;
-
     enum class show_result_type : u8 {
         none,            //!< No change - No close.
         edited,          //!< Component is changed - Update state.
         request_to_close //!< The window must be closed.
     };
 
-    enum class option : u8 { show_grid, show_help };
-
-    graph_editor() noexcept;
-
-    /** Display the graph component directly into a @c ImGui::BeginChild. */
-    void show(application&       app,
-              component&         c,
-              const component_id c_id,
-              graph_component&   g) noexcept;
-
     /** Display the simulation @c tree-node and @c graph-observer into an
-     * @c ImGui::BeginChild window.
+     * @c ImGui::Begin window.
      *
      * @return A status if the user close the window, edit the simulation or
      * keep open window.
@@ -458,83 +377,37 @@ public:
               tree_node&      tn,
               graph_observer& obs) noexcept;
 
-    /** Thread-safe Copy and apply transformation of the graph @c g. A @c job
-     * performs the task in a thread-safe way. Do not delete the @c g until the
-     * job. */
-    void update(application& app, const graph& g) noexcept;
+    /** Rebuilds the projected graph at the next display, for example when the
+     * user selects another graph component. */
+    void request_update() noexcept { m_dirty = true; }
 
 private:
-    /** A projection class to build @c data_type::nodes position in 2D from the
-     * 3D position of the graph nodes. */
-    projection_3d proj;
+    struct view;
 
-    /** Top left corner position in canvas. */
-    ImVec2 scrolling       = { 0, 0 };
-    ImVec2 canvas_sz       = { 0, 0 };
-    ImVec2 start_selection = { 0, 0 };
-    ImVec2 end_selection   = { 0, 0 };
+    node_editor::editor m_editor;
+    projection_3d       m_proj;
 
-    struct data_type {
-        /** Each node stores the projection in 2D position @c (x,y) from the @c
-         * graph node position 3D @c (x,y,z). */
-        vector<std::array<float, 2>> nodes;
+    vector<graph_node_id>       m_nodes;
+    vector<u32>                 m_node_indices;
+    vector<ImVec2>              m_positions;
+    vector<std::pair<u32, u32>> m_edges;
 
-        std::array<float, 3> top_left;
-        std::array<float, 3> bottom_right;
-        std::array<float, 3> center;
-    };
+    bool m_dirty     = true;
+    bool m_rotating  = false;
+    bool m_dock_init = false;
 
-    shared_buffer<data_type> nodes_locker;
+    void build(const graph& g) noexcept;
 
-    vector<graph_node_id> selected_nodes;
-    vector<graph_edge_id> selected_edges;
+    /** @return true if the user asks to clone the display in a window. */
+    bool show_canvas(application&          app,
+                     const graph&          g,
+                     const graph_observer* obs,
+                     bool                  can_clone) noexcept;
 
-    graph_id g = undefined<graph_id>();
-
-    float zoom      = { 1 };
-    float grid_step = { 64 };
-
-    bitflags<option> flags;
-
-    bool run_selection = false;
-    bool dock_init     = false;
-
-    enum class popup_options : u8 {
-        show_graph_modication,
-        show_make_project_global_window
-    };
-
-    void auto_fit_camera() noexcept;
-    void center_camera() noexcept;
-    void reset_camera(application& app, const graph& g) noexcept;
-
-    bool initialize_canvas(ImVec2 top_left,
-                           ImVec2 bottom_right,
-                           ImU32  color) noexcept;
-    void draw_grid(ImVec2 top_left, ImVec2 bottom_right, ImU32 color) noexcept;
-    void draw_graph(const graph&          g,
-                    ImVec2                top_left,
-                    ImU32                 color,
-                    ImU32                 node_color,
-                    ImU32                 edge_color,
-                    const graph_observer& obs) noexcept;
-    void draw_graph(const graph& g,
-                    ImVec2       top_left,
-                    ImU32        color,
-                    ImU32        node_color,
-                    ImU32        edge_color,
-                    application& app) noexcept;
-    bool draw_popup(application&                  app,
-                    graph&                        g,
-                    ImVec2                        top_left,
-                    const bitflags<popup_options> opt = {}) noexcept;
-    bool draw_popup(application&                  app,
-                    const graph&                  g,
-                    ImVec2                        top_left,
-                    const bitflags<popup_options> opt = {}) noexcept;
-    void draw_selection(const graph& g,
-                        ImVec2       top_left,
-                        ImU32        background_selection_color) noexcept;
+    void clone(application&    app,
+               project_editor& ed,
+               tree_node&      tn,
+               graph_observer& obs) noexcept;
 };
 
 class grid_component_editor_data
@@ -543,19 +416,12 @@ public:
     grid_component_editor_data(const component_id      id,
                                const grid_component_id grid) noexcept;
 
-    void clear() noexcept;
-
     bool show(component_editor& ed,
               const component_access&,
               component& compo) noexcept;
     bool show_selected_nodes(component_editor& ed,
                              const component_access&,
                              component& compo) noexcept;
-    bool need_show_selected_nodes(component_editor& ed) noexcept;
-    void clear_selected_nodes() noexcept;
-
-    //! Get the underlying component_id.
-    component_id get_id() const noexcept { return m_id; }
 
     ImVec2           distance{ 5.f, 5.f };
     ImVec2           size{ 30.f, 30.f };
@@ -585,53 +451,42 @@ public:
     graph_component_editor_data(const component_id       id,
                                 const graph_component_id graph) noexcept;
 
-    void clear() noexcept;
-
     bool show(component_editor& ed,
               const component_access&,
               component& compo) noexcept;
     bool show_selected_nodes(component_editor& ed,
                              const component_access&,
                              component& compo) noexcept;
-    bool need_show_selected_nodes(component_editor& ed) noexcept;
     void clear_selected_nodes() noexcept;
-
-    //! Get the underlying component_id.
-    component_id get_id() const noexcept { return m_id; }
 
 private:
     file_selector file_select;
 
+    struct view;
+
     vector<graph_node_id> selected_nodes;
     vector<graph_edge_id> selected_edges;
-    ImVec2                start_selection;
-    ImVec2                end_selection;
-    ImVec2                canvas_sz;
-    bool                  run_selection  = false;
-    bool                  is_initialized = false;
+
+    node_editor::editor   m_editor;
+    vector<graph_node_id> m_nodes;
+    vector<graph_edge_id> m_edges;
+    vector<u32>           m_node_indices;
+
+    /// The positions owned by the view, indexed by the index of the vertices:
+    /// the component is read again at each frame.
+    vector<ImVec2>        m_positions;
+    vector<graph_node_id> m_position_ids;
 
     ImVec2 distance{ 15.f, 15.f };
-    ImVec2 scrolling{ 0.f, 0.f }; //!< top left position in canvas.
-    ImVec2 zoom{ 1.f, 1.f };
 
-    std::atomic_flag task_is_running; // Allow only one task (new graph or new
-                                      // automatic layout at the same time).
-
-    i32 iteration_limit     = 100'000;
-    i32 time_limit_ms       = 1'000;
-    i32 update_frequence_ms = 0'16;
+    std::atomic_flag task_is_running; // Allow only one task to build a new
+                                      // graph at the same time.
 
     graph_component_id graph_id = undefined<graph_component_id>();
     component_id       m_id     = undefined<component_id>();
 
-    void automatic_layout_task(application& app) noexcept;
-    bool compute_automatic_layout(graph_component& graph,
-                                  vector<ImVec2>&  displacements,
-                                  int              iteration) const noexcept;
-
     void clear_file_access() noexcept;
-    void center_camera() noexcept;
-    void auto_fit_camera() noexcept;
+    void build_graph(const graph_component& data) noexcept;
 
     bool show(application&, component&) noexcept;
     bool show_scale_free_menu(application& app) noexcept;
@@ -697,10 +552,6 @@ public:
     hsm_component_editor_data(const component_id     id,
                               const hsm_component_id hid,
                               const hsm_component&   hsm) noexcept;
-    ~hsm_component_editor_data() noexcept;
-
-    //! Get the underlying component_id.
-    component_id get_id() const noexcept { return m_id; }
 
     bool show(component_editor& ed,
               const component_access&,
@@ -708,30 +559,87 @@ public:
     bool show_selected_nodes(component_editor& ed,
                              const component_access&,
                              component& compo) noexcept;
-    bool need_show_selected_nodes(component_editor& ed) noexcept;
-    void clear_selected_nodes() noexcept;
 
 private:
-    void show_hsm() noexcept;
+    using state_id = hierarchical_state_machine::state_id;
+
+    /// A transition drawn as a link: @c type is the output pin of @c from,
+    /// the start of the level for its initial state, the if or the else
+    /// transition for the other states.
+    struct transition_link {
+        state_id from = 0;
+        state_id to   = 0;
+        u8       type = 0;
+    };
+
+    /// The editor shows one level of the hierarchy: the initial pseudo state
+    /// of the level, the sub states of the level and the targets of their
+    /// transitions outside the level.
+    enum class node_kind : u8 { initial, state, target };
+
+    struct view_node {
+        state_id  id   = 0;
+        node_kind kind = node_kind::state;
+
+        bool operator==(const view_node&) const noexcept = default;
+    };
+
+    struct graph;
+
+    void build_graph() noexcept;
+    u32  node_of(state_id id, node_kind kind) const noexcept;
+    void open_level(state_id id) noexcept;
+    void show_breadcrumb() noexcept;
     bool show_menu() noexcept;
-    bool show_graph() noexcept;
+    bool show_graph(application& app) noexcept;
     bool show_panel(component&) noexcept;
-    void clear() noexcept;
     bool valid() noexcept;
+
+    /// A run of the machine alone, step by step, in the test tab. It follows
+    /// the @c hsm_wrapper: a step is a message on an input port or the
+    /// expiration of the next timer.
+    struct test {
+        hierarchical_state_machine::execution     exec;
+        small_ring_buffer<small_string<127>, 128> log;
+        std::array<real, 4>                       inputs  = { 1, 1, 1, 1 };
+        time                                      t       = 0;
+        bool                                      running = false;
+    };
+
+    void show_test() noexcept;
+    void restart_test() noexcept;
+    void stop_test() noexcept;
+
+    /// Sends a message on the input port @c port or, if @c port is empty,
+    /// wakes up the next timer.
+    void step_test(std::optional<int> port) noexcept;
+    void log_test_step(std::string_view event, const status& ret) noexcept;
 
     void read(application& app, component&) noexcept;
     void write(application& app, component&) noexcept;
 
-    ImNodesEditorContext* m_context = nullptr;
+    node_editor::editor m_editor;
+
+    vector<view_node>       m_nodes;
+    vector<transition_link> m_links;
+
+    /// The positions owned by the view, the component being read again at
+    /// each frame. A NaN marks a position to read from @c m_hsm.
+    std::array<ImVec2, max_number_of_state> m_positions;
+
+    /// The positions of the initial pseudo state and of the target nodes of
+    /// the current level: not saved, they are placed when the level opens.
+    ImVec2                                  m_initial_position;
+    std::array<ImVec2, max_number_of_state> m_target_positions;
+
+    /// The super state whose sub states are shown, the top state at first.
+    state_id m_level = 0;
+
+    test m_test;
 
     /** An editable @c hsm_component. */
     hsm_component m_hsm;
     u64           m_version = std::numeric_limits<u64>::max();
-
-    ImVector<int> m_selected_links;
-    ImVector<int> m_selected_nodes;
-
-    ImVector<hierarchical_state_machine::state_id> m_stack;
 
     std::array<bool, max_number_of_state> m_enabled;
 
@@ -754,7 +662,6 @@ public:
                                   const component&           compo,
                                   const generic_component_id gid,
                                   const generic_component&   gen) noexcept;
-    ~generic_component_editor_data() noexcept;
 
     bool show(component_editor& ed,
               const component_access&,
@@ -762,13 +669,54 @@ public:
     bool show_selected_nodes(component_editor& ed,
                              const component_access&,
                              component& compo) noexcept;
-    bool need_show_selected_nodes(component_editor& ed) noexcept;
-    void clear_selected_nodes() noexcept;
 
-    //! Get the underlying component_id.
-    component_id get_id() const noexcept { return m_id; }
+    /// A node of the graph: an input or an output port of the component, or
+    /// one of its children.
+    struct node {
+        enum class kind : u8 { input, output, child };
 
-    ImNodesEditorContext* context = nullptr;
+        kind     type  = kind::child;
+        child_id child = undefined<child_id>();
+        port_id  port  = undefined<port_id>();
+
+        constexpr bool operator==(const node&) const noexcept = default;
+    };
+
+    /// A connection between two nodes. @c index is the position of the
+    /// connection in its container: @c connections, @c input_connections or
+    /// @c output_connections according to @c type.
+    struct link {
+        enum class kind : u8 { internal, input, output };
+
+        kind type     = kind::internal;
+        u32  index    = 0;
+        u32  out_node = 0;
+        u32  out_port = 0;
+        u32  in_node  = 0;
+        u32  in_port  = 0;
+    };
+
+    /// The positions owned by the view: the component is read again at each
+    /// frame and receives them only when the view writes it.
+    template<typename Id>
+    struct positions {
+        vector<Id>     ids;
+        vector<ImVec2> values;
+    };
+
+    struct graph;
+
+    node_editor::editor editor;
+
+    vector<node> nodes;
+    vector<link> links;
+    vector<u32>  child_nodes;
+    vector<u32>  x_nodes;
+    vector<u32>  y_nodes;
+
+    positions<child_id> child_positions;
+    positions<port_id>  x_positions;
+    positions<port_id>  y_positions;
 
 public:
     enum {
@@ -779,18 +727,10 @@ public:
         force_update_position,
     };
 
-    ImVector<int>    selected_links;
-    ImVector<int>    selected_nodes;
     vector<child_id> update_position_list;
 
     std::unique_ptr<component>         m_compo_buffer;
     std::unique_ptr<generic_component> m_generic_buffer;
-
-    int   automatic_layout_iteration_limit = 2048;
-    float automatic_layout_x_distance      = 350.f;
-    float automatic_layout_y_distance      = 350.f;
-    float grid_layout_x_distance           = 240.f;
-    float grid_layout_y_distance           = 200.f;
 
     std::bitset<6> options;
 
@@ -806,10 +746,6 @@ private:
 class generic_simulation_editor
 {
 public:
-    generic_simulation_editor() noexcept;
-
-    ~generic_simulation_editor() noexcept;
-
     /**
      * Build the @c links and @c nodes vectors from the project tree_node.
      *
@@ -838,21 +774,14 @@ public:
      */
     void init(application& app, project_editor& pj_ed) noexcept;
 
-    /**
-     * Add a rebuild @c nodes and @c links vectors task according to the current
-     * @c tree_node.
-     *
-     * @param app Application to use thread task manager and log.
-     */
-    void reinit(application& app, project_editor& pj_ed) noexcept;
-
     bool display(application& app, project_editor& pj_ed) noexcept;
 
+    /// The ports and the models of a link, as indices in @c nodes.
     struct link {
-        int out     = 0; /**<  use get_model_output_port/make_output_node_id. */
-        int in      = 0; /**< use get_model_input_port/make_input_node_id. */
-        int mdl_out = 0; /**< output model in nodes index. */
-        int mdl_in  = 0; /**< input model in nodes index. */
+        u32 out_node = 0;
+        u32 out_port = 0;
+        u32 in_node  = 0;
+        u32 in_port  = 0;
     };
 
     struct node {
@@ -861,41 +790,49 @@ public:
     };
 
 private:
-    ImNodesEditorContext* context = nullptr;
+    struct graph;
+
+    node_editor::editor editor;
 
     tree_node_id current = undefined<tree_node_id>();
 
-    vector<int>    selected_links;
-    vector<int>    selected_nodes;
     vector<link>   links;
     vector<node>   nodes;
     vector<link>   links_2nd;
     vector<node>   nodes_2nd;
-    vector<ImVec2> displacements;
 
-    int   automatic_layout_iteration       = 0;
-    int   automatic_layout_iteration_limit = 2048;
-    float automatic_layout_x_distance      = 350.f;
-    float automatic_layout_y_distance      = 350.f;
-    float grid_layout_x_distance           = 240.f;
-    float grid_layout_y_distance           = 200.f;
+    /// The world position of the nodes, indexed by the index of the model in
+    /// the simulation: it survives the rebuilds of @c nodes.
+    vector<ImVec2> positions;
+
+    /// The world position where the next new model is placed.
+    std::optional<ImVec2> new_model_position;
+
+    float grid_layout_x_distance = 240.f;
+    float grid_layout_y_distance = 200.f;
 
     bool show_identifiers      = true;
     bool show_internal_values  = false;
     bool show_parameter_values = false;
-    bool show_minimap          = true;
     bool can_edit_parameters   = true;
 
-    bool enable_show = true;  /**< @c false, the display of nodes and links are
-                                 disabled. Mainly  use during @c rebuild or @c
-                                 init. */
+    /// Set by the rebuild tasks: the editor caches refer to the old nodes.
+    bool need_reset = false;
+
+    std::atomic<bool> enable_show{ true }; /**< @c false, the display of nodes
+                                 and links are disabled. Mainly  use during @c
+                                 rebuild or @c init. */
     bool rebuild_wip = false; /**< @ true, a rebuild order is in work in
                                  progress. No other rebuild can occured. */
 
-    void start_rebuild_task(application& app, project_editor& pj_ed) noexcept;
-    void show_nodes(application& app, project_editor& pj_ed) noexcept;
-    void show_links() noexcept;
-    void compute_automatic_layout() noexcept;
+    /// The edition count of the player when @c nodes were built.
+    u64 edit_count = std::numeric_limits<u64>::max();
+
+    void rebuild(const project_editor& pj_ed) noexcept;
+    void start_init_task(application&       app,
+                         project_editor&    pj_ed,
+                         const tree_node_id tn_id) noexcept;
+    void place_new_nodes(const project_editor& pj_ed) noexcept;
     int  show_menu(project_editor& pj_ed, const ImVec2 click_pos) noexcept;
 
     spin_mutex mutex;
@@ -904,17 +841,8 @@ private:
 class flat_simulation_editor
 {
 public:
-    enum class action : u32 {
-        camera_center,
-        camera_auto_fit,
-        use_grid,
-        use_bezier,
-    };
-
     bool display(application& app, project_editor& pj_ed) noexcept;
     void display_status() noexcept;
-
-    void reset() noexcept;
 
 private:
     struct data_type {
@@ -928,32 +856,43 @@ private:
         vector<ImVec2> cache_positions;
     };
 
-    void center_camera() noexcept;
-    void auto_fit_camera() noexcept;
+    /// A model of the simulation and the color of its tree node.
+    struct node {
+        model_id mdl   = undefined<model_id>();
+        ImU32    color = 0;
+    };
+
+    struct link {
+        u32 out_node = 0;
+        u32 out_port = 0;
+        u32 in_node  = 0;
+        u32 in_port  = 0;
+    };
+
+    struct graph;
 
     void compute_rects(application&    app,
                        project_editor& pj_ed,
                        data_type&      d) noexcept;
     void rebuild(application& app, project_editor& pj_ed) noexcept;
+    void build_graph(const project_editor& pj_ed, const data_type& d) noexcept;
 
     shared_buffer<data_type> data;
 
     ImVec2 distance{ 15.f, 15.f };      /// distance between two nodes
     ImVec2 tn_distance{ 100.f, 100.f }; /// distance between two tree nodes
-    ImVec2 scrolling{ 0.f, 0.f };       /// top left position in canvas
-    ImVec2 canvas_sz{ 0.f, 0.f };       /// canvas size
-    float  zoom = 1.f;
 
-    ImVec2 start_selection;
-    ImVec2 end_selection;
+    node_editor::editor editor;
+    vector<node>        nodes;
+    vector<link>        links;
 
-    ImVec2 top_left;
-    ImVec2 bottom_right;
+    /// The top-left positions of the nodes, copied from the layout of @c data
+    /// to be moved in the view.
+    vector<ImVec2> positions;
+    u64            version = std::numeric_limits<u64>::max();
 
-    vector<model_id> selected_nodes;
-    bitflags<action> actions;
-
-    bool run_selection = false;
+    /// The edition count of the player of the last layout.
+    u64 edit_count = std::numeric_limits<u64>::max();
 
     std::atomic_flag is_ready = ATOMIC_FLAG_INIT;
 };
@@ -996,8 +935,6 @@ public:
     void show(application& app, project_editor& pj) noexcept;
 
     struct selection {
-        void clear() noexcept;
-
         void select(constant_source_id id) noexcept;
         void select(text_file_source_id id) noexcept;
         void select(binary_file_source_id id) noexcept;
@@ -1022,18 +959,173 @@ private:
     bool           show_file_dialog = false;
 };
 
-struct project_editor {
-    enum class visualization_mode { flat, tree };
+struct player_view {
+    u64    step;
+    u64    furthest;
+    u64    earliest;
+    time   t;
+    time   begin; ///< limits of the simulation (progress bar)
+    time   end;
+    time   target;
+    i64    lateness_ms;
+    i64    work_ms; ///< computation time of the complete run
+    u32    resyncs;
+    size_t keyframes;
+    size_t bytes;
+    size_t journal; ///< entries of the journal of the commands
+    bool   started;
+    bool   finished;
+    bool   can_back;
+};
 
-    project_editor(const std::string_view default_name,
-                   project&&              project_) noexcept;
+/// The curves of the observers of a project, owned by the main thread. The
+/// task of the player gives the points (@c consume(), @c rewind()); the main
+/// thread takes them once per frame (@c receive()) and reads the curves
+/// without lock.
+class plot_series final : public observation_sink
+{
+public:
+    /// The outputs go to @c next too (the observation files).
+    explicit plot_series(observation_sink& next) noexcept
+      : m_next(next)
+    {}
 
-    ~project_editor() noexcept;
+    status consume(const observation_batch& batch) noexcept override;
+    void   rewind(const simulation& sim) noexcept override;
 
+    /// Main thread: moves the points given by the task to the curves.
+    void receive() noexcept;
+
+    /// Main thread: the curve of the observer, empty if unknown.
+    std::span<const resampled_sample> get(const observer_id id) const noexcept;
+
+private:
+    /// Replaces the points of the curve from @c index by @c count points of
+    /// the staged points from @c first.
+    struct message {
+        observer_id id;
+        u64         index;
+        u32         first;
+        u32         count;
+    };
+
+    struct curve {
+        observer_id              id = undefined<observer_id>();
+        vector<resampled_sample> points;
+    };
+
+    observation_sink& m_next;
+
+    std::mutex               m_mutex;
+    vector<message>          m_staged;
+    vector<resampled_sample> m_staged_points;
+
+    vector<message>          m_received;
+    vector<resampled_sample> m_received_points;
+    vector<curve>            m_curves; // indexed by get_index(observer_id)
+};
+
+class player_controller
+{
+public:
+    /// What the player does now (schedule_player).
+    enum class mode : u8 { paused, play, reverse, realtime, complete };
+
+    /// How the user runs the simulation (show_simulation_player).
+    enum class kind : u8 {
+        debug,    ///< step forward, step back, play, reverse
+        realtime, ///< one unit of simulation time lasts @c unit_duration
+        complete  ///< to the end, as fast as possible, without history
+    };
+
+    /// The player is sequential until @c application gives it the task list
+    /// of the project (@c simulation_player::set_task_list()).
+    explicit player_controller(project& pj) noexcept
+      : player(pj.sim)
+      , curves(pj.observation_file_sink())
+      , journal(pj)
+    {
+        player.set_observation_sink(&curves);
+        player.set_edition_replay(&journal);
+    }
+
+    simulation_player player;
+    plot_series       curves;
+    realtime_pacer    pacer;
+
+    /// The commands applied by the task: the player does them again when it
+    /// replays the steps. Only the task and the main thread between two tasks
+    /// use it.
+    command_journal journal;
+
+    u32 resyncs = 0;
+
+    std::atomic_flag busy; ///< raised by the main thread, lowered by the task
+
+    mode   current = mode::paused; ///< main thread only
+    kind   view    = kind::debug;  ///< main thread only
+    status result;                 ///< write by task before busy.clear()
+
+    /// millseconds per unit time of simulation
+    std::chrono::milliseconds unit_duration{ 1000 };
+
+    /// task budget
+    std::chrono::milliseconds task_duration{ 16 };
+
+    /// task budget of the complete mode: long, because the GUI gives the
+    /// next task only at the next frame (the idle time between two tasks is
+    /// one frame), and the pause button answers in one task at most.
+    std::chrono::milliseconds complete_budget{ 200 };
+
+    /// over need resynchronisation
+    std::chrono::milliseconds max_lateness{ 1000 };
+
+    /// time given to the simulation by frame.
+    std::chrono::milliseconds frame_budget{ 8 };
+
+    u64 target          = 0;
+    u64 steps_per_frame = { 1 }; ///< speed of "play" and "play backward".
+
+    /// Computation time of the complete run: write by the task before
+    /// busy.clear(), read by the task only (the GUI reads fresh.work_ms).
+    std::chrono::nanoseconds work{};
+
+    player_view fresh{}; ///< write by the task before @c busy.clear()
+    player_view shown{}; ///< main thread copy, displayed during busy
+
+    bool dragging   = false;
+    bool has_result = false;
+    bool pace_reset = true;  ///< rebase clock to the next task (start, resume).
+    bool need_start = false; ///< the next complete task (re)starts the player.
+    bool need_rebuild = false; ///< build the simulation again, then start.
+    bool need_replay  = false; ///< the rebuild keeps the journal: a replay.
+    bool need_load_journal = false; ///< the rebuild reads the journal file.
+    bool need_save_journal = false; ///< written between two tasks.
+
+    /// Written by the main thread, applied by the task between two steps.
+    command_queue commands;
+
+    /// Held by the main thread during a frame, see @c simulation_readable().
+    std::shared_lock<std::shared_mutex> frame_lock;
+
+    /// False during a frame where a rewind rebuilds the simulation: the views
+    /// must not read it.
+    bool simulation_readable() const noexcept { return frame_lock.owns_lock(); }
+};
+
+class project_editor
+{
+public:
     enum class show_result_t {
         success,          /**< Nothing to do. */
         request_to_close, /**< The window must be closed by the called. */
     };
+
+    project_editor(const modeling&        mod,
+                   const std::string_view default_name,
+                   project&&              project_) noexcept;
+
+    ~project_editor() noexcept;
 
     void set_title_name(const std::string_view name) noexcept;
 
@@ -1043,29 +1135,22 @@ struct project_editor {
      * try to close it. */
     show_result_t show(application& app) noexcept;
 
+    /** Add simulation task iff necessary. */
+    void schedule_player(application& app) noexcept;
+
     /** Display the settings and simulation hierarchy in a @c
      * ImGui::BeginTabBar/End widget. */
     void show_settings_and_hierarchy(application& app) noexcept;
 
     void display_subwindows(application& app) noexcept;
+    void show_observations_window_content(application& app) noexcept;
     void close_subwindows(application& app) noexcept;
 
-    void update_simulation_state(application& app) noexcept;
-    void import_from_modeling(application& app) noexcept;
-    void init_simulation(application& app) noexcept;
-    void run_bag_simulation(application& app) noexcept;
-    void run_simulation(application& app) noexcept;
-    void pause_simulation() noexcept;
     void finish_simulation(application& app) noexcept;
-    void advance_simulation(application& app) noexcept;
-    void back_simulation(application& app) noexcept;
 
+    /// True if the user can edit the simulation: the edits go through the
+    /// commands of @c sim_player, applied between two steps.
     bool can_edit() const noexcept;
-    bool can_display_graph_editor() const noexcept;
-
-    std::atomic_bool force_pause   = false;
-    bool             show_minimap  = true;
-    bool             display_graph = true;
 
     enum class raw_data_type : u8 { none, graph, binary, text };
 
@@ -1073,25 +1158,22 @@ struct project_editor {
 
     bool is_dock_init = false;
 
-    // timeline tl;
-
-    real simulation_last_finite_t   = 0;
     real simulation_display_current = 0;
 
     std::chrono::milliseconds one_simulation_time_duration{ 1000 };
     std::chrono::milliseconds simulation_task_duration{ 16 };
 
-    tree_node_id head    = undefined<tree_node_id>();
-    tree_node_id current = undefined<tree_node_id>();
-
-    visualization_mode mode = visualization_mode::flat;
-
     ImPlotContext* output_context = nullptr;
 
     /** Number of column in the tree node observation. */
-    using tree_node_observation_t = constrained_value<int, 1, 100>;
+    using tree_node_observation_t = clamped_value<int, 1, 100>;
     tree_node_observation_t tree_node_observation{ 1 };
     float                   tree_node_observation_height = 300.f;
+
+    /// The observations of the selected component in their own window: they
+    /// stay visible while the simulation is edited in the other tabs.
+    bool             show_observations_window = false;
+    small_string<80> observations_title;
 
     project pj;
 
@@ -1099,16 +1181,12 @@ struct project_editor {
     //! the underlying component is tested before assignment.
     void select(application& app, tree_node_id id) noexcept;
 
-    //! @return true if @c id is the selected @c tree_node.
-    bool is_selected(tree_node_id id) const noexcept;
-
-    tree_node_id selected_tn() noexcept;
-
     tree_node_id m_selected_tree_node = undefined<tree_node_id>();
 
-    /// For each simulation, and according to the @a save_simulation_raw_data,
-    /// an output stream to store all model state during simulation.
-    file raw_ofs;
+    player_controller sim_player;
+
+    /// The value typed by the user for the "send value" of a constant.
+    real constant_value_to_send = 0.0;
 
     /** A local @c graph_editor to display the simulation graph component editor
      * (without observation). */
@@ -1131,8 +1209,7 @@ struct project_editor {
 
 inline bool project_editor::can_edit() const noexcept
 {
-    return any_equal(pj.simulation_state, simulation_status::initialized,
-                     simulation_status::paused, simulation_status::finished);
+    return sim_player.shown.started and not sim_player.shown.finished;
 }
 
 class component_editor
@@ -1165,12 +1242,6 @@ public:
     void add_simulation_component_data() noexcept;
 
     bool is_component_open(const component_id id) const noexcept;
-
-    template<typename IdentifierType>
-    auto try_to_get(const IdentifierType id) noexcept;
-
-    template<typename T>
-    auto get_id(const T& elem) const noexcept;
 
     enum class tab_id : u32;
 
@@ -1264,10 +1335,7 @@ public:
     void show() noexcept;
 
     void add_open_file(const file_path_id, const project_id) noexcept;
-    void add_open_file(const file_path_id, const component_id) noexcept;
-    void add_open_file(const file_path_id, const graph_id) noexcept;
     std::optional<file_target> get_open_file(const file_path_id) noexcept;
-    void                       close_open_file(const file_path_id) noexcept;
 
     bool is_open = true;
 
@@ -1348,6 +1416,20 @@ struct task_window {
 
     void show() noexcept;
     void show_widgets() noexcept;
+
+    /// The counters of a list or a worker, sampled every second to compute
+    /// the number of tasks per second and the load.
+    struct sample {
+        u64   tasks   = 0;   //!< Completed tasks at the last sample.
+        u64   time_ms = 0;   //!< Execution time at the last sample.
+        float rate    = 0.f; //!< Tasks per second during the last period.
+        float load    = 0.f; //!< Part of the last period spent in tasks.
+    };
+
+    vector<sample> lists;   //!< The ordered then the unordered lists.
+    vector<sample> workers; //!< The ordered then the unordered workers.
+
+    std::chrono::steady_clock::time_point last_sample;
 
     bool is_open = false;
 };
@@ -1532,7 +1614,10 @@ public:
     ~application() noexcept;
 
 private:
-    task_manager task_mgr;
+    /* The main thread keeps its journal during the whole life of the
+     * application. */
+    journal_scope m_journal;
+    task_manager  task_mgr;
 
 public:
     ImFont* icons = nullptr;
@@ -1592,12 +1677,6 @@ public:
 
     request_buffer<std::unique_ptr<project>> new_project_req;
 
-    void request_alloc_project_editor(std::unique_ptr<project> pj) noexcept
-    {
-        if (new_project_req.try_request())
-            new_project_req.fulfill(std::move(pj));
-    }
-
     /// Open a new project window iff component @c id can be set as a project.
     void try_set_component_as_project(const file_access&      files,
                                       const component_access& ids,
@@ -1618,53 +1697,43 @@ public:
     bool          init() noexcept;
     show_result_t show() noexcept;
 
-    /**
-     * Helpers function to add a @c simulation_task into an @c
-     * ordered_task_list. The task list used depends on the @c get_index or
-     * the
-     * @c project_id. Task is added at tail of the @c ring_buffer and ensure
-     * linear operation.
-     *
-     * @param id A value used to select the ordered-task-list the @a
-     * task_manager::ordered_task_lists.
-     * @param fn The function to run.
-     */
-    template<typename Fn>
-    void add_simulation_task(const unsigned id, Fn&& fn) noexcept;
+    /// Helper function to add a @c task into a @c ordered_task_list. The task
+    /// list used depends on the @c get_index of the @c project_id.
+    ///
+    /// @param id A value used to select the ordered-task-list.
+    /// @param fn The function to run.
+    template<typename T, typename Fn>
+        requires((std::is_integral_v<T> or is_identifier_type<T>) and
+                 std::is_invocable_v<Fn>)
+    void add_simulation_task(T id, Fn&& fn) noexcept;
 
-    /**
-     * Helpers function to add a @c gui_task into the @c ordered_task_list
-     * gui. Task is added at tail of the @c ring_buffer and ensure linear
-     * operation.
-     *
-     * @param fn The function to run.
-     */
+    /// Helper function to add a @c task into the GUI @c ordered_task_list.
     template<typename Fn>
+        requires(std::is_invocable_v<Fn>)
     void add_gui_task(Fn&& fn) noexcept;
 
-    /**
-     * Helpers function to get the current instance of the @a
-     * unordered_task_list.
-     *
-     * @return The reference to the @a unordered_task_list
-     */
-    unordered_task_list& get_unordered_task_list() noexcept;
+    /// Get the ordered/unordered list index from an identifier or a integer.
+    ///
+    /// @code
+    /// get_task_manager_list(pjs.get_id(pj));
+    /// get_task_manager_list(pjs.next_key());
+    /// @endcode
+    template<typename T>
+        requires(std::is_integral_v<T> || is_identifier_type<T>)
+    std::size_t get_task_manager_list(T id) const noexcept;
 
-    /// Allocate a new @c project_editor and read the file @c file_path_id.
-    void start_load_project(const project_id f_id) noexcept;
+    /// Gives the simulation player of a new project the unordered list of the
+    /// project: its steps run on the ordered list of the same index (see
+    /// @c add_simulation_task()), so the projects that share a list never use
+    /// the unordered list at the same time.
+    void set_player_task_list(project_editor& ed) noexcept;
 
-    /// Save the project @c pj_id.
-    void start_save_project(const project_id pj_id) noexcept;
-    void start_save_component(const component_id id) noexcept;
     void start_init_source(const project_id  pj_id,
                            const u64         id,
                            const source_type type) noexcept;
     void start_hsm_test_start() noexcept;
-    void start_dir_path_refresh(const dir_path_id id) noexcept;
 
     unsigned int get_main_dock_id() const noexcept { return main_dock_id; }
-
-    void request_open_directory_dlg(const registred_path_id id) noexcept;
 
     std::atomic<file_path_id> new_file;
     std::atomic<dir_path_id>  new_dir;
@@ -1726,66 +1795,39 @@ bool show_local_observers(application&            app,
 //! @return A pointer to a newly allocated memory.
 path get_imgui_filename() noexcept;
 
-template<typename Fn>
-void application::add_simulation_task(const unsigned id, Fn&& fn) noexcept
+template<typename T, typename Fn>
+    requires((std::is_integral_v<T> or is_identifier_type<T>) and
+             std::is_invocable_v<Fn>)
+void application::add_simulation_task(T id, Fn&& fn) noexcept
 {
-    const auto index = id % task_mgr.ordered_size();
+    const auto idx = get_task_manager_list(id);
 
-    task_mgr.ordered(index).add(std::forward<Fn>(fn));
+    task_mgr.ordered(idx).add(std::forward<Fn>(fn));
 }
 
 template<typename Fn>
+    requires(std::is_invocable_v<Fn>)
 void application::add_gui_task(Fn&& fn) noexcept
 {
-    task_mgr.ordered(ordinal(main_task::gui)).add(std::forward<Fn>(fn));
+    task_mgr.ordered(0).add(std::forward<Fn>(fn));
+}
+
+template<typename T>
+    requires(std::is_integral_v<T> || is_identifier_type<T>)
+std::size_t application::get_task_manager_list(T id) const noexcept
+{
+    // unordered_task_list(0) is for the GUI
+
+    if constexpr (is_identifier_type<T>) {
+        const auto uid = static_cast<std::size_t>(get_index(id));
+        return 1u + (uid % (task_mgr.list_size() - 1u));
+    } else {
+        return 1u + (id % (task_mgr.list_size() - 1u));
+    }
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  */
-
-inline bool project_editor::can_display_graph_editor() const noexcept
-{
-    return display_graph;
-}
-
-inline tree_node_id project_editor::selected_tn() noexcept
-{
-    return m_selected_tree_node;
-}
-
-template<typename IdentifierType>
-auto component_editor::try_to_get(const IdentifierType id) noexcept
-{
-    auto& app = container_of(this, &application::component_ed);
-
-    if constexpr (std::is_same_v<IdentifierType, grid_editor_data_id>)
-        return app.grids.try_to_get(id);
-    if constexpr (std::is_same_v<IdentifierType, graph_editor_data_id>)
-        return app.graphs.try_to_get(id);
-    if constexpr (std::is_same_v<IdentifierType, generic_editor_data_id>)
-        return app.generics.try_to_get(id);
-    if constexpr (std::is_same_v<IdentifierType, hsm_editor_data_id>)
-        return app.hsms.try_to_get(id);
-    if constexpr (std::is_same_v<IdentifierType, simulation_editor_data_id>)
-        return app.sims.try_to_get(id);
-}
-
-template<typename T>
-auto component_editor::get_id(const T& elem) const noexcept
-{
-    auto& app = container_of(this, &application::component_ed);
-
-    if constexpr (std::is_same_v<T, grid_component_editor_data>)
-        return app.grids.get_id(elem);
-    if constexpr (std::is_same_v<T, graph_component_editor_data>)
-        return app.graphs.get_id(elem);
-    if constexpr (std::is_same_v<T, generic_component_editor_data>)
-        return app.generics.get_id(elem);
-    if constexpr (std::is_same_v<T, hsm_component_editor_data>)
-        return app.hsms.get_id(elem);
-    if constexpr (std::is_same_v<T, simulation_component_editor_data>)
-        return app.sims.get_id(elem);
-}
 
 } // namespace irt
 

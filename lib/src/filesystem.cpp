@@ -38,17 +38,27 @@
 
 namespace irt {
 
-#if defined(_WIN32)
 constexpr static inline auto irritator_name = "irritator-" irritator_to_string(
   VERSION_MAJOR) "." irritator_to_string(VERSION_MINOR);
+
+#if defined(_WIN32)
+constexpr static inline auto
+  irritator_dir_name = "irritator-" irritator_to_string(
+    VERSION_MAJOR) "." irritator_to_string(VERSION_MINOR);
 #else
-constexpr static inline auto irritator_name = ".irritator-" irritator_to_string(
-  VERSION_MAJOR) "." irritator_to_string(VERSION_MINOR);
+constexpr static inline auto
+  irritator_dir_name = ".irritator-" irritator_to_string(
+    VERSION_MAJOR) "." irritator_to_string(VERSION_MINOR);
 #endif
 
 constexpr std::string_view get_irritator_name() noexcept
 {
     return irritator_name;
+}
+
+constexpr std::string_view get_irritator_dir_name() noexcept
+{
+    return irritator_dir_name;
 }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -123,10 +133,10 @@ expected<path> get_home_directory() noexcept
 
         auto p = *local_home;
 
-        if (not p.can_append(get_irritator_name()))
+        if (not p.can_append(get_irritator_dir_name()))
             return make_error(std::errc::not_enough_memory);
 
-        p /= get_irritator_name();
+        p /= get_irritator_dir_name();
 
         const auto std_path = p.to_std_path();
 
@@ -164,37 +174,35 @@ expected<path> get_executable_directory() noexcept
     uint32_t     size{ 0 };
 
     if (_NSGetExecutablePath(buf.data(), &size))
-        return make_error(std::errc::bad_address);
+        return error_code(std::errc::bad_address);
 
     return path{ std::string_view{ buf.data(), size } };
 }
 #elif defined(_WIN32)
 expected<path> get_executable_directory() noexcept
 {
-    std::wstring filepath;
-    DWORD        len   = MAX_PATH;
-    DWORD        error = ERROR_SUCCESS;
-
-    filepath.resize(len, '\0');
+    DWORD           error = ERROR_SUCCESS;
+    vector<wchar_t> filepath(MAX_PATH);
 
     for (int i = 1; i < 16; ++i) {
-        auto size = ::GetModuleFileNameW(nullptr, filepath.data(), len);
+        const auto size = ::GetModuleFileNameW(
+          nullptr, filepath.data(), static_cast<DWORD>(filepath.size()));
         if (size == 0) {
             error = ::GetLastError();
-            len *= 2;
-            filepath.resize(len);
+            if (not filepath.resize(filepath.size() * 2))
+                break;
         } else {
-            filepath.resize(static_cast<std::size_t>(size));
-            auto  std_path = std::filesystem::path(filepath);
-            auto  u8       = std_path.u8string();
-            auto* ptr      = reinterpret_cast<const char*>(u8.c_str());
-            auto  len      = u8.size();
+            auto std_path = std::filesystem::path(
+              std::wstring_view(filepath.data(), size));
+            auto  u8  = std_path.u8string();
+            auto* ptr = reinterpret_cast<const char*>(u8.c_str());
+            auto  len = u8.size();
 
             return path{ std::string_view(ptr, len) };
         }
     }
 
-    return make_error(std::errc::bad_address);
+    return error_code(std::errc::bad_address);
 }
 #endif
 
@@ -216,7 +224,7 @@ expected<path> get_system_component_dir() noexcept
     if (std::filesystem::exists(std_path, ec))
         return install_path;
 
-    return make_error(std::errc{ errno });
+    return error_code(std::errc{ errno });
 }
 #elif defined(_WIN32)
 path build_system_component_path(const path& path) noexcept
@@ -264,40 +272,40 @@ expected<path> get_system_component_dir() noexcept
             return install_path;
     }
 
-    return make_error(std::errc::bad_address);
+    return error_code(std::errc::bad_address);
 }
 #endif
 
 #if defined(IRT_DATAROOTDIR)
 expected<path> get_system_prefix_component_dir() noexcept
 {
-    auto       ret         = path{ IRT_DATAROOTDIR };
-    const auto irt_dirname = "irritator-" irritator_to_string(
-      VERSION_MAJOR) "." irritator_to_string(VERSION_MINOR);
-    const auto compo_dirname = "components";
+    using namespace std::string_view_literals;
 
-    if (not ret.can_append(irt_dirname))
-        return make_error(fs_errc::executable_access_fail);
+    auto ret = path{ IRT_DATAROOTDIR };
 
-    ret /= irt_dirname;
+    if (not ret.can_append(get_irritator_name()))
+        return error_code(simulation_errc::executable_access_fail);
 
-    if (not ret.can_append(compo_dirname.sv()))
-        return make_error(fs_errc::executable_access_fail);
+    ret /= get_irritator_name();
 
-    ret /= "components";
+    const auto compo_dirname = "components"sv;
+    if (not ret.can_append(compo_dirname))
+        return error_code(simulation_errc::executable_access_fail);
+
+    ret /= compo_dirname;
 
     const auto      std_path = ret.to_std_path();
     std::error_code ec;
 
     if (not std::filesystem::exists(std_path, ec))
-        return make_error(fs_errc::executable_access_fail);
+        return error_code(simulation_errc::executable_access_fail);
 
     return ret;
 }
 #else
 expected<path> get_system_prefix_component_dir() noexcept
 {
-    return make_error(std::errc::bad_address);
+    return error_code(std::errc::bad_address);
 }
 #endif
 
@@ -360,11 +368,6 @@ static expected<path> get_home_filename(const char* filename) noexcept
     }
 
     return make_error(std::errc::bad_address);
-}
-
-expected<path> get_settings_filename() noexcept
-{
-    return get_home_filename("settings.ini");
 }
 
 class config_home_manager

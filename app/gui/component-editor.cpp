@@ -10,7 +10,6 @@
 #include "application.hpp"
 #include "editor.hpp"
 #include "imgui.h"
-#include "imnodes.h"
 #include "internal.hpp"
 
 namespace irt {
@@ -24,6 +23,10 @@ enum class component_editor_result_type : u8 {
 };
 
 using component_editor_result = bitflags<component_editor_result_type>;
+
+/* ImGui needs a null-terminated label: the names stored as string_view are
+ * copied, and truncated if too long. */
+using label_str = small_string<128>;
 
 static small_string<64> make_title(const std::string_view name,
                                    const component_id     compo_id) noexcept
@@ -652,13 +655,11 @@ static child_id show_node_selection(ImGuiTextFilter&   filter,
                                     generic_component& g,
                                     child_id           selected) noexcept
 {
-    const auto label = std::string{
-        g.children.try_to_get(selected)
-          ? g.children_names[get_index(selected)].sv()
-          : "-"
-    };
+    const auto* label = g.children.try_to_get(selected)
+                          ? g.children_names[get_index(selected)].c_str()
+                          : "-";
 
-    if (ImGui::BeginCombo("Child", label.c_str())) {
+    if (ImGui::BeginCombo("Child", label)) {
         if (ImGui::IsWindowAppearing()) {
             ImGui::SetKeyboardFocusHere();
             filter.Clear();
@@ -678,11 +679,11 @@ static child_id show_node_selection(ImGuiTextFilter&   filter,
             ImGui::PushID(idx);
 
             if (not g.children_names[idx].empty()) {
-                const auto temp = std::string{ g.children_names[idx].sv() };
+                const auto* name = g.children_names[idx].c_str();
 
-                if (filter.PassFilter(temp.c_str())) {
+                if (filter.PassFilter(name)) {
                     ImGui::PushID(idx);
-                    if (ImGui::Selectable(temp.c_str(), selected == id)) {
+                    if (ImGui::Selectable(name, selected == id)) {
                         selected = id;
                     }
                     ImGui::PopID();
@@ -702,9 +703,9 @@ static graph_node_id show_node_selection(ImGuiTextFilter& filter,
                                          graph_component& graph,
                                          graph_node_id    selected) noexcept
 {
-    const auto label = std::string{ graph.g.nodes.exists(selected)
-                                      ? graph.g.node_names[get_index(selected)]
-                                      : std::string_view{ "-" } };
+    const auto label = label_str{ graph.g.nodes.exists(selected)
+                                    ? graph.g.node_names[get_index(selected)]
+                                    : std::string_view{ "-" } };
 
     if (ImGui::BeginCombo("Node", label.c_str())) {
         if (ImGui::IsWindowAppearing()) {
@@ -725,7 +726,7 @@ static graph_node_id show_node_selection(ImGuiTextFilter& filter,
             ImGui::PushID(idx);
 
             if (not graph.g.node_names[idx].empty()) {
-                const auto temp = std::string{ graph.g.node_names[idx] };
+                const auto temp = label_str{ graph.g.node_names[idx] };
 
                 if (filter.PassFilter(temp.c_str())) {
                     ImGui::PushID(idx);
@@ -811,19 +812,14 @@ static bool show_input_connections_new(const component_access& ids,
                     log(
                       log_level::error,
                       [](auto& m, auto ec) {
-                          if (ec.value() ==
-                              ordinal(modeling_errc::
-                                        graph_input_connection_already_exists))
+                          if (ec == error_code(
+                                      modeling_errc::
+                                        grid_input_connection_container_full))
                               m = "modeling: fail to add input connection - "
-                                  "Input connection already exists.";
-                          else if (ec.value() ==
-                                   ordinal(
-                                     modeling_errc::
-                                       graph_input_connection_container_full))
-                              m = "modeling: fail to add input connection - "
-                                  "Not enough memory to allocate more "
-                                  "input "
+                                  "Not enough memory to allocate more input "
                                   "connection.";
+                          else
+                              m = "modeling: fail to add input connection.";
                       },
                       ret.error());
                 } else {
@@ -897,24 +893,20 @@ static bool show_output_connections_new(const component_access& ids,
             }
 
             if (is_defined(con.y) and is_defined(con.id)) {
-                if (auto ret = grid.connect_input(con.y, con.row, con.col,
-                                                  con.id);
+                if (auto ret = grid.connect_output(con.y, con.row, con.col,
+                                                   con.id);
                     not ret) {
                     log(
                       log_level::error,
                       [](auto& m, auto ec) {
-                          if (ec.value() ==
-                              ordinal(modeling_errc::
-                                        graph_input_connection_already_exists))
-                              m = "modeling: fail to input connection - Input "
-                                  "connection already exists.";
-                          else if (ec.value() ==
-                                   ordinal(
-                                     modeling_errc::
-                                       graph_input_connection_container_full))
-                              m = "modeling: fail to input connection - Not "
-                                  "enough memory to allocate more input "
+                          if (ec == error_code(
+                                      modeling_errc::
+                                        grid_output_connection_container_full))
+                              m = "modeling: fail to add output connection - "
+                                  "Not enough memory to allocate more output "
                                   "connection.";
+                          else
+                              m = "modeling: fail to add output connection.";
                       },
                       ret.error());
                 } else {
@@ -952,7 +944,7 @@ static bool show_input_connections_new(const component_access& ids,
                                        generic_component&      g) noexcept
 {
     auto& con    = tab.input_gen_con;
-    auto  temp   = std::string{};
+    auto  temp   = label_str{};
     auto  filter = ImGuiTextFilter{};
     auto  u      = 0;
 
@@ -1058,15 +1050,18 @@ static bool connect_input(const port_id      g_port_id,
         log(
           log_level::error,
           [](auto& m, auto ec) {
-              if (ec.value() ==
-                  ordinal(modeling_errc::graph_input_connection_already_exists))
+              if (ec ==
+                  error_code(
+                    modeling_errc::generic_input_connection_already_exists))
                   m = "modeling: fail to add input connection - Input "
                       "connection already exists.";
-              else if (ec.value() ==
-                       ordinal(
-                         modeling_errc::graph_input_connection_container_full))
-                  m = "modeling: fail to add input connection - Not enough "
-                      "memory to allocate more input connection.";
+              else if (ec ==
+                       error_code(modeling_errc::
+                                    generic_input_connection_container_full))
+                  m = "modeling: fail to add input connection - Not "
+                      "enough memory to allocate more input connection.";
+              else
+                  m = "modeling: fail to add input connection.";
           },
           ret.error());
 
@@ -1082,7 +1077,7 @@ static bool show_output_connections_new(const component_access& ids,
 {
     auto& con    = tab.output_gen_con;
     auto  filter = ImGuiTextFilter{};
-    auto  temp   = std::string{};
+    auto  temp   = label_str{};
     auto  u      = 0;
 
     con.y = show_output_port(tab.compo, con.y);
@@ -1188,16 +1183,18 @@ static bool connect_output(const port_id      g_port_id,
         log(
           log_level::error,
           [](auto& m, auto ec) {
-              if (ec.value() ==
-                  ordinal(
-                    modeling_errc::graph_output_connection_already_exists))
+              if (ec ==
+                  error_code(
+                    modeling_errc::generic_output_connection_already_exists))
                   m = "modeling: fail to add output connection - Output "
                       "connection already exists.";
-              else if (ec.value() ==
-                       ordinal(
-                         modeling_errc::graph_output_connection_container_full))
-                  m = "modeling: fail to add output connection - Not enough "
-                      "memory to allocate more output connection.";
+              else if (ec ==
+                       error_code(modeling_errc::
+                                    generic_output_connection_container_full))
+                  m = "modeling: fail to add output connection - Not "
+                      "enough memory to allocate more output connection.";
+              else
+                  m = "modeling: fail to add output connection.";
           },
           ret.error());
 
@@ -1213,7 +1210,7 @@ static bool show_input_connections_new(const component_access& ids,
 {
     auto& con    = tab.input_graph_con;
     auto  filter = ImGuiTextFilter{};
-    auto  temp   = std::string{};
+    auto  temp   = label_str{};
     auto  u      = 0;
 
     con.x = show_input_port(tab.compo, con.x);
@@ -1260,17 +1257,19 @@ static bool show_input_connections_new(const component_access& ids,
                 log(
                   log_level::error,
                   [](auto& m, auto ec) {
-                      if (ec.value() ==
-                          ordinal(modeling_errc::
-                                    graph_input_connection_already_exists))
+                      if (ec ==
+                          error_code(modeling_errc::
+                                       graph_input_connection_already_exists))
                           m = "modeling: fail to add input connection - Input "
                               "connection already exists.";
-                      else if (ec.value() ==
-                               ordinal(modeling_errc::
+                      else if (ec == error_code(
+                                       modeling_errc::
                                          graph_input_connection_container_full))
                           m = "modeling: fail to add input connection - Not "
                               "enough memory to allocate more input "
                               "connection.";
+                      else
+                          m = "modeling: fail to add input connection.";
                   },
                   ret.error());
             } else {
@@ -1288,7 +1287,7 @@ static bool show_output_connections_new(const component_access& ids,
 {
     auto& con    = tab.output_graph_con;
     auto  filter = ImGuiTextFilter{};
-    auto  temp   = std::string{};
+    auto  temp   = label_str{};
     auto  u      = 0;
 
     con.y = show_output_port(tab.compo, con.y);
@@ -1336,18 +1335,21 @@ static bool show_output_connections_new(const component_access& ids,
                 log(
                   log_level::error,
                   [](auto& m, auto ec) {
-                      if (ec.value() ==
-                          ordinal(modeling_errc::
-                                    graph_output_connection_already_exists))
+                      if (ec ==
+                          error_code(modeling_errc::
+                                       graph_output_connection_already_exists))
                           m = "modeling: fail to add output connection - "
-                              "Output connection already exists.";
-                      else if (ec.value() ==
-                               ordinal(
+                              "Output "
+                              "connection already exists.";
+                      else if (ec ==
+                               error_code(
                                  modeling_errc::
                                    graph_output_connection_container_full))
                           m = "modeling: fail to add output connection - Not "
                               "enough memory to allocate more output "
                               "connection.";
+                      else
+                          m = "modeling: fail to add output connection.";
                   },
                   ret.error());
             } else {
@@ -1845,12 +1847,12 @@ static bool show_input_connection_packs(const component_access& ids,
               ids, "child component", vec, con.child_component, con.child_port);
 
             con.child_component = child.first;
-            con.child_port = ids.exists(con.child_component)
-                               ? combobox_component_port_id(
+            con.child_port      = ids.exists(con.child_component)
+                                    ? combobox_component_port_id(
                                    "child port",
                                    ids.components[con.child_component].x,
                                    child.second)
-                               : combobox_component_port_id_empty("child port");
+                                    : combobox_component_port_id_empty("child port");
 
             if (is_defined(con.child_component) and
                 is_defined(con.child_port) and is_defined(con.parent_port) and
@@ -1887,12 +1889,12 @@ static bool show_output_connection_packs(const component_access& ids,
               ids, "child component", vec, con.child_component, con.child_port);
 
             con.child_component = child.first;
-            con.child_port = ids.exists(con.child_component)
-                               ? combobox_component_port_id(
+            con.child_port      = ids.exists(con.child_component)
+                                    ? combobox_component_port_id(
                                    "child port",
                                    ids.components[con.child_component].y,
                                    child.second)
-                               : combobox_component_port_id_empty("child port");
+                                    : combobox_component_port_id_empty("child port");
 
             if (is_defined(con.child_component) and
                 is_defined(con.child_port) and is_defined(con.parent_port) and
@@ -2253,10 +2255,11 @@ static auto display_component_editor(component_editor&      ed,
                         return;
 
                     if (action[component_editor_result_type::do_save_file]) {
-                        ids.components[tab->id]             = tab->compo;
+                        auto& compo       = ids.components[tab->id];
+                        compo             = tab->compo;
+                        compo.file_status = component_file_status::modified;
                         ids.component_file_paths[tab->id]   = tab->file;
                         ids.component_descriptions[tab->id] = tab->desc;
-                        ids.components[tab->id]             = tab->compo;
 
                         app.mod.files.read([&](const auto& fs, auto) noexcept {
                             if (auto ret = app.mod.save(ids, fs, tab->id);
@@ -2270,6 +2273,8 @@ static auto display_component_editor(component_editor&      ed,
                                            ret.error().value());
                                 });
                             } else {
+                                compo
+                                  .file_status = component_file_status::saved;
                                 log(log_level::notice, [&](auto& msg) {
                                     format(msg, "component: save {} success",
                                            tab->compo.name.sv());
@@ -2296,6 +2301,15 @@ static auto display_component_editor(component_editor&      ed,
                                  do_store_external_source]) {
                         ids.components[tab->id] = tab->compo;
                     }
+
+                    if (action
+                          [component_editor_result_type::do_store_component] or
+                        action
+                          [component_editor_result_type::do_store_file_path] or
+                        action[component_editor_result_type::
+                                 do_store_external_source])
+                        ids.components[tab->id]
+                          .file_status = component_file_status::modified;
                 });
             });
 

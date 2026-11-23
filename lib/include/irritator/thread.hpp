@@ -9,6 +9,7 @@
 #include <irritator/ext.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -23,11 +24,13 @@ namespace irt {
  *
  * * * * */
 
+/** Owns the journals of the threads. A journal released by a finished thread
+ * is given to the next thread: its remaining records are still collected. */
 class journal_registry
 {
 private:
     journal_registry() noexcept
-      : m_journals(8, reserve_tag)
+      : m_slots(8, reserve_tag)
     {}
 
 public:
@@ -37,12 +40,42 @@ public:
         return r;
     }
 
-    thread_journal& attach() noexcept
+    /** @return @c nullptr if the journal can not be allocated: the logs of
+     * the thread are then ignored. */
+    thread_journal* attach() noexcept
     {
         std::scoped_lock lock(m_mutex);
 
-        m_journals.push_back(std::make_unique<thread_journal>());
-        return *m_journals.back();
+        for (auto& slot : m_slots) {
+            if (not slot.in_use) {
+                slot.in_use = true;
+                return slot.journal.data();
+            }
+        }
+
+        auto* slot = m_slots.emplace_back();
+        if (not slot)
+            return nullptr;
+
+        if (not slot->journal.resize(1)) {
+            m_slots.pop_back();
+            return nullptr;
+        }
+
+        slot->in_use = true;
+        return slot->journal.data();
+    }
+
+    void detach(const thread_journal& journal) noexcept
+    {
+        std::scoped_lock lock(m_mutex);
+
+        for (auto& slot : m_slots) {
+            if (slot.journal.data() == &journal) {
+                slot.in_use = false;
+                return;
+            }
+        }
     }
 
     template<typename F>
@@ -50,20 +83,59 @@ public:
     {
         std::scoped_lock lock(m_mutex);
 
-        for (auto& j : m_journals)
-            f(*j);
+        for (auto& slot : m_slots)
+            f(slot.journal.front());
+    }
+
+    /** Number of journals allocated, used or not. */
+    int size() noexcept
+    {
+        std::scoped_lock lock(m_mutex);
+
+        return m_slots.ssize();
     }
 
 private:
-    spin_mutex                              m_mutex;
-    vector<std::unique_ptr<thread_journal>> m_journals;
+    struct slot {
+        /* A single journal in its own buffer: current_journal keeps its
+         * address while the registry grows. */
+        vector<thread_journal> journal;
+        bool                   in_use = false;
+    };
+
+    spin_mutex   m_mutex;
+    vector<slot> m_slots;
 };
 
-struct journal_scope {
-    journal_scope()
+/** Gives a journal to the current thread while the scope lives, then restores
+ * the previous one. */
+class journal_scope
+{
+public:
+    journal_scope() noexcept
+      : m_previous(current_journal)
+      , m_journal(journal_registry::instance().attach())
     {
-        current_journal = &journal_registry::instance().attach();
+        if (m_journal)
+            current_journal = m_journal;
     }
+
+    ~journal_scope() noexcept
+    {
+        current_journal = m_previous;
+
+        if (m_journal)
+            journal_registry::instance().detach(*m_journal);
+    }
+
+    journal_scope(const journal_scope&)            = delete;
+    journal_scope& operator=(const journal_scope&) = delete;
+    journal_scope(journal_scope&&)                 = delete;
+    journal_scope& operator=(journal_scope&&)      = delete;
+
+private:
+    thread_journal* m_previous;
+    thread_journal* m_journal;
 };
 
 /** Aggregation and diffusion journal log
@@ -324,6 +396,15 @@ public:
     bool pop(task& out) noexcept;
     void notify_done() noexcept;
 
+    /// A snapshot of the list (for statistics).
+    struct status {
+        u32  queued;   //!< Tasks waiting in the ring buffer.
+        u32  running;  //!< Tasks being executed (0 or 1).
+        bool stopping; //!< @c shutdown() was called.
+    };
+
+    status get_status() const noexcept;
+
     //! Wait until every accepted task is done, or until @c shutdown().
     void wait_empty() noexcept;
 
@@ -372,14 +453,16 @@ public:
         return m_tasks_completed.load(std::memory_order_relaxed);
     }
 
-    u64 execution_time_in_ns() const noexcept
+    std::chrono::nanoseconds execution_time_in_ns() const noexcept
     {
-        return m_execution_time_ns.load(std::memory_order_relaxed);
+        return std::chrono::nanoseconds(
+          m_execution_time_ns.load(std::memory_order_relaxed));
     }
 
-    u64 execution_time_in_ms() const noexcept
+    std::chrono::milliseconds execution_time_in_ms() const noexcept
     {
-        return execution_time_in_ns() / 1'000'000u;
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+          execution_time_in_ns());
     }
 
     bool initialized() const noexcept
@@ -434,6 +517,20 @@ public:
     bool try_steal(task& out) noexcept;
     void notify_done() noexcept;
 
+    enum class phase : uint8_t { accepting, executing, shutting_down };
+
+    /// A snapshot of the list (for statistics).
+    struct status {
+        phase current;    //!< Building, executing or shutting down.
+        u32   pending;    //!< Tasks of the batch (accepting: being built).
+        u32   incoming;   //!< Tasks added while the batch executes.
+        u32   batch_size; //!< Size of the batch (executing).
+        u32   started;    //!< Tasks of the batch taken by a worker.
+        u32   completed;  //!< Tasks of the batch done.
+    };
+
+    status get_status() const noexcept;
+
     //! Wait for the end of the batch, or until @c shutdown().
     void wait_completion() noexcept;
 
@@ -456,8 +553,6 @@ public:
 
 private:
     friend class task_manager;
-
-    enum class phase : uint8_t { accepting, executing, shutting_down };
 
     vector<task> m_pending;  // the batch (accepting: being built)
     vector<task> m_incoming; // tasks added while the batch executes
@@ -493,14 +588,16 @@ public:
         return m_tasks_completed.load(std::memory_order_relaxed);
     }
 
-    u64 execution_time_in_ns() const noexcept
+    std::chrono::nanoseconds execution_time_in_ns() const noexcept
     {
-        return m_execution_time_ns.load(std::memory_order_relaxed);
+        return std::chrono::nanoseconds(
+          m_execution_time_ns.load(std::memory_order_relaxed));
     }
 
-    u64 execution_time_in_ms() const noexcept
+    std::chrono::milliseconds execution_time_in_ms() const noexcept
     {
-        return execution_time_in_ns() / 1'000'000u;
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+          execution_time_in_ns());
     }
 
     bool initialized() const noexcept
@@ -518,6 +615,17 @@ private:
     std::atomic<bool> m_initialized{ false };
 };
 
+/// Options of the @c task_manager. The default values are reasonable for most
+/// use cases in command line applications.
+struct task_manager_options {
+    /// Number of pair of ordered and unordered lists to create. Must be > 0.
+    u32 list_count = 1;
+
+    /// Number of workers (@c std::thread) used for all lists combined. 0 means
+    /// the use of an heuristic otherwise the value is used without constraint.
+    u32 worker_count = 0;
+};
+
 /** Owns the lists and the worker threads.
  *
  * The destructor calls @c shutdown(): forgetting it no longer ends in
@@ -529,15 +637,23 @@ private:
 class task_manager
 {
 public:
-    /**
-     * @param unordered_worker_count Number of threads for the unordered
-     * lists (0 means 1). No unordered thread is created if
-     * @c unordered_count is 0.
-     */
-    task_manager(size_t ordered_count,
-                 size_t unordered_count,
-                 size_t unordered_worker_count =
-                   std::thread::hardware_concurrency()) noexcept;
+    using options = task_manager_options;
+
+    /// Constructs a task manager with the specified options. Number of lists
+    /// and workers are fixed at construction time. The lists and workers are
+    /// created but not started.
+    ///
+    /// To compute unordered_worker number based on HW threads:
+    ///
+    /// | HW Threads | list_count=1 | list_count=4 | list_count=8 |
+    /// | ---------- | ------------ | ------------ | ------------ |
+    /// | 1          | 1            | 1            | 1            |
+    /// | 2          | 1            | 1            | 1            |
+    /// | 4          | 3            | 3            | 3            |
+    /// | 8          | 7            | 6            | 6            |
+    /// | 16         | 15           | 12           | 12           |
+    /// | 32         | 31           | 28           | 24           |
+    task_manager(const options opt = options{}) noexcept;
 
     ~task_manager() noexcept;
 
@@ -552,17 +668,19 @@ public:
     ordered_task_list&   ordered(std::integral auto i) noexcept;
     unordered_task_list& unordered(std::integral auto i) noexcept;
 
-    size_t ordered_size() const noexcept;
-    size_t unordered_size() const noexcept;
-    size_t wordered_size() const noexcept;
-    size_t wunordered_size() const noexcept;
+    /// Get the number of pair of ordered and unordered lists.
+    size_t list_size() const noexcept;
+
+    size_t ordered_worker_size() const noexcept;
+    size_t unordered_worker_size() const noexcept;
 
     u64 wordered_tasks_completed(std::integral auto i) const noexcept;
     u64 wunordered_tasks_completed(std::integral auto i) const noexcept;
 
-    //! Execution time in milliseconds.
-    u64 wordered_execution_time(std::integral auto i) const noexcept;
-    u64 wunordered_execution_time(std::integral auto i) const noexcept;
+    std::chrono::milliseconds wordered_execution_time(
+      std::integral auto i) const noexcept;
+    std::chrono::milliseconds wunordered_execution_time(
+      std::integral auto i) const noexcept;
 
 private:
     worker_signal m_signal; // before the lists and workers: used by both
@@ -585,22 +703,17 @@ inline unordered_task_list& task_manager::unordered(
     return m_unordered_lists[i];
 }
 
-inline size_t task_manager::ordered_size() const noexcept
+inline size_t task_manager::list_size() const noexcept
 {
     return m_ordered_lists.size();
 }
 
-inline size_t task_manager::unordered_size() const noexcept
-{
-    return m_unordered_lists.size();
-}
-
-inline size_t task_manager::wordered_size() const noexcept
+inline size_t task_manager::ordered_worker_size() const noexcept
 {
     return m_ordered_workers.size();
 }
 
-inline size_t task_manager::wunordered_size() const noexcept
+inline size_t task_manager::unordered_worker_size() const noexcept
 {
     return m_unordered_workers.size();
 }
@@ -617,13 +730,13 @@ inline u64 task_manager::wunordered_tasks_completed(
     return m_unordered_workers[i].tasks_completed();
 }
 
-inline u64 task_manager::wordered_execution_time(
+inline std::chrono::milliseconds task_manager::wordered_execution_time(
   std::integral auto i) const noexcept
 {
     return m_ordered_workers[i].execution_time_in_ms();
 }
 
-inline u64 task_manager::wunordered_execution_time(
+inline std::chrono::milliseconds task_manager::wunordered_execution_time(
   std::integral auto i) const noexcept
 {
     return m_unordered_workers[i].execution_time_in_ms();

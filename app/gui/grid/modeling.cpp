@@ -560,16 +560,6 @@ grid_component_editor_data::grid_component_editor_data(
   , m_id(id_)
 {}
 
-void grid_component_editor_data::clear() noexcept
-{
-    zoom[0]           = 1.f;
-    zoom[1]           = 1.f;
-    hovered_component = nullptr;
-
-    grid_id = undefined<grid_component_id>();
-    m_id    = undefined<component_id>();
-}
-
 bool grid_component_editor_data::show(component_editor&       ed,
                                       const component_access& ids,
                                       component&              compo) noexcept
@@ -767,14 +757,6 @@ bool grid_component_editor_data::show_selected_nodes(
     return false;
 }
 
-bool grid_component_editor_data::need_show_selected_nodes(
-  component_editor& /*ed*/) noexcept
-{
-    return false;
-}
-
-void grid_component_editor_data::clear_selected_nodes() noexcept {}
-
 void grid_component_editor_data::read(application& app,
                                       component&   compo) noexcept
 {
@@ -807,7 +789,7 @@ void grid_component_editor_data::write(application& app,
 
               ids.components[id] = *c;
 
-              if (debug::check(c->type == component_type::grid)) {
+              if (c->type == component_type::grid) {
                   const auto grid_id = c->id.grid_id;
 
                   if (auto* grid = ids.grid_components.try_to_get(grid_id))

@@ -66,26 +66,23 @@ void* new_delete_memory_resource::data::debug_allocate(
   std::size_t bytes,
   std::size_t alignment) noexcept
 {
-    fmt::print(debug::mem_file(),
-               "new-delete::allocate   {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
+    fmt::print(
+      debug::mem_file(), "new-delete::allocate   {},{} {},{}\n",
+      human_readable_bytes(bytes), human_readable_bytes(alignment),
+      human_readable_bytes(allocated.load(std::memory_order_relaxed)),
+      human_readable_bytes(deallocated.load(std::memory_order_relaxed)));
 
-    auto ptr = std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    auto ptr = fn.allocate(bytes, alignment);
     if (ptr) {
         std::fill_n(static_cast<std::byte*>(ptr), bytes, std::byte(0xCD));
-        allocated += bytes;
+        allocated.fetch_add(bytes, std::memory_order_relaxed);
     }
 
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{} = {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
+    fmt::print(
+      debug::mem_file(), "                       {},{} {},{} = {}\n",
+      human_readable_bytes(bytes), human_readable_bytes(alignment),
+      human_readable_bytes(allocated.load(std::memory_order_relaxed)),
+      human_readable_bytes(deallocated.load(std::memory_order_relaxed)), ptr);
 
     return ptr;
 }
@@ -95,247 +92,23 @@ void new_delete_memory_resource::data::debug_deallocate(
   std::size_t bytes,
   std::size_t alignment) noexcept
 {
-    fmt::print(debug::mem_file(),
-               "new-delete::deallocate {},{} {},{} {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
+    fmt::print(
+      debug::mem_file(), "new-delete::deallocate {},{} {},{} {}\n",
+      human_readable_bytes(bytes), human_readable_bytes(alignment),
+      human_readable_bytes(allocated.load(std::memory_order_relaxed)),
+      human_readable_bytes(deallocated.load(std::memory_order_relaxed)), ptr);
 
     if (ptr) {
-        deallocated += bytes;
+        deallocated.fetch_add(bytes, std::memory_order_relaxed);
         std::fill_n(static_cast<std::byte*>(ptr), bytes, std::byte(0xDD));
-        std::pmr::new_delete_resource()->deallocate(ptr, bytes, alignment);
+        fn.deallocate(ptr, bytes, alignment);
     }
 
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-}
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-void* synchronized_pool_resource<max_blocks_per_chunk,
-                                 largest_required_pool_block>::data::
-  debug_allocate(std::size_t bytes, std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "sync-pools::allocate   {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-
-    auto ptr = mr.allocate(bytes, alignment);
-    if (ptr)
-        allocated += bytes;
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{} = {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    return ptr;
-}
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-void synchronized_pool_resource<max_blocks_per_chunk,
-                                largest_required_pool_block>::data::
-  debug_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "sync-pools::deallocate {},{} {},{} {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    if (ptr) {
-        deallocated += bytes;
-        mr.deallocate(ptr, bytes, alignment);
-    }
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-}
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-void* unsynchronized_pool_resource<max_blocks_per_chunk,
-                                   largest_required_pool_block>::data::
-  debug_allocate(std::size_t bytes, std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "unsync-pools::allocate   {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-
-    auto ptr = mr.allocate(bytes, alignment);
-    if (ptr)
-        allocated += bytes;
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{} = {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    return ptr;
-}
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-void unsynchronized_pool_resource<max_blocks_per_chunk,
-                                  largest_required_pool_block>::data::
-  debug_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "unsync-pools::deallocate {},{} {},{} {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    if (ptr) {
-        deallocated += bytes;
-        mr.deallocate(ptr, bytes, alignment);
-    }
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-}
-
-template<std::size_t Length, int ID>
-void* monotonic_small_buffer<Length, ID>::data::debug_allocate(
-  std::size_t bytes,
-  std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "mono-small-size-{}::allocate   {},{} {},{}\n",
-               id,
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-
-    auto ptr = mr.allocate(bytes, alignment);
-    if (ptr)
-        allocated += bytes;
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{} = {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    return ptr;
-}
-
-template<std::size_t Length, int ID>
-void monotonic_small_buffer<Length, ID>::data::debug_deallocate(
-  void*       ptr,
-  std::size_t bytes,
-  std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "mono-small-size-{}::deallocate {},{} {},{} {}\n",
-               id,
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    if (ptr) {
-        deallocated += bytes;
-        mr.deallocate(ptr, bytes, alignment);
-    }
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-}
-
-template<int ID>
-void* monotonic_buffer<ID>::data::debug_allocate(std::size_t bytes,
-                                                 std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "mono-size-{}::allocate   {},{} {},{}\n",
-               id,
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
-
-    auto ptr = mr.allocate(bytes, alignment);
-    if (ptr)
-        allocated += bytes;
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{} = {}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    return ptr;
-}
-
-template<int ID>
-void monotonic_buffer<ID>::data::debug_deallocate(
-  void*       ptr,
-  std::size_t bytes,
-  std::size_t alignment) noexcept
-{
-    fmt::print(debug::mem_file(),
-               "mono-size-{}::deallocate {},{} {},{} {}\n",
-               id,
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated),
-               ptr);
-
-    if (ptr) {
-        deallocated += bytes;
-        mr.deallocate(ptr, bytes, alignment);
-    }
-
-    fmt::print(debug::mem_file(),
-               "                       {},{} {},{}\n",
-               human_readable_bytes(bytes),
-               human_readable_bytes(alignment),
-               human_readable_bytes(allocated),
-               human_readable_bytes(deallocated));
+    fmt::print(
+      debug::mem_file(), "                       {},{} {},{}\n",
+      human_readable_bytes(bytes), human_readable_bytes(alignment),
+      human_readable_bytes(allocated.load(std::memory_order_relaxed)),
+      human_readable_bytes(deallocated.load(std::memory_order_relaxed)));
 }
 
 } // namespace irt

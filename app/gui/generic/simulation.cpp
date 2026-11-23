@@ -11,7 +11,6 @@
 #include <irritator/io.hpp>
 #include <irritator/modeling-helpers.hpp>
 #include <irritator/modeling.hpp>
-#include <irritator/timeline.hpp>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -22,97 +21,13 @@
 #include "editor.hpp"
 #include "internal.hpp"
 
-#include "imnodes.h"
+#include <limits>
 
 namespace irt {
 
 const char* observable_type_names[] = {
     "none", "file", "plot", "graph", "grid",
 };
-
-static int make_input_node_id(const irt::model_id mdl, const int port) noexcept
-{
-    debug::ensure(port >= 0 && port < 8);
-
-    irt::u32 index = static_cast<u32>(irt::get_index(mdl));
-    debug::ensure(index < 268435456u);
-
-    irt::u32 port_index = static_cast<irt::u32>(port) << 28u;
-    index |= port_index;
-
-    return static_cast<int>(index);
-}
-
-static int make_output_node_id(const irt::model_id mdl, const int port) noexcept
-{
-    debug::ensure(port >= 0 && port < 8);
-
-    irt::u32 index = static_cast<u32>(irt::get_index(mdl));
-    debug::ensure(index < 268435456u);
-
-    irt::u32 port_index = static_cast<irt::u32>(8u + port) << 28u;
-    index |= port_index;
-
-    return static_cast<int>(index);
-}
-
-static std::pair<irt::u32, irt::u32> get_model_input_port(
-  const int node_id) noexcept
-{
-    const irt::u32 real_node_id = static_cast<irt::u32>(node_id);
-
-    irt::u32 port = real_node_id >> 28u;
-    debug::ensure(port < 8u);
-
-    constexpr irt::u32 mask  = ~(15u << 28u);
-    irt::u32           index = real_node_id & mask;
-
-    return std::make_pair(index, port);
-}
-
-static std::pair<irt::u32, irt::u32> get_model_output_port(
-  const int node_id) noexcept
-{
-    const irt::u32 real_node_id = static_cast<irt::u32>(node_id);
-
-    irt::u32 port = real_node_id >> 28u;
-    debug::ensure(port >= 8u && port < 16u);
-    port -= 8u;
-    debug::ensure(port < 8u);
-
-    constexpr irt::u32 mask  = ~(15u << 28u);
-    irt::u32           index = real_node_id & mask;
-
-    return std::make_pair(index, port);
-}
-
-struct gport {
-    gport() noexcept = default;
-
-    gport(irt::model* model_, const int port_index_) noexcept
-      : model(model_)
-      , port_index(port_index_)
-    {}
-
-    irt::model* model      = nullptr;
-    int         port_index = 0;
-};
-
-static gport get_in(simulation& sim, const int index) noexcept
-{
-    const auto model_index_port = get_model_input_port(index);
-    auto*      mdl = sim.models.try_to_get_from_pos(model_index_port.first);
-
-    return { mdl, static_cast<int>(model_index_port.second) };
-}
-
-static gport get_out(simulation& sim, const int index) noexcept
-{
-    const auto model_index_port = get_model_output_port(index);
-    auto*      mdl = sim.models.try_to_get_from_pos(model_index_port.first);
-
-    return { mdl, static_cast<int>(model_index_port.second) };
-}
 
 static void show_dynamics_values(application& /*app*/,
                                  project_editor& /*sim*/,
@@ -335,14 +250,6 @@ static void show_dynamics_values(application& /*app*/,
 template<sz QssLevel>
 static void show_dynamics_values(application& /*app*/,
                                  project_editor& /*sim*/,
-                                 const abstract_integer<QssLevel>& dyn)
-{
-    ImGui::LabelFormat("value", "{}", dyn.value[0]);
-}
-
-template<sz QssLevel>
-static void show_dynamics_values(application& /*app*/,
-                                 project_editor& /*sim*/,
                                  const abstract_compare<QssLevel>& dyn)
 {
     ImGui::LabelFormat("a", "{}", dyn.a[0]);
@@ -360,46 +267,39 @@ static void show_dynamics_values(application& /*app*/,
     ImGui::LabelFormat("sum-values", "{}", dyn.sum_values);
 }
 
+/// A fifo is allocated on the first message and stays allocated once empty.
+static void show_queue_fifo(project_editor& sim, const dated_message_id fifo)
+{
+    const auto* ar = sim.pj.sim.dated_messages.try_to_get(fifo);
+
+    if (not ar or ar->empty()) {
+        ImGui::LabelFormat("queue", "{}", "empty");
+    } else {
+        ImGui::LabelFormat("size", "{}", ar->size());
+        ImGui::LabelFormat("next ta", "{}", ar->front()[0]);
+        ImGui::LabelFormat("next value", "{}", ar->front()[1]);
+    }
+}
+
 static void show_dynamics_values(application& /*app*/,
                                  project_editor& sim,
                                  const queue&    dyn)
 {
-    auto* ar = sim.pj.sim.dated_messages.try_to_get(dyn.fifo);
-
-    if (not ar) {
-        ImGui::LabelFormat("queue", "{}", "empty");
-    } else {
-        ImGui::LabelFormat("next ta", "{}", ar->front()[0]);
-        ImGui::LabelFormat("next value", "{}", ar->front()[1]);
-    }
+    show_queue_fifo(sim, dyn.fifo);
 }
 
 static void show_dynamics_values(application& /*app*/,
                                  project_editor&      sim,
                                  const dynamic_queue& dyn)
 {
-    auto* ar = sim.pj.sim.dated_messages.try_to_get(dyn.fifo);
-
-    if (not ar) {
-        ImGui::LabelFormat("queue", "{}", "empty");
-    } else {
-        ImGui::LabelFormat("next ta", "{}", ar->front()[0]);
-        ImGui::LabelFormat("next value", "{}", ar->front()[1]);
-    }
+    show_queue_fifo(sim, dyn.fifo);
 }
 
 static void show_dynamics_values(application& /*app*/,
                                  project_editor&       sim,
                                  const priority_queue& dyn)
 {
-    auto* ar = sim.pj.sim.dated_messages.try_to_get(dyn.fifo);
-
-    if (not ar) {
-        ImGui::LabelFormat("queue", "{}", "empty");
-    } else {
-        ImGui::LabelFormat("next ta", "{}", ar->front()[0]);
-        ImGui::LabelFormat("next value", "{}", ar->front()[1]);
-    }
+    show_queue_fifo(sim, dyn.fifo);
 }
 
 static void show_dynamics_values(application& /*app*/,
@@ -414,14 +314,26 @@ static void show_dynamics_values(application& /*app*/,
                                  constant&       dyn)
 {
     ImGui::LabelFormat("next ta", "{}", dyn.sigma);
-    ImGui::InputDouble("value", &dyn.value);
+    ImGui::LabelFormat("value", "{}", dyn.value);
+
+    if (not sim.can_edit())
+        return;
+
+    // The model belongs to the simulation thread: the new value goes through
+    // a command.
+    ImGui::InputDouble("new value", &sim.constant_value_to_send);
 
     if (ImGui::Button("Send value now")) {
         auto& mdl    = get_model(dyn);
         auto  mdl_id = sim.pj.sim.models.get_id(mdl);
 
-        sim.pj.push(command{ .type = command_type::send_message,
-                             .data{ .send_message{ .mdl_id = mdl_id } } });
+        if (not sim.sim_player.commands.push(command{
+              .type = command_type::send_message,
+              .data{ .send_message{ .mdl_id = mdl_id,
+                                    .value  = sim.constant_value_to_send } } }))
+            log(log_level::error, [](auto& msg) noexcept {
+                msg = "simulation: commands order list is full";
+            });
     }
 }
 
@@ -452,14 +364,13 @@ static void show_dynamics_values(
     ImGui::LabelFormat("value", "{}", dyn.values[0]);
 }
 
-template<std::size_t QssLevel>
-static void show_dynamics_values(application& /*app*/,
-                                 project_editor& /*sim*/,
-                                 const abstract_filter<QssLevel>& dyn)
+template<std::size_t QssLevel, std::size_t PortNumber>
+static void show_dynamics_values(
+  application& /*app*/,
+  project_editor& /*sim*/,
+  const struct abstract_priority<QssLevel, PortNumber>& dyn)
 {
     ImGui::LabelFormat("value", "{}", dyn.value[0]);
-    ImGui::LabelFormat("lower-threshold", "{}", dyn.lower_threshold);
-    ImGui::LabelFormat("upper-threshold", "{}", dyn.upper_threshold);
 }
 
 template<std::size_t QssLevel>
@@ -828,58 +739,58 @@ static void show_dynamics_values(application& /*app*/,
     ImGui::LabelFormat("value", "{}", dyn.value[0]);
 }
 
-static constexpr auto is_in_node(
-  std::span<generic_simulation_editor::node> nodes,
-  const model_id                             mdl_id) noexcept
+/// Maps the index of a model in the simulation to its index in @c nodes, to
+/// build the links without searching the nodes.
+static void build_node_indices(
+  const simulation&                                sim,
+  std::span<const generic_simulation_editor::node> nodes,
+  vector<u32>&                                     indices) noexcept
 {
-    return std::ranges::any_of(
-      nodes, [&](const auto& node) { return node.mdl == mdl_id; });
+    indices.clear();
+    indices.resize(sim.models.capacity(), std::numeric_limits<u32>::max());
+
+    for (u32 i = 0, e = static_cast<u32>(nodes.size()); i != e; ++i)
+        indices[get_index(nodes[i].mdl)] = i;
 }
 
-static constexpr auto get_index_from_nodes(
-  std::span<generic_simulation_editor::node> nodes,
-  const model_id                             mdl_id) noexcept
+static void build_model_links(
+  const simulation&                        sim,
+  const model&                             mdl,
+  std::span<const u32>                     indices,
+  vector<generic_simulation_editor::link>& links) noexcept
 {
-    return static_cast<int>(std::ranges::distance(
-      nodes.begin(), std::ranges::find_if(nodes, [&](const auto& node) {
-          return node.mdl == mdl_id;
-      })));
-}
+    dispatch(mdl, [&]<typename Dynamics>(const Dynamics& dyn) noexcept {
+        if constexpr (has_output_port<Dynamics>) {
+            const auto src = indices[get_index(sim.get_id(dyn))];
 
-static void build_links(const simulation&                          sim,
-                        const tree_node&                           tn,
-                        std::span<generic_simulation_editor::node> nodes,
-                        vector<generic_simulation_editor::link>& links) noexcept
-{
-    for (const auto& child : tn.children) {
-        if (child.type == tree_node::child_node::type::model) {
-            if (auto* mdl = sim.models.try_to_get(child.mdl)) {
-                dispatch(*mdl, [&]<typename Dynamics>(Dynamics& dyn) noexcept {
-                    if constexpr (has_output_port<Dynamics>) {
-                        const auto src_id = sim.get_id(dyn);
-                        const auto src_idx =
-                          get_index_from_nodes(nodes, src_id);
-                        for (int i = 0, e = length(dyn.y); i != e; ++i) {
-                            sim.for_each(
-                              dyn.y[i], [&](auto& dst, auto dst_port) {
-                                  const auto dst_id = sim.get_id(dst);
-                                  if (is_in_node(nodes, dst_id)) {
-                                      links.push_back(
-                                        generic_simulation_editor::link{
-                                          .out = make_output_node_id(src_id, i),
-                                          .in  = make_input_node_id(dst_id,
-                                                                    dst_port),
-                                          .mdl_out = src_idx,
-                                          .mdl_in  = get_index_from_nodes(
-                                            nodes, dst_id) });
-                                  }
-                              });
-                        }
-                    }
+            for (int i = 0, e = length(dyn.y); i != e; ++i) {
+                sim.for_each(dyn.y[i], [&](auto& dst, auto dst_port) {
+                    const auto dst_idx = indices[get_index(sim.get_id(dst))];
+
+                    if (src != std::numeric_limits<u32>::max() and
+                        dst_idx != std::numeric_limits<u32>::max())
+                        links.push_back(generic_simulation_editor::link{
+                          .out_node = src,
+                          .out_port = static_cast<u32>(i),
+                          .in_node  = dst_idx,
+                          .in_port  = static_cast<u32>(dst_port) });
                 });
             }
         }
-    }
+    });
+}
+
+static void build_links(const simulation&                                sim,
+                        std::span<const generic_simulation_editor::node> nodes,
+                        vector<generic_simulation_editor::link>& links) noexcept
+{
+    vector<u32> indices;
+    build_node_indices(sim, nodes, indices);
+
+    for (const auto& n : nodes)
+        if (const auto* mdl = sim.models.try_to_get(n.mdl))
+            build_model_links(sim, *mdl,
+                              std::span(indices.data(), indices.size()), links);
 }
 
 static void build_nodes(const simulation&                        sim,
@@ -897,32 +808,6 @@ static void build_nodes(const simulation&                        sim,
                   .mdl = child.mdl, .name = name ? name->sv() : empty_name });
             }
         }
-    }
-}
-
-static constexpr void build_flat_links(
-  const simulation&                          sim,
-  std::span<generic_simulation_editor::node> nodes,
-  vector<generic_simulation_editor::link>&   links) noexcept
-{
-    for (const auto& mdl : sim.models) {
-        dispatch(mdl, [&]<typename Dynamics>(Dynamics& dyn) noexcept {
-            if constexpr (has_output_port<Dynamics>) {
-                const auto src_id  = sim.get_id(dyn);
-                const auto src_idx = get_index_from_nodes(nodes, src_id);
-                for (int i = 0, e = length(dyn.y); i != e; ++i) {
-                    sim.for_each(dyn.y[i], [&](auto& dst, auto dst_port) {
-                        const auto dst_id = sim.get_id(dst);
-
-                        links.push_back(generic_simulation_editor::link{
-                          .out     = make_output_node_id(src_id, i),
-                          .in      = make_input_node_id(dst_id, dst_port),
-                          .mdl_out = src_idx,
-                          .mdl_in  = get_index_from_nodes(nodes, dst_id) });
-                    });
-                }
-            }
-        });
     }
 }
 
@@ -953,28 +838,32 @@ static void build_flat_nodes(
     }
 }
 
+static int push_command(project_editor& pj_ed, const command& cmd) noexcept
+{
+    if (pj_ed.sim_player.commands.push(cmd))
+        return 1;
+
+    log(log_level::error, [](auto& msg) noexcept {
+        msg = "simulation: commands order list is full";
+    });
+
+    return 0;
+}
+
 static int copy(project_editor&                                pj_ed,
                 const vector<generic_simulation_editor::node>& nodes,
                 const tree_node_id                             current,
-                const vector<int>& selection) noexcept
+                std::span<const u32> selection) noexcept
 {
-    int ret = false;
+    int ret = 0;
 
-    for (const auto index : selection) {
-        if (pj_ed.pj.sim.models.try_to_get(nodes[index].mdl)) {
-            if (not pj_ed.pj.push(command{
-                  .type = command_type::copy_model,
-                  .data{ .copy_model{ .tn_id  = current,
-                                      .mdl_id = nodes[index].mdl } } })) {
-                log(log_level::error, [](auto& msg) noexcept {
-                    msg = "simulation: commands order list is full";
-                });
-                return ret;
-            }
-
-            ++ret;
-        }
-    }
+    for (const auto index : selection)
+        if (pj_ed.pj.sim.models.try_to_get(nodes[index].mdl))
+            ret += push_command(
+              pj_ed,
+              command{ .type = command_type::copy_model,
+                       .data{ .copy_model{ .tn_id  = current,
+                                           .mdl_id = nodes[index].mdl } } });
 
     return ret;
 }
@@ -984,261 +873,115 @@ static int new_model(project_editor&     pj_ed,
                      const dynamics_type type,
                      const ImVec2        click_pos) noexcept
 {
-    if (not pj_ed.pj.push(command{ .type = command_type::new_model,
-                                   .data{ .new_model{ .tn_id = current,
-                                                      .type  = type,
-                                                      .x     = click_pos.x,
-                                                      .y = click_pos.y } } })) {
-        log(log_level::error, [](auto& msg) noexcept {
-            msg = "simulation: command order list is full";
-        });
-
-        return false;
-    }
-
-    return true;
+    return push_command(pj_ed,
+                        command{ .type = command_type::new_model,
+                                 .data{ .new_model{ .tn_id = current,
+                                                    .type  = type,
+                                                    .x     = click_pos.x,
+                                                    .y     = click_pos.y } } });
 }
 
-static int free_model(project_editor&    pj_ed,
-                      const tree_node_id current,
-                      const vector<int>& selection) noexcept
+static int free_model(project_editor&                                pj_ed,
+                      const vector<generic_simulation_editor::node>& nodes,
+                      const tree_node_id                             current,
+                      std::span<const u32> selection) noexcept
 {
-    int ret = false;
+    int ret = 0;
 
-    for (const auto index : selection) {
-        if (auto* mdl = pj_ed.pj.sim.models.try_to_get_from_pos(index)) {
-            if (not pj_ed.pj.push(command{
-                  .type = command_type::free_model,
-                  .data{ .free_model{
-                    .tn_id  = current,
-                    .mdl_id = pj_ed.pj.sim.models.get_id(*mdl) } } })) {
-                log(log_level::error, [](auto& msg) noexcept {
-                    msg = "simulation: commands order list is full";
-                });
-                return ret;
-            }
-
-            ++ret;
-        }
-    }
+    for (const auto index : selection)
+        if (pj_ed.pj.sim.models.try_to_get(nodes[index].mdl))
+            ret += push_command(
+              pj_ed,
+              command{ .type = command_type::free_model,
+                       .data{ .free_model{ .tn_id  = current,
+                                           .mdl_id = nodes[index].mdl } } });
 
     return ret;
 }
 
-static int connect(project_editor&    pj_ed,
-                   const tree_node_id current,
-                   int                start,
-                   int                end) noexcept
+static int connect(project_editor&                                pj_ed,
+                   const vector<generic_simulation_editor::node>& nodes,
+                   const tree_node_id                             current,
+                   const node_editor::link_request&               req) noexcept
 {
-    const gport out = get_out(pj_ed.pj.sim, start);
-    const gport in  = get_in(pj_ed.pj.sim, end);
+    auto* out = pj_ed.pj.sim.models.try_to_get(nodes[req.out.node].mdl);
+    auto* in  = pj_ed.pj.sim.models.try_to_get(nodes[req.in.node].mdl);
 
-    if (!(out.model && in.model && pj_ed.pj.sim.can_connect(1)))
+    if (not(out and in and pj_ed.pj.sim.can_connect(1)))
         return 0;
 
-    if (!is_ports_compatible(
-          *out.model, out.port_index, *in.model, in.port_index))
+    const auto port_out = static_cast<int>(req.out.port);
+    const auto port_in  = static_cast<int>(req.in.port);
+
+    if (not is_ports_compatible(*out, port_out, *in, port_in))
         return 0;
 
-    if (not pj_ed.pj.push(
-          command{ .type = command_type::new_connection,
-                   .data{ .new_connection{
-                     .tn_id      = current,
-                     .mdl_src_id = pj_ed.pj.sim.get_id(*out.model),
-                     .mdl_dst_id = pj_ed.pj.sim.get_id(*in.model),
-                     .port_src   = static_cast<i8>(out.port_index),
-                     .port_dst   = static_cast<i8>(in.port_index) } } })) {
-        log(log_level::error, [](auto& msg) noexcept {
-            msg = "simulation: commands order list is full";
-        });
-
-        return 0;
-    }
-
-    return 1;
+    return push_command(pj_ed,
+                        command{ .type = command_type::new_connection,
+                                 .data{ .new_connection{
+                                   .tn_id      = current,
+                                   .mdl_src_id = nodes[req.out.node].mdl,
+                                   .mdl_dst_id = nodes[req.in.node].mdl,
+                                   .port_src   = static_cast<i8>(port_out),
+                                   .port_dst = static_cast<i8>(port_in) } } });
 }
 
 static int disconnect(project_editor&                                pj_ed,
+                      const vector<generic_simulation_editor::node>& nodes,
                       const tree_node_id                             current,
                       const vector<generic_simulation_editor::link>& links,
-                      const vector<int>& selection) noexcept
+                      std::span<const u32> selection) noexcept
 {
-    int ret = false;
+    int ret = 0;
 
-    for (const auto link_index : selection) {
-        auto out = get_out(pj_ed.pj.sim, links[link_index].out);
-        auto in  = get_in(pj_ed.pj.sim, links[link_index].in);
+    for (const auto index : selection) {
+        const auto& l = links[index];
 
-        if (out.model and in.model) {
-            if (not pj_ed.pj.push(command{
-                  .type = command_type::free_connection,
-                  .data{ .free_connection{
-                    .tn_id      = current,
-                    .mdl_src_id = pj_ed.pj.sim.get_id(*out.model),
-                    .mdl_dst_id = pj_ed.pj.sim.get_id(*in.model),
-                    .port_src   = static_cast<i8>(out.port_index),
-                    .port_dst   = static_cast<i8>(in.port_index) } } })) {
-                log(log_level::error, [](auto& msg) noexcept {
-                    msg = "simulation: commands order list is full";
-                });
-
-                return ret;
-            }
-
-            ++ret;
-        }
+        ret += push_command(
+          pj_ed, command{ .type = command_type::free_connection,
+                          .data{ .free_connection{
+                            .tn_id      = current,
+                            .mdl_src_id = nodes[l.out_node].mdl,
+                            .mdl_dst_id = nodes[l.in_node].mdl,
+                            .port_src   = static_cast<i8>(l.out_port),
+                            .port_dst   = static_cast<i8>(l.in_port) } } });
     }
 
     return ret;
 }
 
-static void compute_connection_distance(
-  const vector<generic_simulation_editor::link>& links,
-  const float                                    k,
-  std::span<ImVec2>                              displacements) noexcept
+/// The models without position, new or never shown, take the position of the
+/// last context menu or a place on a grid after the other nodes.
+void generic_simulation_editor::place_new_nodes(
+  const project_editor& pj_ed) noexcept
 {
-    for (const auto& link : links) {
-        const auto out = get_model_output_port(link.out);
-        const auto in  = get_model_input_port(link.in);
+    const auto capacity = pj_ed.pj.sim.models.capacity();
+    if (positions.size() < static_cast<sz>(capacity))
+        positions.resize(capacity,
+                         ImVec2(std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::quiet_NaN()));
 
-        const auto u_pos = ImNodes::GetNodeEditorSpacePos(to_signed(out.first));
-        const auto v_pos = ImNodes::GetNodeEditorSpacePos(to_signed(in.first));
+    auto placed = 0;
+    for (sz i = 0, e = nodes.size(); i != e; ++i) {
+        auto& p = positions[get_index(nodes[i].mdl)];
 
-        const float dx = v_pos.x - u_pos.x;
-        const float dy = v_pos.y - u_pos.y;
+        if (not std::isnan(p.x))
+            continue;
 
-        if (std::isnormal(dx) and std::isnormal(dy)) {
-            const float d2    = dx * dx / dy * dy;
-            const float coeff = std::sqrt(d2) / k;
-
-            displacements[link.mdl_out].x += dx * coeff;
-            displacements[link.mdl_out].y += dy * coeff;
-            displacements[link.mdl_in].x -= dx * coeff;
-            displacements[link.mdl_in].y -= dy * coeff;
-        }
-    }
-}
-
-void generic_simulation_editor::compute_automatic_layout() noexcept
-{
-    if (nodes.empty())
-        return;
-
-    /* See. Graph drawing by Forced-directed Placement by Thomas M. J.
-       Fruchterman and Edward M. Reingold in Software--Pratice and
-       Experience, Vol. 21(1 1), 1129-1164 (november 1991).
-       */
-
-    const auto size      = nodes.size();
-    const auto tmp       = std::sqrt(size);
-    const auto column    = static_cast<int>(tmp);
-    const auto line      = column;
-    const auto remaining = size - (column * line);
-
-    const float W    = static_cast<float>(column) * automatic_layout_x_distance;
-    const float L    = static_cast<float>(line) +
-                       ((remaining > 0) ? automatic_layout_y_distance : 0.f);
-    const float area = W * L;
-    const float k_square = area / static_cast<float>(size);
-    const float k        = std::sqrt(k_square);
-
-    // float t = 1.f - static_cast<float>(iteration) /
-    //                   static_cast<float>(automatic_layout_iteration_limit);
-    // t *= t;
-
-    displacements.resize(size);
-
-    float t = 1.f - 1.f / static_cast<float>(automatic_layout_iteration_limit);
-
-    for (sz i_v = 0; i_v < size; ++i_v) {
-        const int v = to_signed(get_index(nodes[i_v].mdl));
-
-        displacements[i_v].x = 0.f;
-        displacements[i_v].y = 0.f;
-
-        for (sz i_u = 0; i_u < size; ++i_u) {
-            const int u = to_signed(get_index(nodes[i_u].mdl));
-
-            if (u != v) {
-                const auto u_pos = ImNodes::GetNodeEditorSpacePos(u);
-                const auto v_pos = ImNodes::GetNodeEditorSpacePos(v);
-                const auto delta =
-                  ImVec2{ v_pos.x - u_pos.x, v_pos.y - u_pos.y };
-
-                if (std::isnormal(delta.x) and std::isnormal(delta.y)) {
-                    const float d2    = delta.x * delta.x + delta.y * delta.y;
-                    const float coeff = k_square / d2;
-
-                    displacements[i_v].x += coeff * delta.x;
-                    displacements[i_v].y += coeff * delta.y;
-                }
-            }
+        if (new_model_position.has_value()) {
+            p = *new_model_position;
+            new_model_position.reset();
+        } else {
+            p = node_editor::grid_position(
+              static_cast<u32>(i),
+              node_editor::grid_columns(static_cast<u32>(e)),
+              ImVec2(grid_layout_x_distance, grid_layout_y_distance));
+            ++placed;
         }
     }
 
-    compute_connection_distance(
-      links, k, std::span(displacements.data(), displacements.size()));
-
-    for (sz i_v = 0; i_v < size; ++i_v) {
-        const auto idx = get_index(nodes[i_v].mdl);
-        const auto v   = static_cast<int>(idx);
-        const auto d2  = displacements[i_v].x * displacements[i_v].x +
-                         displacements[i_v].y * displacements[i_v].y;
-        const auto d   = std::sqrt(d2);
-
-        if (d > t) {
-            const float coeff = t / d;
-            displacements[i_v].x *= coeff;
-            displacements[i_v].y *= coeff;
-        }
-
-        auto v_pos = ImNodes::GetNodeEditorSpacePos(v);
-        v_pos.x += displacements[i_v].x;
-        v_pos.y += displacements[i_v].y;
-
-        ImNodes::SetNodeEditorSpacePos(v, v_pos);
-    }
-}
-
-static void compute_grid_layout(
-  const vector<generic_simulation_editor::node>& nodes,
-  const float                                    grid_layout_x_distance,
-  const float grid_layout_y_distance) noexcept
-{
-    const auto size  = nodes.size();
-    const auto fsize = static_cast<float>(size);
-
-    if (size == 0)
-        return;
-
-    const auto column    = static_cast<int>(std::floor(std::sqrt(fsize)));
-    const auto line      = column;
-    const auto remaining = size - (column * line);
-    const auto panning   = ImNodes::EditorContextGetPanning();
-    auto       new_pos   = panning;
-
-    int index = 0;
-    for (auto i = 0; i < line; ++i) {
-        new_pos.y = panning.y + static_cast<float>(i) * grid_layout_y_distance;
-
-        for (auto j = 0; j < column; ++j) {
-            new_pos.x =
-              panning.x + static_cast<float>(j) * grid_layout_x_distance;
-            ImNodes::SetNodeEditorSpacePos(
-              to_signed(get_index(nodes[index].mdl)), new_pos);
-            ++index;
-        }
-    }
-
-    new_pos.x = panning.x;
-    new_pos.y = panning.y + static_cast<float>(column) * grid_layout_y_distance;
-
-    for (sz j = 0; j < remaining; ++j) {
-        new_pos.x = panning.x + static_cast<float>(j) * grid_layout_x_distance;
-        ImNodes::SetNodeEditorSpacePos(to_signed(get_index(nodes[index].mdl)),
-                                       new_pos);
-        ++index;
-    }
+    if (placed > 0)
+        editor.request_fit();
 }
 
 static int popup_menu(project_editor&     pj_ed,
@@ -1315,34 +1058,37 @@ static int show_menu_edit(project_editor&    pj_ed,
 int generic_simulation_editor::show_menu(project_editor& pj_ed,
                                          ImVec2          click_pos) noexcept
 {
-    const bool open_popup =
-      ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-      ImNodes::IsEditorHovered() && ImGui::IsMouseClicked(1);
+    const bool open_popup = ImGui::IsWindowFocused(
+                              ImGuiFocusedFlags_RootAndChildWindows) and
+                            editor.is_background_hovered() and
+                            ImGui::IsMouseClicked(ImGuiMouseButton_Right);
 
     int r = false;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.f, 8.f));
-    if (!ImGui::IsAnyItemHovered() && open_popup)
+    if (open_popup)
         ImGui::OpenPopup("Context menu");
 
     if (ImGui::BeginPopup("Context menu")) {
-        if (ImGui::MenuItem("Force grid layout")) {
-            compute_grid_layout(
-              nodes, grid_layout_x_distance, grid_layout_y_distance);
-        }
+        if (ImGui::MenuItem("Grid layout"))
+            editor.request_grid_layout();
 
-        if (ImGui::MenuItem("Force automatic layout")) {
-            automatic_layout_iteration = automatic_layout_iteration_limit;
-        }
+        if (ImGui::MenuItem("Automatic layout"))
+            editor.request_force_layout();
 
         ImGui::MenuItem("Show internal values", "", &show_internal_values);
         ImGui::MenuItem("Show internal parameters", "", &show_parameter_values);
         ImGui::MenuItem("Show identifiers", "", &show_identifiers);
+        ImGui::MenuItem("Show minimap", "", &editor.show_minimap);
 
         ImGui::Separator();
 
-        if (pj_ed.can_edit())
-            r += show_menu_edit(pj_ed, current, click_pos);
+        if (pj_ed.can_edit()) {
+            const auto added = show_menu_edit(pj_ed, current, click_pos);
+            if (added > 0)
+                new_model_position = editor.to_world(click_pos);
+            r += added;
+        }
 
         ImGui::EndPopup();
     }
@@ -1352,182 +1098,91 @@ int generic_simulation_editor::show_menu(project_editor& pj_ed,
     return r;
 }
 
-static void show_simulation_wrapper_input_attribute(
-  application& /*app*/,
-  const simulation_wrapper& dyn,
-  const model_id            id) noexcept
-{
-    ImNodes::BeginInputAttribute(make_input_node_id(id, 0),
-                                 ImNodesPinShape_TriangleFilled);
-    ImGui::TextUnformatted("init");
-    ImNodes::EndInputAttribute();
+/// The view of the models of the simulation for the @c node_editor.
+struct generic_simulation_editor::graph {
+    application&               app;
+    project_editor&            pj_ed;
+    generic_simulation_editor& ed;
+    small_string<127>          title_buffer;
 
-    ImNodes::BeginInputAttribute(make_input_node_id(id, 1),
-                                 ImNodesPinShape_TriangleFilled);
-    ImGui::TextUnformatted("run");
-    ImNodes::EndInputAttribute();
-
-    for (auto i = 2, e = length(dyn.x); i < e; ++i) {
-        ImNodes::BeginInputAttribute(make_input_node_id(id, i),
-                                     ImNodesPinShape_TriangleFilled);
-        ImGui::TextFormat("{}", i);
-        ImNodes::EndInputAttribute();
+    model& mdl(const u32 node) noexcept
+    {
+        return pj_ed.pj.sim.models.get(ed.nodes[node].mdl);
     }
-}
 
-template<typename Dynamics>
-void show_input_attribute(const Dynamics& dyn, const model_id id) noexcept
-{
-    if constexpr (has_input_port<Dynamics>) {
-        const auto names = get_input_port_names<Dynamics>();
-
-        debug::ensure(std::cmp_equal(names.size(), length(dyn.x)));
-
-        for (sz i = 0, e = names.size(); i != e; ++i) {
-            ImNodes::BeginInputAttribute(
-              make_input_node_id(id, static_cast<int>(i)),
-              ImNodesPinShape_TriangleFilled);
-            ImGui::TextUnformatted(names[i].data(),
-                                   names[i].data() + names[i].size());
-            ImNodes::EndInputAttribute();
-        }
+    u32 node_count() const noexcept
+    {
+        return static_cast<u32>(ed.nodes.size());
     }
-}
 
-static void show_simulation_wrapper_output_attribute(
-  application& /*app*/,
-  const simulation_wrapper& dyn,
-  const model_id            id) noexcept
-{
-    auto i = 0;
-
-    for ([[maybe_unused]] const auto& p : dyn.y) {
-        ImNodes::BeginOutputAttribute(make_output_node_id(id, i),
-                                      ImNodesPinShape_TriangleFilled);
-        ImGui::TextFormat("{}", i);
-        ImNodes::EndOutputAttribute();
-        ++i;
+    ImVec2& position(const u32 node) noexcept
+    {
+        return ed.positions[get_index(ed.nodes[node].mdl)];
     }
-}
 
-template<typename Dynamics>
-void show_output_attribute(const Dynamics& dyn, const model_id id) noexcept
-{
-    if constexpr (has_output_port<Dynamics>) {
-        const auto names = get_output_port_names<Dynamics>();
+    std::string_view title(const u32 node) noexcept
+    {
+        const auto type = dynamics_type_names[ordinal(mdl(node).type)];
 
-        debug::ensure(std::cmp_equal(names.size(), length(dyn.y)));
+        if (not ed.show_identifiers or ed.nodes[node].name.empty())
+            return type;
 
-        for (sz i = 0, e = names.size(); i != e; ++i) {
-            ImNodes::BeginOutputAttribute(
-              make_output_node_id(id, static_cast<int>(i)),
-              ImNodesPinShape_TriangleFilled);
-            ImGui::TextUnformatted(names[i].data(),
-                                   names[i].data() + names[i].size());
-            ImNodes::EndOutputAttribute();
-        }
+        format(title_buffer, "{} ({})", ed.nodes[node].name.sv(), type);
+        return title_buffer.sv();
     }
-}
 
-template<typename Dynamics>
-void show_node_values(project_editor& ed, Dynamics& dyn) noexcept
-{
-    ImGui::PushID(0);
-    ImGui::PushItemWidth(120.0f);
-    show_dynamics_values(ed, dyn);
-    ImGui::PopItemWidth();
-    ImGui::PopID();
-}
+    u32 input_count(const u32 node) noexcept
+    {
+        return input_port_count(mdl(node));
+    }
 
-void generic_simulation_editor::show_nodes(application&    app,
-                                           project_editor& pj_ed) noexcept
-{
-    for (sz i = 0, e = nodes.size(); i != e; ++i) {
-        if (auto* mdl = pj_ed.pj.sim.models.try_to_get(nodes[i].mdl)) {
-            ImNodes::BeginNode(to_signed(get_index(nodes[i].mdl)));
-            ImNodes::BeginNodeTitleBar();
+    u32 output_count(const u32 node) noexcept
+    {
+        return output_port_count(mdl(node));
+    }
 
-            if (show_identifiers and not nodes[i].name.empty()) {
-                ImGui::TextFormat("{}\n{}",
-                                  nodes[i].name.c_str(),
-                                  dynamics_type_names[ordinal(mdl->type)]);
-            } else {
-                ImGui::TextUnformatted(dynamics_type_names[ordinal(mdl->type)]);
+    std::string_view input_name(const u32 node, const u32 port) noexcept
+    {
+        return input_port_name(mdl(node), port);
+    }
+
+    std::string_view output_name(const u32 node, const u32 port) noexcept
+    {
+        return output_port_name(mdl(node), port);
+    }
+
+    void content(const u32 node) noexcept
+    {
+        auto& m = mdl(node);
+
+        dispatch(m, [&]<typename Dynamics>(Dynamics& dyn) {
+            if (ed.show_internal_values) {
+                ImGui::PushID(0);
+                ImGui::PushItemWidth(120.0f);
+                show_dynamics_values(app, pj_ed, dyn);
+                ImGui::PopItemWidth();
+                ImGui::PopID();
             }
 
-            ImNodes::EndNodeTitleBar();
-
-            const auto mdl_id = nodes[i].mdl;
-
-            dispatch(*mdl, [&]<typename Dynamics>(Dynamics& dyn) {
-                if constexpr (std::is_same_v<std::decay_t<Dynamics>,
-                                             simulation_wrapper>) {
-                    show_simulation_wrapper_input_attribute(app, dyn, mdl_id);
-                } else {
-                    show_input_attribute(dyn, mdl_id);
-                }
-
-                if (show_internal_values) {
-                    ImGui::PushID(0);
-                    ImGui::PushItemWidth(120.0f);
-                    show_dynamics_values(app, pj_ed, dyn);
-                    ImGui::PopItemWidth();
-                    ImGui::PopID();
-                }
-
-                if (show_parameter_values and can_edit_parameters) {
-                    ImGui::PushID(1);
-                    ImGui::PushItemWidth(120.0f);
-                    show_parameter_editor(app,
-                                          pj_ed.pj.sim.srcs,
-                                          mdl->type,
-                                          pj_ed.pj.sim.parameters[get_index(
-                                            pj_ed.pj.sim.models.get_id(mdl))]);
-                    ImGui::PopItemWidth();
-                    ImGui::PopID();
-                }
-
-                if constexpr (std::is_same_v<Dynamics, simulation_wrapper>) {
-                    show_simulation_wrapper_output_attribute(app, dyn, mdl_id);
-                } else {
-                    show_output_attribute(dyn, mdl_id);
-                }
-            });
-            ImNodes::EndNode();
-        }
+            if (ed.show_parameter_values and ed.can_edit_parameters) {
+                ImGui::PushID(1);
+                ImGui::PushItemWidth(120.0f);
+                show_parameter_editor(
+                  app, pj_ed.pj.sim.srcs, m.type,
+                  pj_ed.pj.sim.parameters[get_index(ed.nodes[node].mdl)]);
+                ImGui::PopItemWidth();
+                ImGui::PopID();
+            }
+        });
     }
-}
 
-void generic_simulation_editor::show_links() noexcept
-{
-    for (sz i = 0, e = links.size(); i != e; ++i) {
-        ImNodes::Link(static_cast<int>(i), links[i].out, links[i].in);
+    template<typename Fn>
+    void for_each_link(Fn&& fn) noexcept
+    {
+        for (const auto& l : ed.links)
+            fn(l.out_node, l.out_port, l.in_node, l.in_port);
     }
-}
-
-generic_simulation_editor::generic_simulation_editor() noexcept
-{
-    context = ImNodes::EditorContextCreate();
-    ImNodes::PushAttributeFlag(
-      ImNodesAttributeFlags_EnableLinkDetachWithDragClick);
-
-    ImNodesIO& io                           = ImNodes::GetIO();
-    io.LinkDetachWithModifierClick.Modifier = &ImGui::GetIO().KeyCtrl;
-    io.MultipleSelectModifier.Modifier      = &ImGui::GetIO().KeyCtrl;
-
-    ImNodesStyle& style = ImNodes::GetStyle();
-    style.Flags |=
-      ImNodesStyleFlags_GridLinesPrimary | ImNodesStyleFlags_GridSnapping;
-}
-
-generic_simulation_editor::~generic_simulation_editor() noexcept
-{
-    if (context) {
-        ImNodes::EditorContextSet(context);
-        ImNodes::PopAttributeFlag();
-        ImNodes::EditorContextFree(context);
-    }
-}
+};
 
 void generic_simulation_editor::init(application&     app,
                                      project_editor&  pj_ed,
@@ -1535,84 +1190,65 @@ void generic_simulation_editor::init(application&     app,
                                      const component& /*compo*/,
                                      const generic_component& /*gen*/) noexcept
 {
-    enable_show = false;
-
-    app.add_gui_task([&]() {
-        nodes_2nd.clear();
-        links_2nd.clear();
-
-        build_nodes(pj_ed.pj.sim, tn, nodes_2nd);
-        build_links(pj_ed.pj.sim, tn, nodes_2nd, links_2nd);
-
-        if (std::unique_lock lock(mutex); lock.owns_lock()) {
-            std::swap(links, links_2nd);
-            std::swap(nodes, nodes_2nd);
-        }
-
-        current     = pj_ed.pj.tree_nodes.get_id(tn);
-        enable_show = true;
-        rebuild_wip = false;
-    });
+    start_init_task(app, pj_ed, pj_ed.pj.tree_nodes.get_id(tn));
 }
 
 void generic_simulation_editor::init(application&    app,
                                      project_editor& pj_ed) noexcept
 {
-    enable_show = false;
-
-    app.add_gui_task([&]() {
-        nodes_2nd.clear();
-        links_2nd.clear();
-
-        build_flat_nodes(pj_ed, pj_ed.pj.sim, nodes_2nd);
-        build_flat_links(pj_ed.pj.sim, nodes_2nd, links_2nd);
-
-        if (std::unique_lock lock(mutex); lock.owns_lock()) {
-            std::swap(links, links_2nd);
-            std::swap(nodes, nodes_2nd);
-        }
-
-        current     = undefined<tree_node_id>();
-        enable_show = true;
-        rebuild_wip = false;
-    });
+    start_init_task(app, pj_ed, undefined<tree_node_id>());
 }
 
-void generic_simulation_editor::start_rebuild_task(
-  application&    app,
-  project_editor& pj_ed) noexcept
+void generic_simulation_editor::start_init_task(
+  application&       app,
+  project_editor&    pj_ed,
+  const tree_node_id tn_id) noexcept
 {
-    app.add_gui_task([&]() {
+    enable_show = false;
+
+    app.add_gui_task([&, tn_id]() {
         nodes_2nd.clear();
         links_2nd.clear();
 
-        if (auto* tn = pj_ed.pj.tree_nodes.try_to_get(current)) {
+        // The simulation can be rebuilt or edited by its task meanwhile: the
+        // tree node is searched again under the lock.
+        const auto structure = pj_ed.sim_player.player.lock_structure();
+
+        if (const auto* tn = pj_ed.pj.tree_nodes.try_to_get(tn_id))
             build_nodes(pj_ed.pj.sim, *tn, nodes_2nd);
-            build_links(pj_ed.pj.sim, *tn, nodes_2nd, links_2nd);
-        } else {
+        else
             build_flat_nodes(pj_ed, pj_ed.pj.sim, nodes_2nd);
-            build_flat_links(pj_ed.pj.sim, nodes_2nd, links_2nd);
-        }
 
-        if (std::unique_lock lock(mutex); lock.owns_lock()) {
-            std::swap(links, links_2nd);
-            std::swap(nodes, nodes_2nd);
-        }
+        build_links(pj_ed.pj.sim, std::span(nodes_2nd.data(), nodes_2nd.size()),
+                    links_2nd);
 
+        const auto count = pj_ed.sim_player.player.edit_count();
+
+        std::unique_lock lock(mutex);
+        std::swap(links, links_2nd);
+        std::swap(nodes, nodes_2nd);
+        current     = tn_id;
+        edit_count  = count;
+        need_reset  = true;
         enable_show = true;
         rebuild_wip = false;
     });
 }
 
-void generic_simulation_editor::reinit(application&    app,
-                                       project_editor& pj_ed) noexcept
+void generic_simulation_editor::rebuild(const project_editor& pj_ed) noexcept
 {
-    if (rebuild_wip)
-        return;
+    nodes.clear();
+    links.clear();
 
-    rebuild_wip = true;
-    enable_show = false;
-    start_rebuild_task(app, pj_ed);
+    if (auto* tn = pj_ed.pj.tree_nodes.try_to_get(current))
+        build_nodes(pj_ed.pj.sim, *tn, nodes);
+    else
+        build_flat_nodes(pj_ed, pj_ed.pj.sim, nodes);
+
+    build_links(pj_ed.pj.sim, std::span(nodes.data(), nodes.size()), links);
+
+    edit_count = pj_ed.sim_player.player.edit_count();
+    editor.reset();
 }
 
 bool generic_simulation_editor::display(application&    app,
@@ -1622,73 +1258,41 @@ bool generic_simulation_editor::display(application&    app,
 
     if (std::unique_lock lock(mutex, std::try_to_lock); lock.owns_lock()) {
         if (enable_show) {
-            ImNodes::EditorContextSet(context);
-            ImNodes::BeginNodeEditor();
+            if (std::exchange(need_reset, false))
+                editor.reset();
 
-            const auto is_editor_hovered =
-              ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) and
-              ImNodes::IsEditorHovered();
+            // The commands applied since the last frame may have freed some
+            // models of the nodes. The frame holds the lock of the structure:
+            // the simulation does not change during the rebuild.
+            if (pj_ed.sim_player.player.edit_count() != edit_count)
+                rebuild(pj_ed);
 
-            if (automatic_layout_iteration > 0) {
-                compute_automatic_layout();
-                --automatic_layout_iteration;
-            }
+            place_new_nodes(pj_ed);
 
-            show_nodes(app, pj_ed);
-            show_links();
+            auto g = graph{
+                .app = app, .pj_ed = pj_ed, .ed = *this, .title_buffer = {}
+            };
+            const auto ev = editor.show("simulation-graph", g);
 
-            auto click_pos = ImGui::GetMousePosOnOpeningCurrentPopup();
-            changes += show_menu(pj_ed, click_pos);
+            changes += show_menu(pj_ed,
+                                 ImGui::GetMousePosOnOpeningCurrentPopup());
 
-            if (show_minimap)
-                ImNodes::MiniMap(0.2f, ImNodesMiniMapLocation_BottomLeft);
+            if (pj_ed.can_edit()) {
+                if (ev.link_created)
+                    changes += connect(pj_ed, nodes, current, *ev.link_created);
 
-            ImNodes::EndNodeEditor();
+                if (ev.delete_selection) {
+                    changes += free_model(pj_ed, nodes, current,
+                                          editor.selected_nodes());
+                    changes += disconnect(pj_ed, nodes, current, links,
+                                          editor.selected_links());
+                    editor.clear_selection();
+                }
 
-            int start = 0, end = 0;
-            if (ImNodes::IsLinkCreated(&start, &end) and pj_ed.can_edit())
-                changes += connect(pj_ed, current, start, end);
-
-            auto num_selected_links = ImNodes::NumSelectedLinks();
-            auto num_selected_nodes = ImNodes::NumSelectedNodes();
-
-            if (num_selected_nodes == 0) {
-                selected_nodes.clear();
-                ImNodes::ClearNodeSelection();
-            }
-
-            if (num_selected_links == 0) {
-                selected_links.clear();
-                ImNodes::ClearLinkSelection();
-            }
-
-            if (is_editor_hovered and not ImGui::IsAnyItemHovered()) {
-                if (num_selected_nodes > 0) {
-                    selected_nodes.resize(num_selected_nodes, -1);
-                    ImNodes::GetSelectedNodes(selected_nodes.begin());
-
-                    if (ImGui::IsKeyReleased(ImGuiKey_Delete)) {
-                        changes += free_model(pj_ed, current, selected_nodes);
-                        selected_nodes.clear();
-                        ++changes;
-                        ImNodes::ClearNodeSelection();
-                    } else if (ImGui::IsKeyReleased(ImGuiKey_D)) {
-                        changes += copy(pj_ed, nodes, current, selected_nodes);
-                        selected_nodes.clear();
-                        ImNodes::ClearNodeSelection();
-                    }
-                } else if (num_selected_links > 0) {
-                    selected_links.resize(num_selected_links);
-
-                    if (ImGui::IsKeyReleased(ImGuiKey_Delete)) {
-                        std::fill_n(
-                          selected_links.begin(), selected_links.size(), -1);
-                        ImNodes::GetSelectedLinks(selected_links.begin());
-                        changes +=
-                          disconnect(pj_ed, current, links, selected_links);
-                        selected_links.clear();
-                        ImNodes::ClearLinkSelection();
-                    }
+                if (ev.duplicate_selection) {
+                    changes += copy(pj_ed, nodes, current,
+                                    editor.selected_nodes());
+                    editor.clear_selection();
                 }
             }
         }

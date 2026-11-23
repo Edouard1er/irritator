@@ -9,8 +9,10 @@
 #include <irritator/error.hpp>
 #include <irritator/macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -345,12 +347,6 @@ constexpr bool any_equal(const T& s, Args&&... args) noexcept
     return ((s == std::forward<Args>(args)) || ... || false);
 }
 
-template<class T, class... Rest>
-constexpr bool all_same_type() noexcept
-{
-    return (std::is_same_v<T, Rest> && ...);
-}
-
 /** Checks if the given two numbers are relatively equal according to a relative
  * epsilon. */
 template<std::floating_point Real>
@@ -414,11 +410,11 @@ enum class file_type : u8 {
     data_file,         // .csv
     project_file,      // .pirt
     irb_file,          // .irb
-    irt_manifest_file, // .manifest.json
+    irt_manifest_file, // .manifest.jsonl
 };
 
 constexpr static inline std::string_view file_type_names[] = {
-    "", ".irt", ".dot", ".desc", ".csv", ".pirt", ".irb", ".manifest.json"
+    "", ".irt", ".dot", ".desc", ".csv", ".pirt", ".irb", ".manifest.jsonl"
 };
 
 /// Capacity: 1024 is generous on Linux/macOS/Android (typical PATH_MAX).
@@ -445,9 +441,6 @@ public:
     /// be undefined_file -- there is no string to append for it.
     void replace_extension(const file_type type) noexcept;
 
-    std::string_view filename() const noexcept;
-    std::string_view extension() const noexcept;
-
     /// Get the parent directory of the path.
     path parent_directory() const noexcept;
 
@@ -456,8 +449,6 @@ public:
     /// Windows interprets the narrow string according to the system code
     /// page, not necessarily as UTF-8.
     std::filesystem::path to_std_path() const noexcept;
-    std::ifstream         open_std_ifstream() const noexcept;
-    std::ofstream         open_std_ofstream() const noexcept;
     std_file              open_std_file(const char* mode) const noexcept;
 };
 
@@ -490,17 +481,7 @@ struct time_domain<time> {
     {
         return std::fpclassify(t) == FP_INFINITE;
     }
-
-    static bool is_zero(time t) noexcept
-    {
-        return std::fpclassify(t) == FP_ZERO;
-    }
 };
-
-inline bool is_infinity(const std::floating_point auto x) noexcept
-{
-    return std::fpclassify(x) == FP_INFINITE;
-}
 
 inline bool is_zero(const std::floating_point auto x) noexcept
 {
@@ -722,7 +703,7 @@ public:
     static constexpr u32 default_length = 8u; // default length of the buffer.
 
     name_str   name;
-    chunk_type buffer;
+    chunk_type buffer{};
     u32        length = default_length;
 
     constant_source() noexcept = default;
@@ -742,19 +723,25 @@ public:
 
 //! Use a file with a set of double real in binary mode (little endian) to
 //! produce external data. This external source can be shared between @c
-//! max_clients sources. Each client read a @c external_source_chunk_size
-//! real of the set.
+//! max_clients sources. The file is cut in chunks of @c
+//! external_source_chunk_size reals: the client @c i reads the chunks @c i, @c
+//! i + max_clients, @c i + 2 * max_clients etc.
 //!
 //! source::chunk_id[0] is used to store the client identifier.
-//! source::chunk_id[1] is used to store the current position in the file.
+//! source::chunk_id[1] is used to store the position (in real) of the chunk
+//! currently in the buffer of the client.
 class binary_file_source
 {
 public:
     name_str           name;
     vector<chunk_type> buffers; // buffer, size is defined by max_clients
     vector<u64>        offsets; // offset, size is defined by max_clients
-    u32                max_clients = 1; // number of source max (must be >= 1).
-    u64                max_reals   = 0; // number of real in the file.
+
+    //! Number of clients. If zero, @c init() computes the number of clients
+    //! from the size of the file (one client by chunk with a maximum of @c
+    //! default_max_client_number).
+    u32 max_clients = 1;
+    u64 max_reals   = 0; // number of real in the file.
 
     path          file_path;
     std::ifstream ifs;
@@ -772,7 +759,6 @@ public:
     void swap(binary_file_source& other) noexcept;
 
     status init() noexcept;
-    void   finalize() noexcept;
     status init(source& src, source_data& data) noexcept;
     status update(source& src, source_data& data) noexcept;
     status restore(source& src, source_data& data) noexcept;
@@ -786,14 +772,20 @@ public:
 //! Use a file with a set of double real in ascii text file to produce
 //! external data. This external source can not be shared between @c source.
 //!
-//! source::chunk_id[0] is used to store the current position in the file to
-//! simplify restore operation.
+//! source::chunk_id[0] is used to store the position in the file of the chunk
+//! currently in the buffer to simplify restore operation. The last chunk of
+//! the file can be incomplete.
 class text_file_source
 {
 public:
+    //! The @c offset value when no chunk is read.
+    static constexpr u64 no_chunk = ~static_cast<u64>(0);
+
     name_str   name;
-    chunk_type buffer;
-    u64        offset = 0u;
+    chunk_type buffer{};
+    u64        offset = no_chunk; // position in the file of the current chunk.
+    u32        length = 0u;       // number of real in the current chunk.
+    bool       in_use = false;    // a source already uses this text file.
 
     path          file_path;
     std::ifstream ifs;
@@ -809,13 +801,15 @@ public:
     void swap(text_file_source& other) noexcept;
 
     status init() noexcept;
-    void   finalize() noexcept;
     status init(source& src, source_data& data) noexcept;
     status update(source& src, source_data& data) noexcept;
     status restore(source& src, source_data& data) noexcept;
     status finalize(source& src, source_data& data) noexcept;
 
-    bool read_chunk() noexcept;
+    //! Read at most @c external_source_chunk_size reals at the current
+    //! position of the stream.
+    //! @return The number of reals read.
+    u32 read_chunk() noexcept;
 };
 
 //! Use a prng to produce set of double real. This external source can be
@@ -847,8 +841,13 @@ public:
 
     status init() noexcept;
     void   finalize() noexcept;
+    //! Initialize the PRNG state of @a data from the seed of the
+    //! simulation, the identifier of the model and the @a stream number (to
+    //! get independent sequences for the sources of the same model) and
+    //! fill the buffer.
     status init(const u64      sim_seed,
                 const model_id mdl_id,
+                const u64      stream,
                 source&        src,
                 source_data&   data) noexcept;
     status update(source& src, source_data& data) noexcept;
@@ -932,19 +931,19 @@ public:
 };
 
 struct external_source_reserve_definition {
-    constrained_value<int, 0, INT_MAX> constant_nb{};
-    constrained_value<int, 0, INT_MAX> text_file_nb{};
-    constrained_value<int, 0, INT_MAX> binary_file_nb{};
-    constrained_value<int, 0, INT_MAX> random_nb{};
-    constrained_value<int, 8, INT_MAX> binary_file_max_client{};
-    constrained_value<int, 8, INT_MAX> random_max_client{};
+    clamped_value<int, 0, INT_MAX> constant_nb{};
+    clamped_value<int, 0, INT_MAX> text_file_nb{};
+    clamped_value<int, 0, INT_MAX> binary_file_nb{};
+    clamped_value<int, 0, INT_MAX> random_nb{};
+    clamped_value<int, 8, INT_MAX> binary_file_max_client{};
+    clamped_value<int, 8, INT_MAX> random_max_client{};
 };
 
 struct simulation_reserve_definition {
-    constrained_value<int, 512, INT_MAX>  models{};
-    constrained_value<int, 1024, INT_MAX> connections{};
-    constrained_value<int, 16, INT_MAX>   hsms{};
-    constrained_value<int, 256, INT_MAX>  dated_messages{};
+    clamped_value<int, 512, INT_MAX>  models{};
+    clamped_value<int, 1024, INT_MAX> connections{};
+    clamped_value<int, 16, INT_MAX>   hsms{};
+    clamped_value<int, 256, INT_MAX>  dated_messages{};
 };
 
 class external_source
@@ -972,16 +971,15 @@ public:
     //! binary_file_source etc.).
     status prepare() noexcept;
 
-    //! Call the @c finalize function for all sources (@c constant_source,
-    //! @c binary_file_source etc.). Usefull to close opened files.
-    void finalize() noexcept;
-
     //! To be used in model declaration to initialize a source instance
-    //! according to the type of the external source.
+    //! according to the type of the external source. The @a stream number
+    //! must be different for each source of a model: it gives independent
+    //! random sequences.
     template<typename Dynamics>
     inline status initialize_source(Dynamics&    dyn,
                                     source&      src,
-                                    source_data& data) noexcept;
+                                    source_data& data,
+                                    u64          stream = 0) noexcept;
 
     //! To be used in model declaration to get a new real from a source instance
     //! according to the type of the external source.
@@ -1012,7 +1010,6 @@ enum class dynamics_type : u8 {
     qss1_max_hold,
     qss1_min_hold,
     qss1_flipflop,
-    qss1_filter,
     qss1_power,
     qss1_square,
     qss1_sum_2,
@@ -1022,7 +1019,6 @@ enum class dynamics_type : u8 {
     qss1_wsum_3,
     qss1_wsum_4,
     qss1_inverse,
-    qss1_integer,
     qss1_compare,
     qss1_gain,
     qss1_sin,
@@ -1042,6 +1038,9 @@ enum class dynamics_type : u8 {
     qss1_hysteresis,
     qss1_maximum,
     qss1_minimum,
+    qss1_priority_2,
+    qss1_priority_3,
+    qss1_priority_4,
     qss1_saturation,
     qss1_sigmoid,
     qss1_sign,
@@ -1056,7 +1055,6 @@ enum class dynamics_type : u8 {
     qss2_max_hold,
     qss2_min_hold,
     qss2_flipflop,
-    qss2_filter,
     qss2_power,
     qss2_square,
     qss2_sum_2,
@@ -1066,7 +1064,6 @@ enum class dynamics_type : u8 {
     qss2_wsum_3,
     qss2_wsum_4,
     qss2_inverse,
-    qss2_integer,
     qss2_compare,
     qss2_gain,
     qss2_sin,
@@ -1086,6 +1083,9 @@ enum class dynamics_type : u8 {
     qss2_hysteresis,
     qss2_maximum,
     qss2_minimum,
+    qss2_priority_2,
+    qss2_priority_3,
+    qss2_priority_4,
     qss2_saturation,
     qss2_sigmoid,
     qss2_sign,
@@ -1100,7 +1100,6 @@ enum class dynamics_type : u8 {
     qss3_max_hold,
     qss3_min_hold,
     qss3_flipflop,
-    qss3_filter,
     qss3_power,
     qss3_square,
     qss3_sum_2,
@@ -1110,7 +1109,6 @@ enum class dynamics_type : u8 {
     qss3_wsum_3,
     qss3_wsum_4,
     qss3_inverse,
-    qss3_integer,
     qss3_compare,
     qss3_gain,
     qss3_sin,
@@ -1130,6 +1128,9 @@ enum class dynamics_type : u8 {
     qss3_hysteresis,
     qss3_maximum,
     qss3_minimum,
+    qss3_priority_2,
+    qss3_priority_3,
+    qss3_priority_4,
     qss3_saturation,
     qss3_sigmoid,
     qss3_sign,
@@ -1169,6 +1170,23 @@ constexpr int dynamics_type_size() noexcept { return dynamics_type_last() + 1; }
  *
  ****************************************************************************/
 
+/** What a queue does with a new message when its fifo is full. */
+enum class fifo_overflow : u8 {
+    grow,          /**< Doubles the capacity of the fifo. */
+    error,         /**< Fails with @c simulation_errc::queue_full. */
+    replace_first, /**< Removes the message which leaves first. */
+    replace_last,  /**< Removes the message which leaves last. */
+    forget         /**< Forgets the new message. */
+};
+
+inline constexpr std::string_view fifo_overflow_names[] = {
+    "grow", "error", "replace-first", "replace-last", "forget"
+};
+
+/** The number of messages of a fifo: its initial size with @c
+ * fifo_overflow::grow, its maximal size otherwise. */
+inline constexpr i32 default_fifo_capacity = 32;
+
 /**
    Stores dynamics model parameters for each @c irt::dynamics.
 
@@ -1201,13 +1219,11 @@ struct parameter {
     parameter& set_cross(real threshold,
                          real up_value   = one,
                          real down_value = one) noexcept;
-    parameter& set_filter(real lower_bound, real upper_bound) noexcept;
     parameter& set_compare(real equal, real not_equal) noexcept;
     parameter& set_gain(real k) noexcept;
 
     parameter& set_power(real expoonent) noexcept;
     parameter& set_integrator(real X, real dQ) noexcept;
-    parameter& set_integrator(real X) noexcept;
     parameter& set_time_func(real offset, real timestep, int type) noexcept;
     parameter& set_wsum2(real coeff1, real coeff2) noexcept;
     parameter& set_wsum3(real coeff1, real coeff2, real coeff3) noexcept;
@@ -1223,10 +1239,12 @@ struct parameter {
                                real timer) noexcept;
 
     parameter& set_queue(real sigma) noexcept;
-    parameter& set_priority_queue(real sigma) noexcept;
+
+    /** The fifo of a queue, a dynamic queue or a priority queue. A @a
+     * capacity lower than 1 is replaced by @c default_fifo_capacity. */
+    parameter& set_queue_fifo(fifo_overflow overflow, i32 capacity) noexcept;
 
     parameter& set_generator_ta(real sigma) noexcept;
-    parameter& set_generator_value(real value) noexcept;
     parameter& set_generator_ta(const source_type   type,
                                 const source_any_id id) noexcept;
     parameter& set_generator_value(const source_type   type,
@@ -1244,8 +1262,6 @@ struct parameter {
     parameter& set_dynamic_queue_ta(
       const external_source_definition::id id) noexcept;
     parameter& set_priority_queue_ta(
-      const external_source_definition::id id) noexcept;
-    parameter& set_hsm_wrapper_value(
       const external_source_definition::id id) noexcept;
 
     std::array<real, 4> reals{};
@@ -1447,9 +1463,7 @@ private:
 class observer
 {
 private:
-    using history_type = shared_buffer<
-      vector<resampled_sample>,
-      append_only_merge_policy<vector<resampled_sample>>>;
+    friend struct binary_access;
 
 public:
     static inline constexpr auto raw_buffer_size = 256;
@@ -1457,6 +1471,8 @@ public:
     using raw_buffer_type = circular_buffer<raw_sample, raw_buffer_size>;
 
     observer(const model_id mdl) noexcept;
+    observer(const observer& other) noexcept;
+    observer& operator=(const observer&) = delete;
 
     /// Push a raw sample. Called from the simulation task for each state
     /// change. O(1), no resampling logic here anymore.
@@ -1466,63 +1482,23 @@ public:
     /// occupancy threshold was crossed, ok otherwise.
     buffer_status observe(const raw_sample& s) noexcept;
 
-    /// Reset the circular_buffer and the history.
+    /// Reset the circular_buffer and the last value.
     void reset() noexcept;
 
     /// Retrieves the underlying model identifier.
     model_id model() const noexcept { return m_model; }
 
+    /// The value of the last observation, readable from any thread: the views
+    /// that only show the current state (grids, graphs) need no series.
+    real last_value() const noexcept
+    {
+        return m_last_value.load(std::memory_order_relaxed);
+    }
+
     /// Designated single reader: the copy task's resampler for this
     /// model. Justified now (unlike before) because a real, dedicated
     /// consumer exists on the other side of the SPSC contract.
     raw_buffer_type& raw_buffer() noexcept { return m_raw; }
-
-    /// Current occupancy of raw_buffer, queryable at any time by the
-    /// copy task, not only in reaction to observe()'s return value.
-    buffer_status raw_status() const noexcept { return raw_fill_status(); }
-
-    template<typename Fn, typename... Args>
-    auto read_history(Fn&& fn, Args&&... args) const noexcept
-      -> decltype(std::invoke(
-        std::forward<Fn>(fn),
-        std::declval<const typename history_type::value_type&>(),
-        std::declval<std::uint64_t>(),
-        std::forward<Args>(args)...))
-    {
-        if constexpr (std::is_void_v<decltype(std::invoke(
-                        std::forward<Fn>(fn),
-                        std::declval<
-                          const typename history_type::value_type&>(),
-                        std::declval<std::uint64_t>(),
-                        std::forward<Args>(args)...))>) {
-            m_history.read([&](const auto& history, const auto version) {
-                std::invoke(std::forward<Fn>(fn), history, version,
-                            std::forward<Args>(args)...);
-            });
-        } else {
-            return m_history.read([&](const auto& history, const auto version) {
-                return std::invoke(std::forward<Fn>(fn), history, version,
-                                   std::forward<Args>(args)...);
-            });
-        }
-    }
-
-    /// Only @c resampler can call the write_history function.
-    class write_key
-    {
-        friend class resampler;
-
-        write_key() noexcept = default;
-    };
-
-    /// Used exclusively by this model's resampler (copy task side) to
-    /// publish a batch of resampled points in a single write() -- never
-    /// called from the simulation thread.
-    template<typename Fn>
-    void write_history(Fn&& fn, write_key) noexcept
-    {
-        m_history.write(std::forward<Fn>(fn));
-    }
 
 private:
     // Alert threshold expressed as a fraction (Num/Denum) of raw_buffer
@@ -1539,12 +1515,11 @@ private:
                                     : buffer_status::ok;
     }
 
-    model_id m_model  = undefined<model_id>();
-    real     m_last_t = -std::numeric_limits<real>::infinity();
+    model_id          m_model  = undefined<model_id>();
+    real              m_last_t = -std::numeric_limits<real>::infinity();
+    std::atomic<real> m_last_value{ zero };
 
     circular_buffer<raw_sample, raw_buffer_size> m_raw;
-
-    history_type m_history;
 };
 
 /// Resampler -- owned exclusively by the copy task, ONE instance per
@@ -1552,9 +1527,15 @@ private:
 /// state that used to live in observer::observe()/commit_pending(): the
 /// pending point, the interpolation anchor, the resampling grid position,
 /// and the dedup state. Never touched by the simulation thread.
+///
+/// The samples read and the points produced stay in the resampler until a
+/// consumer takes them (@c simulation::drain_observations()): the simulation
+/// keeps no series, each consumer stores what it needs.
 class resampler
 {
 public:
+    friend struct binary_access;
+
     resampler() noexcept;
     resampler(const real dt, const interpolate_type order) noexcept;
 
@@ -1562,19 +1543,65 @@ public:
     /// global simulation step) for this model. Drains everything currently
     /// available in raw_buffer, confirms the pending point once `now` has
     /// passed it, and -- if `now` is +infinity -- finalizes the series
-    /// (equivalent of the former flush(+infinity)). Publishes any newly
-    /// resampled points to obs.write_history() in a single batched call.
+    /// (equivalent of the former flush(+infinity)).
     void tick(observer& obs, const real now) noexcept;
+
+    /// Same as the other @c tick() with samples read elsewhere (an @c .irb
+    /// file).
+    void tick(std::span<const raw_sample> samples, const real now) noexcept;
+
+    /// Forgets the pending point, the anchor and the outputs (the series is
+    /// restarted); keeps the parameters (dt, interpolation). Use it when the
+    /// simulation is initialized again.
+    void reset() noexcept;
+
+    real             time_step() const noexcept { return m_dt; }
+    interpolate_type interpolation() const noexcept { return m_interp.order(); }
+
+    /// The raw samples read since the last @c clear_outputs().
+    std::span<const raw_sample> raw_output() const noexcept
+    {
+        return std::span(m_raw_batch.data(), m_raw_batch.size());
+    }
+
+    /// The resampled points produced since the last @c clear_outputs().
+    std::span<const resampled_sample> output() const noexcept
+    {
+        return std::span(m_batch.data(), m_batch.size());
+    }
+
+    /// Position of the first sample of @c raw_output() in the whole series of
+    /// raw samples. A rewind restores an earlier position: the consumer
+    /// replaces what it has from this position.
+    u64 raw_output_index() const noexcept
+    {
+        return m_raw_count - static_cast<u64>(m_raw_batch.size());
+    }
+
+    /// Position of the first point of @c output() in the whole resampled
+    /// series, see @c raw_output_index().
+    u64 output_index() const noexcept
+    {
+        return m_point_count - static_cast<u64>(m_batch.size());
+    }
+
+    /// Number of points of the whole resampled series produced so far.
+    u64 point_count() const noexcept { return m_point_count; }
+
+    void clear_outputs() noexcept;
 
 private:
     void ingest(const raw_sample& s) noexcept;
     void commit_pending() noexcept;
     void finalize() noexcept;
+    void advance(const real now) noexcept;
 
     void push_resampled(double t, double value) noexcept;
-    void flush_batch(observer& obs) noexcept;
 
     vector<resampled_sample> m_batch;
+    vector<raw_sample>       m_raw_batch;
+    u64                      m_point_count = 0;
+    u64                      m_raw_count   = 0;
     real                     m_dt;
     real                     m_next_sample_time  = 0.0;
     real                     m_last_pushed_value = 0.0;
@@ -1613,6 +1640,8 @@ public:
     };
 
 private:
+    friend struct binary_access;
+
     node* nodes{ nullptr };
     u32   m_size{ 0 };
     u32   max_size{ 0 };
@@ -1628,7 +1657,7 @@ public:
     heap() noexcept = default;
 
     explicit constexpr heap(
-      constrained_value<int, 512, INT_MAX> pcapacity) noexcept;
+      clamped_value<int, 512, INT_MAX> pcapacity) noexcept;
 
     constexpr heap(const heap& other) noexcept;
     constexpr heap(heap&& other) noexcept;
@@ -1667,18 +1696,13 @@ public:
     constexpr void   decrease(time tn, handle elem) noexcept;
     constexpr void   increase(time tn, handle elem) noexcept;
 
-    constexpr time tn(handle elem) noexcept;
-
     constexpr unsigned size() const noexcept;
-    constexpr int      ssize() const noexcept;
 
     constexpr bool full() const noexcept;
     constexpr bool empty() const noexcept;
     constexpr bool is_in_tree(handle h) const noexcept;
 
     constexpr handle top() const noexcept;
-
-    constexpr void merge(heap& src) noexcept;
 
     constexpr const node& operator[](handle h) const noexcept;
     constexpr node&       operator[](handle h) noexcept;
@@ -1719,6 +1743,8 @@ public:
     using allocator_type = A;
 
 private:
+    friend struct binary_access;
+
     heap<A> m_heap;
 
 public:
@@ -1726,7 +1752,7 @@ public:
     using handle              = u32;
 
     scheduller() noexcept = default;
-    explicit scheduller(constrained_value<int, 512, INT_MAX> capacity) noexcept;
+    explicit scheduller(clamped_value<int, 512, INT_MAX> capacity) noexcept;
 
     bool reserve(std::integral auto new_capacity) noexcept;
     void clear() noexcept;
@@ -1772,8 +1798,9 @@ public:
     void decrease(model& mdl, time tn) noexcept;
 
     /**
-       Remove all @c node with the same @c tn from the tree of the heap. The
-       @c node can be reuse with the @c reintegrate() function.
+       Remove all @c node with the same @c tn from the tree of the heap and
+       append their models to @c out. The @c node can be reuse with the @c
+       reintegrate() function.
      */
     void pop(vector<model_id>& out) noexcept;
 
@@ -1791,9 +1818,6 @@ public:
     bool is_in_tree(handle h) const noexcept;
 
     bool empty() const noexcept;
-
-    inline unsigned size() const noexcept;
-    int             ssize() const noexcept;
 };
 
 /// Stores two simulation time values, the begin `]-oo, +oo[` and the end
@@ -1810,9 +1834,6 @@ public:
     constexpr void set_bound(const double begin_, const double end_) noexcept;
     constexpr void set_duration(const double begin_,
                                 const double end_) noexcept;
-
-    /// Restore @c begin and @c end to @c 0 and @c 100 as in default ctor.
-    constexpr void clear() noexcept;
 
     /// @return true if @c value if the value exceeds the @c m_end value.
     constexpr bool expired(const double value) const noexcept;
@@ -1854,23 +1875,12 @@ struct input_port {
 };
 
 struct output_port {
-    message msg; /**< A single message.Multiple call to @c send_message override
-                    previous message. */
-
     small_vector<node, 4> connections; /**< A list of connected nodes. */
 
     block_node_id next = undefined<block_node_id>(); /**< The next block
                                                 node in the linked
                                                 list of output port
                                                 connections. */
-
-    /** Call the @c Function for each node from the @c output_port::connection
-     * and/or from the @c output_port::next linked list. */
-    template<typename Function, typename... Args>
-    void for_each(const data_array<model, model_id>&           models,
-                  const data_array<block_node, block_node_id>& nodes,
-                  Function&&                                   fn,
-                  Args&&... args) const noexcept;
 
     /** Call the @c Function for each node from the @c output_port::connection
      * and/or from the @c output_port::next linked list. All nodes without valid
@@ -1884,42 +1894,68 @@ struct output_port {
                   Args&&... args) noexcept;
 };
 
-using observer_name           = small_string<32>;
-using observer_history_cursor = u64;
+using observer_name  = small_string<32>;
 using observers_type = id_data_array<observer,
                                      observer_id,
                                      allocator<new_delete_memory_resource>,
                                      observer_name,
-                                     observer_history_cursor,
                                      resampler>;
 
-/// Stores a copy main data simulation.
-///
-/// This class is used to dump a snapshot of the simulation keeping all
-/// identifiants.
-struct simulation_snapshot {
-
-    simulation_snapshot() noexcept = default;
-
-    explicit simulation_snapshot(const simulation& sim) noexcept;
-
-    /// Reuse the allocated snapshot and copy simulation data
-    simulation_snapshot& operator=(const simulation& sim) noexcept;
-
-    data_array<model, model_id>                              models;
-    observers_type                                           observers;
-    data_array<block_node, block_node_id>                    nodes;
-    data_array<output_port, output_port_id>                  output_ports;
-    data_array<ring_buffer<dated_message>, dated_message_id> dated_messages;
-    scheduller<allocator<new_delete_memory_resource>>        sched;
-    time                                                     t{};
+/// The outputs of the resampler of an observer, see
+/// @c simulation::drain_observations().
+struct observation_batch {
+    observer_id                       id;
+    const observer&                   obs;
+    const resampler&                  sampler;
+    std::span<const raw_sample>       raws;
+    std::span<const resampled_sample> points;
 };
 
+/// Receives the outputs of the resamplers, on the thread of the resamplers.
+/// Each consumer (file, curves...) keeps the part of the series it needs.
+class observation_sink
+{
+public:
+    virtual ~observation_sink() noexcept = default;
+
+    virtual status consume(const observation_batch& batch) noexcept = 0;
+
+    /// The resamplers of @c sim went back to an earlier state (a rewind, a
+    /// new start): the next outputs restart from their
+    /// @c resampler::output_index().
+    virtual void rewind(const simulation& sim) noexcept = 0;
+};
+
+/// The editions of a simulation that its player does again when it replays
+/// the steps (a rewind, a jump forward, a replay after a start): see @c
+/// simulation_player::set_edition_replay(). The owner of the editions (a
+/// journal of commands) keeps them with the step after which they were done.
+class edition_replay
+{
+public:
+    virtual ~edition_replay() noexcept = default;
+
+    /// The date of the first edition done after the step @c step, infinity if
+    /// there is none.
+    virtual time edition_time(u64 step) const noexcept = 0;
+
+    /// Applies again, in order, the editions done after the step @c step, the
+    /// clock of the simulation at the date of each one.
+    virtual status replay(u64 step) noexcept = 0;
+
+    /// Forgets the editions done after the steps greater than @c step: a new
+    /// edition replaces the future.
+    virtual void forget_after(u64 step) noexcept = 0;
+};
+
+/// The result of a selection computed from its observation trajectory. The
+/// direction of the optimization belongs to the objective: @c min_last and
+/// @c max_last both take the last observation value.
 enum class criteria_type {
-    min_last, //!< Min value for the last observation value (one real).
-    max_last, //!< Max value for the Last observation value (one real).
+    min_last, //!< Last observation value (one real).
+    max_last, //!< Last observation value (one real).
     min,      //!< Observation value with the lowest value (one real).
-    max,      //!< Observation value with the hightest value (one real).
+    max,      //!< Observation value with the highest value (one real).
 };
 
 enum class factor_type : u8 {
@@ -2037,11 +2073,6 @@ struct random_factor {
     /** Allocate and fill a new vector with random values according to the
      * random distribution and parameters. */
     vector<real> gen(std::span<u64, 6> key) const noexcept;
-
-    /** Fill a vector with random values according to the random distribution
-     * and parameters. */
-    std::span<real> gen(std::span<u64, 6> key,
-                        std::span<real>   values) const noexcept;
 };
 
 using simulation_factor = id_data_array<void,
@@ -2065,11 +2096,25 @@ using simulation_selection = id_data_array<
 
 struct embedded_simulation;
 
+/// An output of a watched model (see @c simulation::watch()) or, for a model
+/// without output port, a change of its watched value.
+struct watched_event {
+    time     t;
+    model_id mdl;
+    i32      port;  ///< The output port, -1 for a model without output port.
+    real     value; ///< The first real of the message, or the new value.
+};
+
 class simulation
 {
 public:
     vector<model_id>       immediate_models;
+
+    /** The models with a null time advance: they run at the next step
+     * without going through the scheduler. */
+    vector<model_id>       zero_ta_models;
     vector<output_port_id> active_output_ports;
+    vector<message>        active_output_messages;
     vector<message>        message_buffer;
     vector<parameter>      parameters;
     vector<observer_id>    immediate_observers;
@@ -2091,6 +2136,8 @@ public:
     time_limit limits;
 
 private:
+    friend struct binary_access;
+
     std::atomic<real> t = time_domain<time>::infinity;
 
     /**
@@ -2125,15 +2172,6 @@ public:
 
     simulation(const simulation& other) noexcept;
     simulation& operator=(const simulation& other) noexcept;
-
-    /// Assign all data from the @a snap snapshot to this simulation.
-    ///
-    /// The current simulation data are destroyed before assignment. Mainly used
-    /// to restore a state of previous simulation run.
-    ///
-    /// @param snap The snapshot to restore.
-    /// @return self.
-    simulation& operator=(const simulation_snapshot& snap) noexcept;
 
     /** Call the @C destroy function to free allocated memory */
     ~simulation() noexcept;
@@ -2170,10 +2208,6 @@ public:
     void destroy() noexcept;
 
     bool can_alloc(std::integral auto place) const noexcept;
-    bool can_alloc(dynamics_type type, std::integral auto place) const noexcept;
-
-    template<typename Dynamics>
-    bool can_alloc_dynamics(std::integral auto place) const noexcept;
 
     //! @brief cleanup simulation object
     //!
@@ -2203,13 +2237,46 @@ public:
     /// with @c dt time-step. The interpolate type is automatically detected.
     status observe(model& mdl, const time) noexcept;
 
-    /// Allocate a new observer for the model @c mdl and resample raw-sample
-    /// with @c dt time-step and for the interpolate_type @c type.
-    status observe(model& mdl,
-                   const time,
-                   const interpolate_type type) noexcept;
-
     void unobserve(model& mdl) noexcept;
+
+    /**
+     * The constant model @c id takes @c value and sends it in the next step,
+     * at the current date. Its next emission, if any, is replaced.
+     *
+     * @return @c simulation_errc::command_model_error if @c id is not a
+     * constant model, @c simulation_errc::constant_value_error if @c value is
+     * not finite.
+     */
+    status send_value(model_id id, real value) noexcept;
+
+    /**
+     * The outputs of the model @c id, or the changes of the watched value of
+     * a model without output port (a @c counter), are added to @c
+     * watched_events() during the steps. The unwatched models cost one test
+     * of an integer.
+     *
+     * The watch is a subscription of the consumer, not a state of the
+     * simulation: the snapshots do not save it and a rewind keeps it. A model
+     * freed is unwatched; a simulation built again must be watched again
+     * (@c unwatch_all()).
+     *
+     * @return @c simulation_errc::watch_model_error if the model does not
+     * exist or can not tell its changes.
+     */
+    status watch(model_id id) noexcept;
+    void   unwatch(model_id id) noexcept;
+    void   unwatch_all() noexcept;
+    bool   is_watched(model_id id) const noexcept;
+
+    /// The events of the watched models since the last @c
+    /// clear_watched_events(), in the order of the steps. Read and clear them
+    /// between two steps, from the thread of the simulation.
+    std::span<const watched_event> watched_events() const noexcept
+    {
+        return std::span(m_watched_events.data(), m_watched_events.size());
+    }
+
+    void clear_watched_events() noexcept { m_watched_events.clear(); }
 
     void deallocate(model_id id) noexcept;
 
@@ -2234,60 +2301,6 @@ public:
 
     status connect(output_port& port, model_id dst, int port_dst) noexcept;
     status connect(output_port_id& port, model_id dst, int port_dst) noexcept;
-
-    template<typename Function, typename... Args>
-    void for_each(output_port& port, Function&& fn, Args&&... args) noexcept
-    {
-        for (const auto& elem : port.connections)
-            if (auto* mdl = models.try_to_get(elem.model))
-                std::invoke(std::forward<Function>(fn), *mdl, elem.port_index,
-                            std::forward<Args>(args)...);
-
-        block_node* prev = nullptr;
-        for (auto* block = nodes.try_to_get(port.next); block;
-             block       = nodes.try_to_get(block->next)) {
-
-            for (auto it = block->nodes.begin(); it != block->nodes.end();) {
-                if (auto* mdl = models.try_to_get(it->model)) {
-                    std::invoke(std::forward<Function>(fn), *mdl,
-                                it->port_index, std::forward<Args>(args)...);
-                    ++it;
-                } else {
-                    block->nodes.swap_pop_back(it);
-                }
-
-                if (block->nodes.empty()) {
-                    if (prev != nullptr) {
-                        prev->next = block->next;
-                        nodes.free(*block);
-                        block = prev;
-                    } else {
-                        if (auto* next_block = nodes.try_to_get(block->next)) {
-                            block->nodes = next_block->nodes;
-                            block->next  = next_block->next;
-                            nodes.free(*next_block);
-                        } else {
-                            nodes.free(*block);
-                            port.next = undefined<block_node_id>();
-                            break;
-                        }
-                    }
-                } else {
-                    prev = block;
-                }
-            }
-        }
-    }
-
-    template<typename Function, typename... Args>
-    void for_each(const output_port_id port,
-                  Function&&           fn,
-                  Args&&... args) noexcept
-    {
-        if (auto* y = output_ports.try_to_get(port))
-            for_each(*y, std::forward<Function>(fn),
-                     std::forward<Args>(args)...);
-    }
 
     template<typename Function, typename... Args>
     void for_each(const output_port_id& port,
@@ -2316,11 +2329,17 @@ public:
                             DynamicsDst& dst,
                             int          port_dst) noexcept;
 
-    /// For each observer fills the history
+    /// Resamples the raw samples of each observer: the outputs wait for
+    /// @c drain_observations().
     void tick_resamplers() noexcept
     {
-        const auto now        = t.load(std::memory_order_acquire);
-        auto&      resamplers = observers.get<resampler>();
+        tick_resamplers(t.load(std::memory_order_acquire));
+    }
+
+    /// With @c now equal to infinity, the resamplers finalize their series.
+    void tick_resamplers(const time now) noexcept
+    {
+        auto& resamplers = observers.get<resampler>();
 
         for (auto& obs : observers) {
             const auto obs_id  = observers.get_id(obs);
@@ -2333,8 +2352,13 @@ public:
     /// For each observer in the vector transfert data
     void tick_resamplers(std::span<const observer_id> v) noexcept
     {
-        const auto now        = t.load(std::memory_order_acquire);
-        auto&      resamplers = observers.get<resampler>();
+        tick_resamplers(v, t.load(std::memory_order_acquire));
+    }
+
+    void tick_resamplers(std::span<const observer_id> v,
+                         const time                   now) noexcept
+    {
+        auto& resamplers = observers.get<resampler>();
 
         for (const auto obs_id : v) {
             if (auto* obs = observers.try_to_get(obs_id)) {
@@ -2345,6 +2369,74 @@ public:
         }
     }
 
+    /// Gives the outputs of the resamplers to @c fn(const observation_batch&)
+    /// (returns a status), then forgets them. The outputs are forgotten even
+    /// if @c fn fails, so that the memory does not grow: the first error is
+    /// returned.
+    template<typename Fn>
+    status drain_observations(Fn&& fn) noexcept
+    {
+        status ret = success();
+
+        for (auto& obs : observers)
+            drain_observation(observers.get_id(obs), obs, fn, ret);
+
+        return ret;
+    }
+
+    template<typename Fn>
+    status drain_observations(std::span<const observer_id> v, Fn&& fn) noexcept
+    {
+        status ret = success();
+
+        for (const auto obs_id : v)
+            if (auto* obs = observers.try_to_get(obs_id))
+                drain_observation(obs_id, *obs, fn, ret);
+
+        return ret;
+    }
+
+    /** The date of the next step: the current date for the models with a
+     * null time advance, infinity when nothing is scheduled. */
+    time next_time() const noexcept;
+
+private:
+    void wake_up(model& mdl, time t) noexcept;
+
+    bool   is_watched_index(u32 index) const noexcept;
+    status push_watched_event(model_id id, i32 port, real value) noexcept;
+    status make_watched_lambda(model& mdl) noexcept;
+
+    // One bit by index of model. The count makes the test free when no model
+    // is watched.
+    vector<u64>           m_watched;
+    u32                   m_watched_count = 0;
+    vector<watched_event> m_watched_events;
+
+    template<typename Fn>
+    void drain_observation(const observer_id obs_id,
+                           const observer&   obs,
+                           Fn&               fn,
+                           status&           ret) noexcept
+    {
+        auto& r = observers.get<resampler>(obs_id);
+
+        if (r.raw_output().empty() and r.output().empty())
+            return;
+
+        auto st = fn(observation_batch{ .id      = obs_id,
+                                        .obs     = obs,
+                                        .sampler = r,
+                                        .raws    = r.raw_output(),
+                                        .points  = r.output() });
+
+        if (st.has_error() and ret.has_value())
+            ret = st;
+
+        r.clear_outputs();
+    }
+
+public:
     /** Call the initialize member function for each model of the
      * simulation an prepare the simulation class to call the `run`
      * function. */
@@ -2352,13 +2444,12 @@ public:
 
     status run() noexcept;
 
-    template<typename Fn, typename... Args>
-    status run_with_cb(Fn&& fn, Args&&... args) noexcept;
-
     template<typename Dynamics>
     status make_initialize(model& mdl, Dynamics& dyn, time t) noexcept;
 
     status make_initialize(model& mdl, time t) noexcept;
+
+    status make_lambda(model& mdl) noexcept;
 
     template<typename Dynamics>
     status make_transition(model& mdl, Dynamics& dyn, time t) noexcept;
@@ -2382,6 +2473,12 @@ public:
     status finalize() noexcept;
 };
 
+/// The maximum number of levels of embedded simulations: a simulation of depth
+/// @c embedded_simulation_max_depth can not contain embedded simulations (the
+/// root simulation has the depth 0). The binary dump refuses deeper
+/// simulations.
+inline constexpr int embedded_simulation_max_depth = 4;
+
 /** The @c embedded_simulation class stores a @c simulation (models,
  * connections, observers, etc.) that serves as its initial project. It also
  * stores a set of @c simulation instances with different parameters to carry
@@ -2394,6 +2491,7 @@ struct embedded_simulation {
     struct embedded_model_observation {
         vector<resampled_sample> values; /*<! Raw output simulation. */
 
+        /// @return NaN without observation.
         real compute_result(const criteria_type type) const noexcept;
     };
 
@@ -2444,6 +2542,13 @@ struct embedded_simulation {
 // DEVS model.
 //
 /////////////////////////////////////////////////////////////////////////////
+
+/// A dynamics without output port that tells the changes of its state to the
+/// watchers (see @c simulation::watch()).
+template<typename T>
+concept has_watched_value_function = requires(const T t) {
+    { t.watched_value() } -> std::same_as<real>;
+};
 
 template<typename T>
 concept has_lambda_function = requires(T t, simulation& sim) {
@@ -2541,68 +2646,53 @@ constexpr void update(std::span<real, QssLevel> values,
     }
 }
 
+/// @return The first strictly positive date where @c value_0 + @c value_1 * t
+/// reaches @a threshold or infinity.
 inline time compute_wake_up(real threshold, real value_0, real value_1) noexcept
 {
-    time ret = time_domain<time>::infinity;
+    if (value_1 == zero)
+        return time_domain<time>::infinity;
 
-    if (value_1 != 0) {
-        const auto a = value_1;
-        const auto b = value_0 - threshold;
-        const auto d = -b * a;
+    const auto d = (threshold - value_0) / value_1;
 
-        ret = (d > zero) ? d : time_domain<time>::infinity;
-    }
-
-    return ret;
+    return d > zero ? d : time_domain<time>::infinity;
 }
 
+/// @return The first strictly positive date where @c value_0 + @c value_1 * t
+/// + @c value_2 * t * t reaches @a threshold or infinity.
 inline time compute_wake_up(real threshold,
                             real value_0,
                             real value_1,
                             real value_2) noexcept
 {
-    time ret = time_domain<time>::infinity;
+    if (value_2 == zero)
+        return compute_wake_up(threshold, value_0, value_1);
 
-    if (value_1 != 0) {
-        if (value_2 != 0) {
-            const auto a = value_2;
-            const auto b = value_1;
-            const auto c = value_0 - threshold;
-            const auto d = b * b - four * a * c;
+    const auto a = value_2;
+    const auto b = value_1;
+    const auto c = value_0 - threshold;
+    const auto d = b * b - four * a * c;
 
-            if (d > zero) {
-                const auto sqrt_d = std::sqrt(d);
-                const auto x1     = (-b + sqrt_d) / (two * a);
-                const auto x2     = (-b - sqrt_d) / (two * a);
+    if (d < zero)
+        return time_domain<time>::infinity;
 
-                if (x1 > zero) {
-                    if (x2 > zero) {
-                        ret = std::min(x1, x2);
-                    } else {
-                        ret = x1;
-                    }
-                } else {
-                    if (x2 > 0)
-                        ret = x2;
-                }
-            } else if (is_zero(d)) {
-                const auto x = -b / (two * a);
-                if (x > zero)
-                    ret = x;
-            }
-        } else {
-            const auto a = value_1;
-            const auto b = value_0 - threshold;
-            const auto d = -b * a;
+    const auto sqrt_d = std::sqrt(d);
+    const auto x1     = (-b + sqrt_d) / (two * a);
+    const auto x2     = (-b - sqrt_d) / (two * a);
 
-            if (d > zero)
-                ret = d;
-        }
-    }
+    auto ret = time_domain<time>::infinity;
+    if (x1 > zero)
+        ret = x1;
+    if (x2 > zero and x2 < ret)
+        ret = x2;
 
     return ret;
 }
 
+/// The bag of the port in this step. The messages are sorted by their values
+/// (the total order of IEEE 754 on @c message[0], then @c message[1] and @c
+/// message[2]): a transition never depends on the order of the emitters or of
+/// the connections.
 inline constexpr auto get_message(simulation&       sim,
                                   const input_port& port) noexcept
   -> std::span<message>;
@@ -2621,10 +2711,13 @@ inline auto get_qss_message(std::span<const message> msgs) noexcept
 constexpr inline auto get_min_message(std::span<const message> msgs) noexcept
   -> real;
 
-/// Get the maximum value (@c message[0]) from the list of messages. If
-/// the list is empty, this function returns zero.
-constexpr inline auto get_max_message(std::span<const message> msgs) noexcept
-  -> real;
+/// True if one message of the list is not null (@c message[0]): a logical
+/// value which does not depend on the order of the messages in the bag.
+inline bool have_true_message(std::span<const message> msgs) noexcept
+{
+    return std::ranges::any_of(
+      msgs, [](const message& msg) noexcept { return not is_zero(msg[0]); });
+}
 
 inline status send_message(simulation&    sim,
                            output_port_id output_port,
@@ -2673,7 +2766,7 @@ struct abstract_integrator<1> {
         if (!(std::isfinite(dQ) && dQ > zero))
             return make_error(simulation_errc::abstract_integrator_dq_error);
 
-        q = std::floor(X / dQ) * dQ;
+        q = X;
         u = zero;
 
         sigma = time_domain<time>::zero;
@@ -2701,8 +2794,7 @@ struct abstract_integrator<1> {
     status reset(const message& msg) noexcept
     {
         X     = msg[0];
-        q     = std::floor(X / dQ) * dQ;
-        u     = zero;
+        q     = X;
         sigma = time_domain<time>::zero;
 
         return success();
@@ -2717,10 +2809,7 @@ struct abstract_integrator<1> {
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
-                      time                  e,
-                      [[maybe_unused]] time r) noexcept
+    status transition(simulation& sim, time /*t*/, time e, time r) noexcept
     {
         const auto lst_x_dot      = get_message(sim, x[port_x_dot]);
         const auto lst_reset      = get_message(sim, x[port_reset]);
@@ -2731,8 +2820,21 @@ struct abstract_integrator<1> {
         if (not have_msg)
             return internal();
 
-        if (have_reset_msg)
-            return reset(get_qss_message<1>(lst_reset));
+        // The reset forces the state but keeps the derivatives: they are only
+        // sent again when the upstream models change.
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<1>(lst_reset)));
+            return have_x_dot_msg
+                     ? external(zero, get_qss_message<1>(lst_x_dot))
+                     : success();
+        }
+
+        // A message at the date of the internal event: the internal transition
+        // goes first, as the confluent transition of Parallel DEVS.
+        if (is_zero(r)) {
+            irt_check(internal());
+            e = zero;
+        }
 
         if (have_x_dot_msg)
             return external(e, get_qss_message<1>(lst_x_dot));
@@ -2742,8 +2844,7 @@ struct abstract_integrator<1> {
 
     status lambda(simulation& sim) noexcept
     {
-        return send_message(sim, y[0],
-                            is_zero(u) ? q : q + dQ * u / std::abs(u));
+        return send_message(sim, y[0], X + u * sigma);
     }
 
     raw_sample observation(time t, time e) const noexcept
@@ -2875,19 +2976,14 @@ struct abstract_integrator<2> {
     status reset(const message& msg) noexcept
     {
         X     = msg[0];
-        u     = zero;
-        mu    = zero;
         q     = X;
-        mq    = zero;
+        mq    = u;
         sigma = time_domain<time>::zero;
 
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
-                      time                  e,
-                      [[maybe_unused]] time r) noexcept
+    status transition(simulation& sim, time /*t*/, time e, time r) noexcept
     {
         const auto lst_x_dot      = get_message(sim, x[port_x_dot]);
         const auto lst_reset      = get_message(sim, x[port_reset]);
@@ -2898,8 +2994,21 @@ struct abstract_integrator<2> {
         if (not have_msg)
             return internal();
 
-        if (have_reset_msg)
-            return reset(get_qss_message<2>(lst_reset));
+        // The reset forces the state but keeps the derivatives: they are only
+        // sent again when the upstream models change.
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<2>(lst_reset)));
+            return have_x_dot_msg
+                     ? external(zero, get_qss_message<2>(lst_x_dot))
+                     : success();
+        }
+
+        // A message at the date of the internal event: the internal transition
+        // goes first, as the confluent transition of Parallel DEVS.
+        if (is_zero(r)) {
+            irt_check(internal());
+            e = zero;
+        }
 
         if (have_x_dot_msg)
             return external(e, get_qss_message<2>(lst_x_dot));
@@ -3001,27 +3110,15 @@ struct abstract_integrator<3> {
 
                 if (i2 > zero) {
                     i2     = std::sqrt(i2);
-                    auto A = i1 + i2;
-                    auto B = i1 - i2;
+                    const auto A = std::cbrt(i1 + i2);
+                    const auto B = std::cbrt(i1 - i2);
 
-                    if (A > zero)
-                        A = std::pow(A, one / three);
-                    else
-                        A = -std::pow(std::abs(A), one / three);
-                    if (B > zero)
-                        B = std::pow(B, one / three);
-                    else
-                        B = -std::pow(std::abs(B), one / three);
 
                     s = A + B - a / three;
                     if (s < zero)
                         s = time_domain<time>::infinity;
                 } else if (is_zero(i2)) {
-                    auto A = i1;
-                    if (A > zero)
-                        A = std::pow(A, one / three);
-                    else
-                        A = -std::pow(std::abs(A), one / three);
+                    const auto A = std::cbrt(i1);
                     auto x1 = two * A - a / three;
                     auto x2 = -(A + a / three);
                     if (x1 < zero) {
@@ -3058,26 +3155,14 @@ struct abstract_integrator<3> {
                 i2 = i1 * i1 + v * v * v / real(27);
                 if (i2 > zero) {
                     i2     = std::sqrt(i2);
-                    auto A = i1 + i2;
-                    auto B = i1 - i2;
-                    if (A > zero)
-                        A = std::pow(A, one / three);
-                    else
-                        A = -std::pow(std::abs(A), one / three);
-                    if (B > zero)
-                        B = std::pow(B, one / three);
-                    else
-                        B = -std::pow(std::abs(B), one / three);
+                    const auto A = std::cbrt(i1 + i2);
+                    const auto B = std::cbrt(i1 - i2);
                     sigma = A + B - a / three;
 
                     if (s < sigma || sigma < zero)
                         sigma = s;
                 } else if (is_zero(i2)) {
-                    auto A = i1;
-                    if (A > zero)
-                        A = std::pow(A, one / three);
-                    else
-                        A = -std::pow(std::abs(A), one / three);
+                    const auto A = std::cbrt(i1);
                     auto x1 = two * A - a / three;
                     auto x2 = -(A + a / three);
                     if (x1 < zero) {
@@ -3196,31 +3281,23 @@ struct abstract_integrator<3> {
         pq = mu / two;
 
         sigma = is_zero(pu) ? time_domain<time>::infinity
-                            : std::pow(std::abs(three * dQ / pu), one / three);
+                            : std::cbrt(std::abs(three * dQ / pu));
 
         return success();
     }
 
-    /** Reset the integrator if and only if only if the value change and
-     * all state are not zero. */
     status reset(const message& msg) noexcept
     {
         X     = msg[0];
-        u     = zero;
-        mu    = zero;
-        pu    = zero;
         q     = X;
-        mq    = zero;
-        pq    = zero;
+        mq    = u;
+        pq    = mu / two;
         sigma = time_domain<time>::zero;
 
         return success();
     }
 
-    status transition(simulation& sim,
-                      time /*t*/,
-                      time                  e,
-                      [[maybe_unused]] time r) noexcept
+    status transition(simulation& sim, time /*t*/, time e, time r) noexcept
     {
         const auto lst_x_dot      = get_message(sim, x[port_x_dot]);
         const auto lst_reset      = get_message(sim, x[port_reset]);
@@ -3231,8 +3308,21 @@ struct abstract_integrator<3> {
         if (not have_msg)
             return internal();
 
-        if (have_reset_msg)
-            return reset(get_qss_message<3>(lst_reset));
+        // The reset forces the state but keeps the derivatives: they are only
+        // sent again when the upstream models change.
+        if (have_reset_msg) {
+            irt_check(reset(get_qss_message<3>(lst_reset)));
+            return have_x_dot_msg
+                     ? external(zero, get_qss_message<3>(lst_x_dot))
+                     : success();
+        }
+
+        // A message at the date of the internal event: the internal transition
+        // goes first, as the confluent transition of Parallel DEVS.
+        if (is_zero(r)) {
+            irt_check(internal());
+            e = zero;
+        }
 
         if (have_x_dot_msg)
             return external(e, get_qss_message<3>(lst_x_dot));
@@ -3842,7 +3932,7 @@ struct abstract_inverse {
     status lambda(simulation& sim) noexcept
     {
         if (is_zero(value[0]))
-            return make_error(simulation_errc::abstract_log_input_error);
+            return make_error(simulation_errc::abstract_inverse_input_error);
 
         if constexpr (QssLevel == 1) {
             return send_message(sim, y[0], one / value[0]);
@@ -4037,137 +4127,6 @@ using qss2_multiplier = abstract_multiplier<2>;
 using qss3_multiplier = abstract_multiplier<3>;
 
 template<typename std::size_t QssLevel>
-struct abstract_integer {
-    static_assert(1 <= QssLevel && QssLevel <= 3, "Only for Qss1, 2 and 3");
-
-    input_port     x[1] = {};
-    output_port_id y[1] = {};
-
-    std::array<real, QssLevel> value;
-    time                       sigma   = time_domain<time>::infinity;
-    real                       upper   = std::numeric_limits<real>::infinity();
-    real                       lower   = -std::numeric_limits<real>::infinity();
-    real                       to_send = zero;
-    real last_send_value               = std::numeric_limits<real>::infinity();
-
-    bool reach_upper = false;
-    bool reach_lower = false;
-
-    abstract_integer() noexcept = default;
-
-    abstract_integer(const abstract_integer& other) noexcept
-      : value(other.value)
-      , sigma(other.sigma)
-      , upper(other.upper)
-      , lower(other.lower)
-      , to_send(other.to_send)
-      , last_send_value(other.last_send_value)
-      , reach_upper(other.reach_upper)
-      , reach_lower(other.reach_lower)
-    {}
-
-    status initialize(simulation& /*sim*/) noexcept
-    {
-        value.fill(zero);
-
-        sigma           = time_domain<time>::infinity;
-        upper           = std::numeric_limits<real>::infinity();
-        lower           = -std::numeric_limits<real>::infinity();
-        reach_upper     = false;
-        reach_lower     = false;
-        to_send         = zero;
-        last_send_value = std::numeric_limits<real>::infinity();
-
-        return success();
-    }
-
-    void compute_next_cross(const real val) noexcept
-    {
-        if (val < 0) {
-            upper = std::trunc(val);
-            lower = upper - 1.0;
-        } else {
-            lower = std::trunc(val);
-            upper = lower + 1.0;
-        }
-    }
-
-    status transition(simulation& sim, time /*t*/, time e, time /*r*/) noexcept
-    {
-        const auto lst            = get_message(sim, x[0]);
-        const auto have_msg       = not lst.empty();
-        auto       external_cross = false;
-
-        if (not have_msg) {
-            last_send_value = to_send;
-
-            if constexpr (QssLevel == 2)
-                value[0] += value[1] * e;
-            if constexpr (QssLevel == 3) {
-                value[0] += value[1] * e + value[2] * e * e;
-                value[1] += two * value[2] * e;
-            }
-        } else {
-            const auto& msg = get_qss_message<QssLevel>(lst);
-
-            if (last_send_value != std::trunc(msg[0])) {
-                external_cross = true;
-            }
-
-            value[0] = msg[0];
-            if constexpr (QssLevel >= 2)
-                value[1] = msg[1];
-            if constexpr (QssLevel == 3)
-                value[2] = msg[2];
-        }
-
-        compute_next_cross(value[0]);
-
-        if (external_cross) {
-            to_send = value[0];
-            sigma   = 0.0;
-        } else {
-            if constexpr (QssLevel == 1) {
-                sigma   = time_domain<time>::infinity;
-                to_send = value[0];
-            } else if constexpr (QssLevel == 2) {
-                sigma   = std::min(compute_wake_up(upper, value[0], value[1]),
-                                   compute_wake_up(lower, value[0], value[1]));
-                to_send = value[0] + value[1] * sigma;
-            } else if constexpr (QssLevel == 3) {
-                sigma = std::min(
-                  compute_wake_up(upper, value[0], value[1], value[2]),
-                  compute_wake_up(lower, value[0], value[1], value[2]));
-                to_send = value[0] + value[1] * sigma +
-                          value[2] * sigma * sigma;
-            }
-        }
-
-        return success();
-    }
-
-    status lambda(simulation& sim) noexcept
-    {
-        return send_message(sim, y[0], std::trunc(to_send));
-    }
-
-    raw_sample observation(time t, time e) const noexcept
-    {
-        if constexpr (QssLevel == 1)
-            return { t, std::trunc(value[0]) };
-        else if constexpr (QssLevel == 2)
-            return { t, std::trunc(value[0] + value[1] * e) };
-        else if constexpr (QssLevel == 3)
-            return { t,
-                     std::trunc(value[0] + value[1] * e + value[2] * e * e) };
-    }
-};
-
-using qss1_integer = abstract_integer<1>;
-using qss2_integer = abstract_integer<2>;
-using qss3_integer = abstract_integer<3>;
-
-template<typename std::size_t QssLevel>
 struct abstract_compare {
     static_assert(1 <= QssLevel && QssLevel <= 3, "Only for Qss1, 2 and 3");
 
@@ -4209,44 +4168,29 @@ struct abstract_compare {
         return success();
     }
 
-    time compute_next_cross() const noexcept
+    /// @param x The difference @c a - @c b, null just after a crossing to
+    /// skip the root of this crossing.
+    time compute_next_cross(const real x) const noexcept
     {
-        if constexpr (QssLevel == 2) {
-            const auto y  = a[1] - b[1];
-            const auto x  = a[0] - b[0];
-            const auto s1 = not is_zero(y) ? -x / y
-                                           : time_domain<time>::infinity;
+        if constexpr (QssLevel == 2)
+            return compute_wake_up(zero, x, a[1] - b[1]);
 
-            return s1 > 0 ? s1 : time_domain<time>::infinity;
-        }
-
-        if constexpr (QssLevel == 3) {
-            const auto z  = a[2] - b[2];
-            const auto y  = a[1] - b[1];
-            const auto x  = a[0] - b[0];
-            auto       s1 = time_domain<time>::infinity;
-            auto       s2 = time_domain<time>::infinity;
-
-            if (is_zero(z)) {
-                if (not is_zero(y))
-                    s1 = -x / y;
-            } else {
-                s1 = (-y + std::sqrt(y * y - four * z * x)) / two / z;
-                s2 = (-y - std::sqrt(y * y - four * z * x)) / two / z;
-            }
-
-            if ((s1 > zero) and ((s1 < s2) or (s2 < zero)))
-                return s1;
-
-            if (s2 > zero)
-                return s2;
-        }
+        if constexpr (QssLevel == 3)
+            return compute_wake_up(zero, x, a[1] - b[1], a[2] - b[2]);
 
         return time_domain<time>::infinity;
     }
 
-    status transition(simulation& sim, time /*t*/, time e, time /*r*/) noexcept
+    /// A finite and strictly positive time advance is the date of a predicted
+    /// crossing of @c a and @c b: the output is the value after the crossing.
+    bool is_crossing() const noexcept
     {
+        return sigma > zero and not time_domain<time>::is_infinity(sigma);
+    }
+
+    status transition(simulation& sim, time /*t*/, time e, time r) noexcept
+    {
+        const auto crossing  = is_zero(r) and is_crossing();
         const auto lst_a     = get_message(sim, x[0]);
         const auto lst_b     = get_message(sim, x[1]);
         const auto message_a = not lst_a.empty();
@@ -4298,7 +4242,18 @@ struct abstract_compare {
             }
         }
 
-        const auto cross = compute_next_cross();
+        // At a predicted crossing, the extrapolated difference is null up to
+        // the rounding errors: its sign can not decide the new state.
+        if (crossing) {
+            is_a_less_b = not is_a_less_b;
+
+            if (not message_a and not message_b) {
+                sigma = compute_next_cross(zero);
+                return success();
+            }
+        }
+
+        const auto cross = compute_next_cross(a[0] - b[0]);
         if (a[0] - b[0] > 0 and is_a_less_b) {
             is_a_less_b = false;
             sigma       = zero;
@@ -4314,7 +4269,8 @@ struct abstract_compare {
 
     status lambda(simulation& sim) noexcept
     {
-        return send_message(sim, y[0], output[is_a_less_b]);
+        return send_message(
+          sim, y[0], output[is_crossing() ? not is_a_less_b : is_a_less_b]);
     }
 
     raw_sample observation(time t, time /*e*/) const noexcept
@@ -4815,6 +4771,11 @@ struct counter {
       , sigma(other.sigma)
     {}
 
+    real watched_value() const noexcept
+    {
+        return static_cast<real>(event_number);
+    }
+
     status initialize(simulation& /*sim*/) noexcept
     {
         event_number = 0;
@@ -4851,19 +4812,24 @@ struct counter {
     }
 };
 
+/** Sends a value at each time advance. The input port @c x_value replaces the
+ * value of the next outputs. The input port @c x_t replaces the time advance
+ * from now: @c 0 sends at once, an infinite value pauses the generator until
+ * the next message on @c x_t, a negative or NaN value is ignored. */
 struct generator {
-    enum : u8 { x_value, x_t, x_add_tr, x_mult_tr };
+    enum : u8 { x_value, x_t };
 
     enum class option : u8 { ta_use_source, value_use_source };
 
-    input_port     x[4] = {};
+    input_port     x[2] = {};
     output_port_id y[1] = {};
 
     time sigma = time_domain<time>::infinity;
     time ta    = one;
     real value = zero;
 
-    source_data src_data;
+    source_data src_data_ta;    // state of the @c source_ta.
+    source_data src_data_value; // state of the @c source_value.
     source      source_ta;
     source      source_value;
 
@@ -4877,7 +4843,7 @@ struct generator {
       , value(other.value)
       , source_ta(other.source_ta)
       , source_value(other.source_value)
-      , flags(option::ta_use_source, option::value_use_source)
+      , flags(other.flags)
     {}
 
     /// Before calling this function, the @c sigma member is initialized
@@ -4889,12 +4855,15 @@ struct generator {
         if (flags[option::ta_use_source]) {
             sigma = time_domain<time>::infinity;
 
-            if (sim.srcs.initialize_source(*this, source_ta, src_data)
+            if (sim.srcs.initialize_source(*this, source_ta, src_data_ta)
                   .has_error())
                 return make_error(
                   simulation_errc::generator_ta_initialization_error);
 
             sigma = source_ta.next();
+
+            if (not std::isfinite(sigma) or std::signbit(sigma))
+                return make_error(simulation_errc::ta_abnormal);
         } else {
             if (not std::isfinite(ta) or std::signbit(ta))
                 return make_error(simulation_errc::ta_abnormal);
@@ -4905,7 +4874,8 @@ struct generator {
         if (flags[option::value_use_source]) {
             value = zero;
 
-            if (sim.srcs.initialize_source(*this, source_value, src_data)
+            if (sim.srcs
+                  .initialize_source(*this, source_value, src_data_value, 1)
                   .has_error())
                 return make_error(
                   simulation_errc::generator_source_initialization_error);
@@ -4919,10 +4889,10 @@ struct generator {
     status finalize(simulation& sim) noexcept
     {
         if (flags[option::ta_use_source])
-            irt_check(sim.srcs.finalize_source(source_ta, src_data));
+            irt_check(sim.srcs.finalize_source(source_ta, src_data_ta));
 
         if (flags[option::value_use_source])
-            irt_check(sim.srcs.finalize_source(source_value, src_data));
+            irt_check(sim.srcs.finalize_source(source_value, src_data_value));
 
         return success();
     }
@@ -4931,12 +4901,16 @@ struct generator {
     {
         auto update_source_by_input_port = false;
 
+        // The kernel computes the next date from the date of this transition:
+        // an external event keeps the remaining time.
+        if (not is_zero(r))
+            sigma = r;
+
         if (const auto lst_value = get_message(sim, x[x_value]);
             not lst_value.empty()) {
             for (const auto& msg : lst_value)
                 value = msg[0];
 
-            sigma                       = r;
             update_source_by_input_port = true;
         }
 
@@ -4945,7 +4919,7 @@ struct generator {
                 not update_source_by_input_port) {
                 if (source_value.is_empty()) {
                     if (const auto ret = sim.srcs.update_source(source_value,
-                                                                src_data);
+                                                                src_data_value);
                         ret.has_error())
                         return ret.error();
                 }
@@ -4956,7 +4930,7 @@ struct generator {
             if (flags[option::ta_use_source]) {
                 if (source_ta.is_empty()) {
                     if (const auto ret = sim.srcs.update_source(source_ta,
-                                                                src_data);
+                                                                src_data_ta);
                         ret.has_error())
                         return ret.error();
                 }
@@ -4966,39 +4940,13 @@ struct generator {
                 if (not std::isfinite(sigma) or std::signbit(sigma))
                     return make_error(simulation_errc::ta_abnormal);
             } else {
-                sigma += ta;
+                sigma = ta;
             }
         }
 
-        const auto lst_t = get_message(sim, x[x_t]);
-        real       t     = -1.0;
-        if (not lst_t.empty())
-            for (const auto& msg : lst_t)
-                t = std::min(msg[0], t);
-
-        const auto lst_add_tr = get_message(sim, x[x_add_tr]);
-        real       add_tr     = time_domain<time>::infinity;
-        if (not lst_add_tr.empty())
-            for (const auto& msg : lst_add_tr)
-                add_tr = std::min(msg[0], add_tr);
-
-        const auto lst_mult_tr = get_message(sim, x[x_mult_tr]);
-        real       mult_tr     = zero;
-        if (not lst_mult_tr.empty())
-            for (const auto& msg : lst_mult_tr)
-                mult_tr = std::max(msg[0], mult_tr);
-
-        if (not(lst_t.empty() and lst_add_tr.empty() and lst_mult_tr.empty())) {
-            if (t >= zero) {
+        if (const auto lst_t = get_message(sim, x[x_t]); not lst_t.empty())
+            if (const auto t = get_min_message(lst_t); t >= zero)
                 sigma = t;
-            } else {
-                if (std::isfinite(add_tr))
-                    sigma = r + add_tr;
-
-                if (std::isnormal(mult_tr))
-                    sigma = r * mult_tr;
-            }
-        }
 
         if (sigma < 0.0)
             sigma = 0.0;
@@ -5297,209 +5245,6 @@ using qss2_min_hold = abstract_min_max_hold<2, false>;
 using qss3_min_hold = abstract_min_max_hold<3, false>;
 
 template<std::size_t QssLevel>
-struct abstract_filter {
-    static_assert(1 <= QssLevel && QssLevel <= 3, "Only for Qss1, 2 and 3");
-
-    input_port     x[1] = {};
-    output_port_id y[3] = {};
-
-    time                       sigma;
-    real                       lower_threshold;
-    real                       upper_threshold;
-    std::array<real, QssLevel> value;
-
-    bool reach_lower_threshold = false;
-    bool reach_upper_threshold = false;
-
-    abstract_filter() noexcept = default;
-
-    abstract_filter(const abstract_filter& other) noexcept
-      : sigma(other.sigma)
-      , lower_threshold(other.lower_threshold)
-      , upper_threshold(other.upper_threshold)
-      , value(other.value)
-      , reach_lower_threshold(other.reach_lower_threshold)
-      , reach_upper_threshold(other.reach_upper_threshold)
-    {}
-
-    status initialize(simulation& /*sim*/) noexcept
-    {
-        if (lower_threshold >= upper_threshold)
-            return make_error(
-              simulation_errc::abstract_filter_threshold_condition_error);
-
-        reach_lower_threshold = false;
-        reach_upper_threshold = false;
-
-        value.fill(zero);
-
-        sigma = time_domain<time>::infinity;
-
-        return success();
-    }
-
-    status transition(simulation& sim, time /*t*/, time e, time /*r*/) noexcept
-    {
-        const auto lst = get_message(sim, x[0]);
-
-        if (lst.empty()) {
-            if constexpr (QssLevel == 2)
-                value[0] += value[1] * e;
-            if constexpr (QssLevel == 3) {
-                value[0] += value[1] * e + value[2] * e * e;
-                value[1] += two * value[2] * e;
-            }
-        } else {
-            const auto& msg = get_qss_message<QssLevel>(lst);
-            value[0]        = msg[0];
-            if constexpr (QssLevel >= 2)
-                value[1] = msg[1];
-            if constexpr (QssLevel == 3)
-                value[2] = msg[2];
-        }
-
-        reach_lower_threshold = false;
-        reach_upper_threshold = false;
-
-        if (value[0] >= upper_threshold) {
-            reach_upper_threshold = true;
-            sigma                 = time_domain<time>::zero;
-        } else if (value[0] <= lower_threshold) {
-            reach_lower_threshold = true;
-            sigma                 = time_domain<time>::zero;
-        } else {
-            if constexpr (QssLevel == 1)
-                sigma = time_domain<time>::infinity;
-            if constexpr (QssLevel == 2)
-                sigma = std::min(
-                  compute_wake_up(upper_threshold, value[0], value[1]),
-                  compute_wake_up(lower_threshold, value[0], value[1]));
-            if constexpr (QssLevel == 3)
-                sigma = std::min(compute_wake_up(upper_threshold, value[0],
-                                                 value[1], value[2]),
-                                 compute_wake_up(lower_threshold, value[0],
-                                                 value[1], value[2]));
-        }
-
-        return success();
-    }
-
-    status lambda(simulation& sim) noexcept
-    {
-        if constexpr (QssLevel == 1) {
-            if (reach_upper_threshold) {
-                irt_check(send_message(sim, y[0], upper_threshold));
-                irt_check(send_message(sim, y[1], one));
-            } else {
-                irt_check(send_message(sim, y[0], value[0]));
-                irt_check(send_message(sim, y[1], zero));
-            }
-
-            if (reach_lower_threshold) {
-                irt_check(send_message(sim, y[0], lower_threshold));
-                irt_check(send_message(sim, y[2], one));
-            } else {
-                irt_check(send_message(sim, y[0], value[0]));
-                irt_check(send_message(sim, y[2], zero));
-            }
-        }
-
-        if constexpr (QssLevel == 2) {
-            if (reach_upper_threshold) {
-                irt_check(send_message(sim, y[0], upper_threshold));
-                irt_check(send_message(sim, y[1], one));
-            } else {
-                irt_check(send_message(sim, y[0], value[0], value[1]));
-                irt_check(send_message(sim, y[1], zero));
-            }
-
-            if (reach_lower_threshold) {
-                irt_check(send_message(sim, y[0], lower_threshold));
-                irt_check(send_message(sim, y[2], one));
-            } else {
-                irt_check(send_message(sim, y[0], value[0], value[1]));
-                irt_check(send_message(sim, y[2], zero));
-            }
-
-            return success();
-        }
-
-        if constexpr (QssLevel == 3) {
-            if (reach_upper_threshold) {
-                irt_check(send_message(sim, y[0], upper_threshold));
-                irt_check(send_message(sim, y[1], one));
-            } else {
-                irt_check(
-                  send_message(sim, y[0], value[0], value[1], value[2]));
-                irt_check(send_message(sim, y[1], zero));
-            }
-
-            if (reach_lower_threshold) {
-                irt_check(send_message(sim, y[0], lower_threshold));
-                irt_check(send_message(sim, y[2], one));
-            } else {
-                irt_check(
-                  send_message(sim, y[0], value[0], value[1], value[2]));
-                irt_check(send_message(sim, y[2], zero));
-            }
-
-            return success();
-        }
-
-        return success();
-    }
-
-    raw_sample observation(time t, time e) const noexcept
-    {
-        if constexpr (QssLevel == 1) {
-            if (reach_upper_threshold) {
-                return { t, upper_threshold };
-            } else {
-                return { t, value[0] };
-            }
-
-            if (reach_lower_threshold) {
-                return { t, lower_threshold };
-            } else {
-                return { t, value[0] };
-            }
-        }
-
-        if constexpr (QssLevel == 2) {
-            if (reach_upper_threshold) {
-                return { t, upper_threshold };
-            } else {
-                return qss_observation(value[0], value[1], t, e);
-            }
-
-            if (reach_lower_threshold) {
-                return { t, lower_threshold };
-            } else {
-                return qss_observation(value[0], value[1], t, e);
-            }
-        }
-
-        if constexpr (QssLevel == 3) {
-            if (reach_upper_threshold) {
-                return { t, upper_threshold };
-            } else {
-                return qss_observation(value[0], value[1], value[2], t, e);
-            }
-
-            if (reach_lower_threshold) {
-                return { t, lower_threshold };
-            } else {
-                return qss_observation(value[0], value[1], value[2], t, e);
-            }
-        }
-    }
-};
-
-using qss1_filter = abstract_filter<1>;
-using qss2_filter = abstract_filter<2>;
-using qss3_filter = abstract_filter<3>;
-
-template<std::size_t QssLevel>
 struct abstract_sample_hold {
     static_assert(1 <= QssLevel && QssLevel <= 3, "Only for Qss1, 2 and 3");
 
@@ -5537,6 +5282,10 @@ struct abstract_sample_hold {
         const auto has      = not lst.empty();
         const auto internal = r <= time_domain<time>::zero;
 
+        // A message at the date of the sampling is read before the sampling:
+        // the sample is the received value, not the previous one as with the
+        // default confluent transition of Parallel DEVS (internal, then
+        // external).
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
@@ -5675,10 +5424,14 @@ struct abstract_quantizer {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = next_boundary();
-            return success();
+            if (not has) {
+                sigma = next_boundary();
+                return success();
+            }
         }
 
         const auto new_level = q * std::round(value[0] / q);
@@ -5861,10 +5614,14 @@ struct abstract_threshold_crossing {
           ? update<QssLevel>(value, get_qss_message<QssLevel>(p_value))
           : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (edge != zero) {
             edge  = zero;
-            sigma = next_crossing();
-            return success();
+            if (p_value.empty() and p_threshold.empty()) {
+                sigma = next_crossing();
+                return success();
+            }
         }
 
         const auto new_side = (value[0] >= threshold) ? side_type::above
@@ -6044,7 +5801,7 @@ struct abstract_sqrt {
     status lambda(simulation& sim) noexcept
     {
         if (value[0] <= zero)
-            return make_error(simulation_errc::abstract_log_input_error);
+            return make_error(simulation_errc::abstract_sqrt_input_error);
 
         const real s = std::sqrt(value[0]);
         if constexpr (QssLevel == 1)
@@ -6394,7 +6151,7 @@ struct abstract_division {
         const real a0 = values[0];
         const real b0 = values[1];
         if (is_zero(b0))
-            return make_error(simulation_errc::abstract_log_input_error);
+            return make_error(simulation_errc::abstract_division_by_zero_error);
 
         if constexpr (QssLevel == 1)
             return send_message(sim, y[0], a0 / b0);
@@ -6629,10 +6386,14 @@ struct abstract_saturation {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         const auto nz = classify();
         if (has or nz != z) {
@@ -6759,10 +6520,14 @@ struct abstract_dead_zone {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         const auto nz = classify();
         if (has or nz != z) {
@@ -6864,10 +6629,14 @@ struct abstract_abs {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         const auto np = classify();
         if (has or np != positive) {
@@ -6965,10 +6734,14 @@ struct abstract_sign {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         const auto no = classify();
         if (not(no == out)) { // NaN-safe : true for the first emit
@@ -7053,10 +6826,14 @@ struct abstract_hysteresis {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         bool nh = high;
         if (high) {
@@ -7188,10 +6965,14 @@ struct abstract_min_max {
             }
         }
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not(msg_a or msg_b)) {
+                sigma = schedule();
+                return success();
+            }
         }
         const bool ns = select_a();
         if (msg_a or msg_b or ns != sel_a) {
@@ -7230,6 +7011,135 @@ using qss3_minimum = abstract_min_max<3, false>;
 using qss1_maximum = abstract_min_max<1, true>;
 using qss2_maximum = abstract_min_max<2, true>;
 using qss3_maximum = abstract_min_max<3, true>;
+
+/** Reduction of the simultaneous messages of one port of a priority model. */
+enum class priority_selection : u8 { maximum, minimum, mean };
+
+inline constexpr std::string_view priority_selection_names[] = { "maximum",
+                                                                 "minimum",
+                                                                 "mean" };
+
+/** Forwards the message of the last emitting source. Simultaneous messages
+ * on several ports: the port of the smallest index wins. Simultaneous
+ * messages on the same port: they are reduced by the @c selection_type of
+ * the port. */
+template<std::size_t QssLevel, std::size_t PortNumber>
+struct abstract_priority {
+    static_assert(1 <= QssLevel && QssLevel <= 3, "Only for Qss1, 2 and 3");
+    static_assert(2 <= PortNumber && PortNumber <= 4, "Only 2, 3 or 4 ports");
+
+    using selection_type = priority_selection;
+
+    input_port     x[PortNumber] = {};
+    output_port_id y[1]          = {};
+
+    std::array<selection_type, PortNumber> selections;
+    std::array<real, QssLevel>             value;
+    time                                   sigma;
+
+    abstract_priority() noexcept = default;
+
+    abstract_priority(const abstract_priority& other) noexcept
+      : selections(other.selections)
+      , value(other.value)
+      , sigma(other.sigma)
+    {}
+
+    status initialize(simulation& /*sim*/) noexcept
+    {
+        value.fill(zero);
+        sigma = time_domain<time>::infinity;
+
+        return success();
+    }
+
+    static bool less(const message& a, const message& b) noexcept
+    {
+        for (std::size_t i = 0; i != QssLevel; ++i)
+            if (a[i] != b[i])
+                return a[i] < b[i];
+
+        return false;
+    }
+
+    void select(std::span<const message> msgs,
+                const selection_type     type) noexcept
+    {
+        switch (type) {
+        case selection_type::minimum: {
+            const auto& m = *std::ranges::min_element(msgs, less);
+            for (std::size_t i = 0; i != QssLevel; ++i)
+                value[i] = m[i];
+        } break;
+
+        case selection_type::mean:
+            value.fill(zero);
+            for (const auto& m : msgs)
+                for (std::size_t i = 0; i != QssLevel; ++i)
+                    value[i] += m[i];
+            for (auto& v : value)
+                v /= static_cast<real>(msgs.size());
+            break;
+
+        case selection_type::maximum:
+        default: {
+            const auto& m = *std::ranges::max_element(msgs, less);
+            for (std::size_t i = 0; i != QssLevel; ++i)
+                value[i] = m[i];
+        } break;
+        }
+    }
+
+    status transition(simulation& sim,
+                      time /*t*/,
+                      time /*e*/,
+                      time /*r*/) noexcept
+    {
+        for (std::size_t i = 0; i != PortNumber; ++i) {
+            const auto lst = get_message(sim, x[i]);
+
+            if (not lst.empty()) {
+                select(lst, selections[i]);
+                sigma = time_domain<time>::zero;
+                return success();
+            }
+        }
+
+        sigma = time_domain<time>::infinity;
+        return success();
+    }
+
+    status lambda(simulation& sim) noexcept
+    {
+        if constexpr (QssLevel == 1)
+            return send_message(sim, y[0], value[0]);
+        if constexpr (QssLevel == 2)
+            return send_message(sim, y[0], value[0], value[1]);
+        if constexpr (QssLevel == 3)
+            return send_message(sim, y[0], value[0], value[1], value[2]);
+        return success();
+    }
+
+    raw_sample observation(time t, time e) const noexcept
+    {
+        if constexpr (QssLevel == 1)
+            return { t, value[0] };
+        else if constexpr (QssLevel == 2)
+            return { t, value[0] + value[1] * e };
+        else
+            return { t, value[0] + value[1] * e + value[2] * e * e };
+    }
+};
+
+using qss1_priority_2 = abstract_priority<1, 2>;
+using qss1_priority_3 = abstract_priority<1, 3>;
+using qss1_priority_4 = abstract_priority<1, 4>;
+using qss2_priority_2 = abstract_priority<2, 2>;
+using qss2_priority_3 = abstract_priority<2, 3>;
+using qss2_priority_4 = abstract_priority<2, 4>;
+using qss3_priority_2 = abstract_priority<3, 2>;
+using qss3_priority_3 = abstract_priority<3, 3>;
+using qss3_priority_4 = abstract_priority<3, 4>;
 
 template<std::size_t QssLevel>
 struct abstract_wrap {
@@ -7293,10 +7203,14 @@ struct abstract_wrap {
         has ? update<QssLevel>(value, get_qss_message<QssLevel>(lst))
             : update<QssLevel>(value, e);
 
+        // A message at the date of the emission is not lost: the output is
+        // computed again from the new value.
         if (emit) {
             emit  = false;
-            sigma = schedule();
-            return success();
+            if (not has) {
+                sigma = schedule();
+                return success();
+            }
         }
         const real nl = current_laps();
         if (has or not(nl == laps)) {
@@ -7387,19 +7301,9 @@ struct abstract_logical {
     {
         const bool old_is_value = is_valid;
 
-        for (sz i = 0; i < PortNumber; ++i) {
-            if (const auto lst = get_message(sim, x[i]); not lst.empty()) {
-                if (not is_zero(lst.front()[0])) {
-                    if (values[i] == false) {
-                        values[i] = true;
-                    }
-                } else {
-                    if (values[i] == true) {
-                        values[i] = false;
-                    }
-                }
-            }
-        }
+        for (sz i = 0; i < PortNumber; ++i)
+            if (const auto lst = get_message(sim, x[i]); not lst.empty())
+                values[i] = have_true_message(lst);
 
         AbstractLogicalTester tester{};
         is_valid = tester(std::begin(values), std::end(values));
@@ -7439,6 +7343,7 @@ struct logical_invert {
     status initialize(simulation& /*sim*/) noexcept
     {
         sigma         = time_domain<time>::infinity;
+        value         = false;
         value_changed = false;
 
         return success();
@@ -7458,10 +7363,9 @@ struct logical_invert {
         const auto lst = get_message(sim, x[0]);
 
         if (not lst.empty()) {
-            const auto& msg = lst.front();
-
-            if ((not is_zero(msg[0]) && !value) || (is_zero(msg[0]) && value))
-                value_changed = true;
+            const auto received = have_true_message(lst);
+            value_changed       = received != value;
+            value               = received;
         }
 
         sigma = value_changed ? time_domain<time>::zero
@@ -7497,6 +7401,14 @@ public:
     static constexpr const u8 max_number_of_state = 254;
     static constexpr const u8 invalid_state_id    = 255;
     static constexpr const u8 max_constants       = 8;
+
+    /// The maximum number of levels of the hierarchy, the top state included.
+    static constexpr const u8 max_depth = 8;
+
+    /// Bounds the events of one @c run_to_completion: a cycle of guarded
+    /// completion transitions or of null timers is not found by
+    /// @c find_error.
+    static constexpr const int max_run_to_completion_steps = 65536;
 
     struct top_state_error {};
     struct next_state_error {};
@@ -7833,6 +7745,12 @@ public:
         real r2    = 0.0;
         time timer = time_domain<time>::infinity;
 
+        /// The remaining durations of the timers of the active states with a
+        /// @c condition_type::sigma, indexed by their depth in the hierarchy:
+        /// the timer of a super state survives the transitions of its sub
+        /// states.
+        std::array<time, max_depth> timers = infinite_timers();
+
         std::array<real, 4> ports; //<! Stores value of input messages in big
                                    //<! endian order. ports[0] is port_3 etc..
 
@@ -7854,15 +7772,23 @@ public:
         state_id previous_state       = invalid_state_id;
         bool     disallow_transition  = false;
 
+        /// A transition tried to send more messages than the buffer holds:
+        /// @c start and @c dispatch fail instead of losing them.
+        bool message_overflow = false;
+
         constexpr void push_message(real               value,
                                     std::integral auto port) noexcept
         {
-            debug::ensure(not(messages >= 4 or std::cmp_less(port, 0) or
-                              std::cmp_greater(port, 4)));
+            debug::ensure(
+              not(std::cmp_less(port, 0) or std::cmp_greater(port, 4)));
 
-            if (messages >= 4 or std::cmp_less(port, 0) or
-                std::cmp_greater(port, 4))
+            if (std::cmp_less(port, 0) or std::cmp_greater(port, 4))
                 return;
+
+            if (messages >= std::ssize(message_values)) {
+                message_overflow = true;
+                return;
+            }
 
             message_values[messages] = value;
             message_ports[messages]  = port;
@@ -7880,8 +7806,29 @@ public:
             current_source_state = invalid_state_id;
             previous_state       = invalid_state_id;
             disallow_transition  = false;
+            message_overflow     = false;
 
             messages = 0;
+            timers   = infinite_timers();
+        }
+
+        void advance_timers(const time elapsed) noexcept
+        {
+            for (auto& t : timers)
+                if (not time_domain<time>::is_infinity(t))
+                    t -= elapsed;
+        }
+
+        constexpr time next_timer() const noexcept
+        {
+            return *std::ranges::min_element(timers);
+        }
+
+        static constexpr std::array<time, max_depth> infinite_timers() noexcept
+        {
+            std::array<time, max_depth> ret;
+            ret.fill(time_domain<time>::infinity);
+            return ret;
         }
     };
 
@@ -7902,12 +7849,15 @@ public:
         top_state = invalid_state_id;
     }
 
-    //! Dispatches an event.
-    //!
-    //! @return return true if the event was processed, otherwise
-    //! false. If the automata is badly defined, return an
-    //! modeling error or @c empty_value_error if the external
-    //! source fail to update the buffer.
+    /** Dispatches an event with the UML semantics: the active states,
+     * from the deepest one, try to consume the event until one consumes it.
+     * A @c wake_up goes only to the deepest active state whose timer is
+     * expired.
+     *
+     * @return @c true if a state consumed the event, an error if the
+     * automata is badly defined or if the external source fails to update
+     * the buffer.
+     */
     expected<bool> dispatch(const event_type e,
                             execution&       exec,
                             external_source& srcs) noexcept;
@@ -7916,14 +7866,27 @@ public:
     /// an event.
     bool is_dispatching(execution& state) const noexcept;
 
-    //! Transitions the state machine. This function can not be
-    //! called from Enter / Exit events in the state handler.
-    //!
-    //! @c return @c empty_value_error if the external source
-    //! fail to update the buffer.
-    status transition(state_id         target,
-                      execution&       exec,
-                      external_source& srcs) noexcept;
+    /** Runs the machine to completion after a DEVS transition. The completion
+     * event of a newly entered state goes first, so the machine is stable when
+     * it handles the next expired timer, then the @c input_changed event if
+     * @c input_received. The condition of the current state is checked again
+     * last, since the timers and the message can change the variables it
+     * reads.
+     */
+    status run_to_completion(execution&       exec,
+                             bool             input_received,
+                             external_source& srcs) noexcept;
+
+    /** Starts an external UML transition from the dispatching state to
+     * @c target: exits the active states up to the least common ancestor,
+     * then runs the @c effect. The caller enters the states down to
+     * @c target. This function can not be called from enter or exit
+     * actions.
+     */
+    status transition(state_id            target,
+                      const state_action& effect,
+                      execution&          exec,
+                      external_source&    srcs) noexcept;
 
     /// Set a handler for a state ID. This function will
     /// overwrite the current state handler. \param id state id
@@ -7953,7 +7916,32 @@ public:
                           execution&       exec,
                           external_source& srcs) noexcept;
 
-    int    steps_to_common_root(state_id source, state_id target) noexcept;
+    /// @return The lowest proper ancestor of @c source which is also a proper
+    /// ancestor of @c target, or @c invalid_state_id.
+    state_id find_lca(state_id source, state_id target) const noexcept;
+
+    /// @return The number of super states of @c id, 0 for the top state.
+    int depth_of(state_id id) const noexcept;
+
+    /** Checks the hierarchy before a simulation: a top state, no cycle, at
+     * most @c max_depth levels, an initial sub state for each composite
+     * state, no transition from or to the top state, and no cycle of
+     * completion transitions without guard (a self-transition included).
+     *
+     * @return The first error or @c simulation_errc::none. Unlike
+     * @c check(), it does not call the error callback: an editor can call
+     * it at each frame.
+     */
+    simulation_errc find_error() const noexcept;
+
+    status check() const noexcept
+    {
+        if (const auto ec = find_error(); ec != simulation_errc::none)
+            return make_error(ec);
+
+        return success();
+    }
+
     status on_enter_sub_state(execution& state, external_source& srcs) noexcept;
 
     void affect_action(const state_action& action, execution& exec) noexcept;
@@ -7994,6 +7982,9 @@ public:
 auto get_hierarchical_state_machine(simulation& sim, hsm_id id) noexcept
   -> expected<hierarchical_state_machine*>;
 
+/// Runs a @c hierarchical_state_machine as a DEVS atomic model. When several
+/// messages arrive on the same input port at the same date, the port reads
+/// their maximum value, as the QSS models do.
 struct hsm_wrapper {
     using hsm      = hierarchical_state_machine;
     using state_id = hsm::state_id;
@@ -8016,24 +8007,28 @@ struct hsm_wrapper {
     raw_sample observation(time t, time e) const noexcept;
 };
 
-/// A wrapper to a simulation object in @c simulation::sims array.
+/// A wrapper to an @c embedded_simulation of the @c simulation::sims array.
 ///
-/// This dynamics allows to embed a simulation engine into the current
-/// simulation graph. The embedded simulation can be controlled via
-/// input port to initialize and run the simulation (with different run
-/// modes).
+/// This dynamics embeds an experimental design into the current simulation
+/// graph: one sub-simulation per combination of the factors values (cross
+/// product). After a run, the objective selects the best sub-simulation and
+/// the wrapper sends its factors values and its selections results.
 ///
-/// The simulation must have only one public parameter and only one
-/// observation message. The observation message will be copied to the
-/// @c y[0] output port.
+/// - The results leave the wrapper after the value of the run message, a
+///   delay (zero for the until run type where the value is a date).
+/// - A selection without observation excludes its sub-simulation from the
+///   choice. Without any eligible sub-simulation, for example when no
+///   sub-simulation satisfies the epsilon constraints, nothing is sent.
+/// - A new factor value on @c x[2..] restarts the sub-simulations at the next
+///   run message.
 struct simulation_wrapper {
-    /** x[0] is used to initialize the simulation, x[1] is used to run
-     * the simulation, x[2..] are used to send assign new value to the
-     * public parameter of the embedded simulation. */
+    /** x[0] initializes the sub-simulations, x[1] runs them according to the
+     * @c run_type, x[2..] give a new value to each factor (combined with the
+     * factor according to its @c factor_type). */
     small_vector<input_port, 12> x;
 
-    /** y[0..] are used to send the public parameter of the embedded
-     * simulation according to the selection criteria. */
+    /** y[0..] send the factors values of the best sub-simulation, then the
+     * results of its selections. */
     small_vector<output_port_id, 12> y;
 
     /** Identifier of the source of the simulation to run. This
@@ -8104,6 +8099,8 @@ struct accumulator {
         std::copy_n(other.numbers, std::size(numbers), numbers);
     }
 
+    real watched_value() const noexcept { return number; }
+
     status initialize(simulation& /*sim*/) noexcept
     {
         number = zero;
@@ -8122,16 +8119,13 @@ struct accumulator {
         for (size_t i = 0; i != PortNumber; ++i) {
             if (const auto lst = get_message(sim, x[i + PortNumber]);
                 not lst.empty()) {
-                numbers[i] = lst.front()[0];
+                numbers[i] = get_qss_message<1>(lst)[0];
             }
         }
 
-        for (size_t i = 0; i != PortNumber; ++i) {
-            if (const auto lst = get_message(sim, x[i]); not lst.empty()) {
-                if (not is_zero(lst.front()[0]))
-                    number += numbers[i];
-            }
-        }
+        for (size_t i = 0; i != PortNumber; ++i)
+            if (have_true_message(get_message(sim, x[i])))
+                number += numbers[i];
 
         return success();
     }
@@ -8160,14 +8154,15 @@ struct abstract_cross {
     abstract_cross() noexcept = default;
 
     abstract_cross(const abstract_cross& other) noexcept
-      : value(other.value)
+      : output_values(other.output_values)
+      , value(other.value)
       , threshold(other.threshold)
       , sigma(other.sigma)
       , zone(other.zone)
     {}
 
-    enum o_port_name : u8 { port_value, port_threshold };
-    enum i_port_name : u8 { port_up, port_down };
+    enum i_port_name : u8 { port_value, port_threshold };
+    enum o_port_name : u8 { port_up, port_down };
 
     status initialize(simulation& /*sim*/) noexcept
     {
@@ -8190,8 +8185,13 @@ struct abstract_cross {
             if constexpr (QssLevel == 1) {
                 if (old_value > value[0])
                     return zone_type::down;
-                else
+                if (old_value < value[0])
                     return zone_type::up;
+
+                // No new value (the internal transition after the output of
+                // the zone): the zone stays, otherwise a value that reaches
+                // the threshold going down would be sent down then up.
+                return zone == zone_type::undefined ? zone_type::up : zone;
             }
 
             if constexpr (QssLevel >= 2) {
@@ -8243,6 +8243,12 @@ struct abstract_cross {
 
     status lambda(simulation& sim) noexcept
     {
+        // A strictly positive time advance is a predicted crossing: the zone
+        // is still the old one, the next transition changes it and the
+        // output is sent at the same date.
+        if (sigma > time_domain<time>::zero)
+            return success();
+
         return zone == zone_type::up
                  ? send_message(sim, y[port_up], output_values[0])
                  : send_message(sim, y[port_down], output_values[1]);
@@ -8398,8 +8404,10 @@ struct time_func {
         if (not std::isfinite(timestep) or timestep <= zero)
             return make_error(simulation_errc::time_func_timestep_error);
 
+        // The value is computed for the date of the next output with the
+        // expression of the kernel (t + sigma): the output at tn is f(tn).
         sigma = offset;
-        value = call_function(sim.current_time());
+        value = call_function(sim.current_time() + offset);
 
         return success();
     }
@@ -8409,8 +8417,8 @@ struct time_func {
                       time /*e*/,
                       time /*r*/) noexcept
     {
-        value = call_function(t);
         sigma = timestep;
+        value = call_function(t + timestep);
         return success();
     }
 
@@ -8436,18 +8444,26 @@ struct queue {
 
     real ta = one;
 
+    fifo_overflow overflow = fifo_overflow::grow;
+    i32           capacity = default_fifo_capacity;
+
     queue() noexcept = default;
 
     queue(const queue& other) noexcept
       : sigma(other.sigma)
       , fifo(undefined<dated_message_id>())
       , ta(other.ta)
+      , overflow(other.overflow)
+      , capacity(other.capacity)
     {}
 
     status initialize(simulation& /*sim*/) noexcept
     {
         if (ta <= 0)
             return make_error(simulation_errc::queue_ta_error);
+
+        if (capacity < 1)
+            return make_error(simulation_errc::queue_capacity_error);
 
         sigma = time_domain<time>::infinity;
         fifo  = undefined<dated_message_id>();
@@ -8468,27 +8484,13 @@ struct queue {
 
     status transition(simulation& sim, time t, time /*e*/, time /*r*/) noexcept;
 
-    status lambda(simulation& sim) noexcept
-    {
-        if (auto* ar = sim.dated_messages.try_to_get(fifo)) {
-            if (not ar->empty()) {
-                auto       it = ar->head();
-                auto       et = ar->end();
-                const auto t  = it->data()[0];
-
-                while (it != et and it->data()[0] == t) {
-                    irt_check(send_message(sim, y[0], it->data()[1],
-                                           it->data()[2], it->data()[3]));
-
-                    ++it;
-                }
-            }
-        }
-
-        return success();
-    }
+    //! Sends the head of the @c fifo: the message with the smallest date.
+    status lambda(simulation& sim) noexcept;
 };
 
+//! A FIFO queue: the messages leave in the order of arrival. The delay of each
+//! message is read in the @c source_ta and a message leaves at the date
+//! max(arrival + delay, date of the previous message).
 struct dynamic_queue {
     input_port       x[1] = {};
     output_port_id   y[1] = {};
@@ -8498,16 +8500,24 @@ struct dynamic_queue {
     source_data src_data;
     source      source_ta;
 
+    fifo_overflow overflow = fifo_overflow::grow;
+    i32           capacity = default_fifo_capacity;
+
     dynamic_queue() noexcept = default;
 
     dynamic_queue(const dynamic_queue& other) noexcept
       : sigma(other.sigma)
       , fifo(undefined<dated_message_id>())
       , source_ta(other.source_ta)
+      , overflow(other.overflow)
+      , capacity(other.capacity)
     {}
 
     status initialize(simulation& sim) noexcept
     {
+        if (capacity < 1)
+            return make_error(simulation_errc::queue_capacity_error);
+
         sigma = time_domain<time>::infinity;
         fifo  = undefined<dated_message_id>();
 
@@ -8531,49 +8541,40 @@ struct dynamic_queue {
 
     status transition(simulation& sim, time t, time /*e*/, time /*r*/) noexcept;
 
-    status lambda(simulation& sim) noexcept
-    {
-        if (auto* ar = sim.dated_messages.try_to_get(fifo); ar) {
-            auto       it  = ar->begin();
-            auto       end = ar->end();
-            const auto t   = it->data()[0];
-
-            for (; it != end && it->data()[0] <= t; ++it)
-                irt_check(send_message(sim, y[0], it->data()[1], it->data()[2],
-                                       it->data()[3]));
-        }
-
-        return success();
-    }
+    //! Sends the head of the @c fifo: the message with the smallest date.
+    status lambda(simulation& sim) noexcept;
 };
 
+//! A queue ordered by date: a message leaves at the date arrival + delay where
+//! the delay is read in the @c source_ta. The messages with the same date
+//! leave in the order of arrival.
 struct priority_queue {
     input_port       x[1] = {};
     output_port_id   y[1] = {};
     time             sigma;
     dated_message_id fifo = undefined<dated_message_id>();
-    real             ta   = 1.0;
 
     source_data src_data;
     source      source_ta;
+
+    fifo_overflow overflow = fifo_overflow::grow;
+    i32           capacity = default_fifo_capacity;
 
     priority_queue() noexcept = default;
 
     priority_queue(const priority_queue& other) noexcept
       : sigma(other.sigma)
       , fifo(undefined<dated_message_id>())
-      , ta(other.ta)
       , source_ta(other.source_ta)
+      , overflow(other.overflow)
+      , capacity(other.capacity)
     {}
 
-private:
-    status try_to_insert(simulation&    sim,
-                         const time     t,
-                         const message& msg) noexcept;
-
-public:
     status initialize(simulation& sim) noexcept
     {
+        if (capacity < 1)
+            return make_error(simulation_errc::queue_capacity_error);
+
         irt_check(sim.srcs.initialize_source(*this, source_ta, src_data));
 
         sigma = time_domain<time>::infinity;
@@ -8597,229 +8598,194 @@ public:
 
     status transition(simulation& sim, time t, time /*e*/, time /*r*/) noexcept;
 
-    status lambda(simulation& sim) noexcept
-    {
-        if (auto* ar = sim.dated_messages.try_to_get(fifo); ar) {
-            auto       it  = ar->begin();
-            auto       end = ar->end();
-            const auto t   = it->data()[0];
-
-            for (; it != end && it->data()[0] <= t; ++it)
-                irt_check(send_message(sim, y[0], it->data()[1], it->data()[2],
-                                       it->data()[3]));
-        }
-
-        return success();
-    }
+    //! Sends the head of the @c fifo: the message with the smallest date.
+    status lambda(simulation& sim) noexcept;
 };
 
-constexpr sz max(sz a) { return a; }
+template<typename... Ts>
+struct type_list {};
 
-template<typename... Args>
-constexpr sz max(sz a, Args&&... args)
+/// The dynamics in the order of @c dynamics_type: the ordinal of a type is its
+/// index in this list.
+using dynamics_list = type_list<qss1_integrator,
+                                qss1_multiplier,
+                                qss1_cross,
+                                qss1_max_hold,
+                                qss1_min_hold,
+                                qss1_flipflop,
+                                qss1_power,
+                                qss1_square,
+                                qss1_sum_2,
+                                qss1_sum_3,
+                                qss1_sum_4,
+                                qss1_wsum_2,
+                                qss1_wsum_3,
+                                qss1_wsum_4,
+                                qss1_inverse,
+                                qss1_compare,
+                                qss1_gain,
+                                qss1_sin,
+                                qss1_cos,
+                                qss1_log,
+                                qss1_exp,
+                                qss1_sample_hold,
+                                qss1_quantizer,
+                                qss1_integrate_and_fire,
+                                qss1_threshold_crossing,
+                                qss1_pwm,
+                                qss1_abs,
+                                qss1_atan,
+                                qss1_atan2,
+                                qss1_dead_zone,
+                                qss1_division,
+                                qss1_hysteresis,
+                                qss1_maximum,
+                                qss1_minimum,
+                                qss1_priority_2,
+                                qss1_priority_3,
+                                qss1_priority_4,
+                                qss1_saturation,
+                                qss1_sigmoid,
+                                qss1_sign,
+                                qss1_sqrt,
+                                qss1_tan,
+                                qss1_tanh,
+                                qss1_wrap,
+                                qss2_integrator,
+                                qss2_multiplier,
+                                qss2_cross,
+                                qss2_max_hold,
+                                qss2_min_hold,
+                                qss2_flipflop,
+                                qss2_power,
+                                qss2_square,
+                                qss2_sum_2,
+                                qss2_sum_3,
+                                qss2_sum_4,
+                                qss2_wsum_2,
+                                qss2_wsum_3,
+                                qss2_wsum_4,
+                                qss2_inverse,
+                                qss2_compare,
+                                qss2_gain,
+                                qss2_sin,
+                                qss2_cos,
+                                qss2_log,
+                                qss2_exp,
+                                qss2_sample_hold,
+                                qss2_quantizer,
+                                qss2_integrate_and_fire,
+                                qss2_threshold_crossing,
+                                qss2_pwm,
+                                qss2_abs,
+                                qss2_atan,
+                                qss2_atan2,
+                                qss2_dead_zone,
+                                qss2_division,
+                                qss2_hysteresis,
+                                qss2_maximum,
+                                qss2_minimum,
+                                qss2_priority_2,
+                                qss2_priority_3,
+                                qss2_priority_4,
+                                qss2_saturation,
+                                qss2_sigmoid,
+                                qss2_sign,
+                                qss2_sqrt,
+                                qss2_tan,
+                                qss2_tanh,
+                                qss2_wrap,
+                                qss3_integrator,
+                                qss3_multiplier,
+                                qss3_cross,
+                                qss3_max_hold,
+                                qss3_min_hold,
+                                qss3_flipflop,
+                                qss3_power,
+                                qss3_square,
+                                qss3_sum_2,
+                                qss3_sum_3,
+                                qss3_sum_4,
+                                qss3_wsum_2,
+                                qss3_wsum_3,
+                                qss3_wsum_4,
+                                qss3_inverse,
+                                qss3_compare,
+                                qss3_gain,
+                                qss3_sin,
+                                qss3_cos,
+                                qss3_log,
+                                qss3_exp,
+                                qss3_sample_hold,
+                                qss3_quantizer,
+                                qss3_integrate_and_fire,
+                                qss3_threshold_crossing,
+                                qss3_pwm,
+                                qss3_abs,
+                                qss3_atan,
+                                qss3_atan2,
+                                qss3_dead_zone,
+                                qss3_division,
+                                qss3_hysteresis,
+                                qss3_maximum,
+                                qss3_minimum,
+                                qss3_priority_2,
+                                qss3_priority_3,
+                                qss3_priority_4,
+                                qss3_saturation,
+                                qss3_sigmoid,
+                                qss3_sign,
+                                qss3_sqrt,
+                                qss3_tan,
+                                qss3_tanh,
+                                qss3_wrap,
+                                counter,
+                                queue,
+                                dynamic_queue,
+                                priority_queue,
+                                generator,
+                                constant,
+                                time_func,
+                                accumulator_2,
+                                logical_and_2,
+                                logical_and_3,
+                                logical_or_2,
+                                logical_or_3,
+                                logical_invert,
+                                hsm_wrapper,
+                                simulation_wrapper,
+                                zero_order_hold>;
+
+template<typename T, typename... Ts>
+consteval int type_list_index(type_list<Ts...>) noexcept
 {
-    return std::max(max(std::forward<Args>(args)...), a);
+    constexpr bool same[] = { std::is_same_v<T, Ts>... };
+
+    for (int i = 0; i != static_cast<int>(sizeof...(Ts)); ++i)
+        if (same[i])
+            return i;
+
+    return -1;
 }
+
+template<typename... Ts>
+consteval int type_list_size(type_list<Ts...>) noexcept
+{
+    return static_cast<int>(sizeof...(Ts));
+}
+
+static_assert(type_list_size(dynamics_list{}) == dynamics_type_size(),
+              "dynamics_list and dynamics_type must have the same size");
 
 constexpr sz max_size_in_bytes() noexcept
 {
-    return max(
-      sizeof(qss1_integrator), sizeof(qss1_multiplier), sizeof(qss1_cross),
-      sizeof(qss1_max_hold), sizeof(qss1_min_hold), sizeof(qss1_flipflop),
-      sizeof(qss1_filter), sizeof(qss1_power), sizeof(qss1_square),
-      sizeof(qss1_sum_2), sizeof(qss1_sum_3), sizeof(qss1_sum_4),
-      sizeof(qss1_wsum_2), sizeof(qss1_wsum_3), sizeof(qss1_wsum_4),
-      sizeof(qss1_inverse), sizeof(qss1_integer), sizeof(qss1_compare),
-      sizeof(qss1_gain), sizeof(qss1_sin), sizeof(qss1_cos), sizeof(qss1_log),
-      sizeof(qss1_exp), sizeof(qss2_integrator), sizeof(qss2_multiplier),
-      sizeof(qss2_cross), sizeof(qss2_max_hold), sizeof(qss2_min_hold),
-      sizeof(qss2_flipflop), sizeof(qss2_filter), sizeof(qss2_power),
-      sizeof(qss2_square), sizeof(qss2_sum_2), sizeof(qss2_sum_3),
-      sizeof(qss2_sum_4), sizeof(qss2_wsum_2), sizeof(qss2_wsum_3),
-      sizeof(qss2_wsum_4), sizeof(qss2_inverse), sizeof(qss2_integer),
-      sizeof(qss2_compare), sizeof(qss2_gain), sizeof(qss2_sin),
-      sizeof(qss2_cos), sizeof(qss2_log), sizeof(qss2_exp),
-      sizeof(qss3_integrator), sizeof(qss3_multiplier), sizeof(qss3_cross),
-      sizeof(qss3_max_hold), sizeof(qss3_min_hold), sizeof(qss3_flipflop),
-      sizeof(qss3_filter), sizeof(qss3_power), sizeof(qss3_square),
-      sizeof(qss3_sum_2), sizeof(qss3_sum_3), sizeof(qss3_sum_4),
-      sizeof(qss3_wsum_2), sizeof(qss3_wsum_3), sizeof(qss3_wsum_4),
-      sizeof(qss3_inverse), sizeof(qss3_integer), sizeof(qss3_compare),
-      sizeof(qss3_gain), sizeof(qss3_sin), sizeof(qss3_cos), sizeof(qss3_log),
-      sizeof(qss3_exp), sizeof(counter), sizeof(queue), sizeof(dynamic_queue),
-      sizeof(priority_queue), sizeof(generator), sizeof(constant),
-      sizeof(time_func), sizeof(accumulator_2), sizeof(logical_and_2),
-      sizeof(logical_and_3), sizeof(logical_or_2), sizeof(logical_or_3),
-      sizeof(logical_invert), sizeof(hsm_wrapper), sizeof(simulation_wrapper),
-      sizeof(qss1_sample_hold), sizeof(qss2_sample_hold),
-      sizeof(qss3_sample_hold), sizeof(zero_order_hold), sizeof(qss1_quantizer),
-      sizeof(qss2_quantizer), sizeof(qss3_quantizer),
-      sizeof(qss1_integrate_and_fire), sizeof(qss2_integrate_and_fire),
-      sizeof(qss3_integrate_and_fire), sizeof(qss1_threshold_crossing),
-      sizeof(qss2_threshold_crossing), sizeof(qss3_threshold_crossing),
-      sizeof(qss1_pwm), sizeof(qss2_pwm), sizeof(qss3_pwm), sizeof(qss1_sqrt),
-      sizeof(qss2_sqrt), sizeof(qss3_sqrt), sizeof(qss1_atan),
-      sizeof(qss2_atan), sizeof(qss3_atan), sizeof(qss1_tan), sizeof(qss2_tan),
-      sizeof(qss3_tan), sizeof(qss1_tanh), sizeof(qss2_tanh), sizeof(qss3_tanh),
-      sizeof(qss1_sigmoid), sizeof(qss2_sigmoid), sizeof(qss3_sigmoid),
-      sizeof(qss1_division), sizeof(qss2_division), sizeof(qss3_division),
-      sizeof(qss1_atan2), sizeof(qss2_atan2), sizeof(qss3_atan2),
-      sizeof(qss1_saturation), sizeof(qss2_saturation), sizeof(qss3_saturation),
-      sizeof(qss1_dead_zone), sizeof(qss2_dead_zone), sizeof(qss3_dead_zone),
-      sizeof(qss1_abs), sizeof(qss2_abs), sizeof(qss3_abs), sizeof(qss1_sign),
-      sizeof(qss2_sign), sizeof(qss3_sign), sizeof(qss1_hysteresis),
-      sizeof(qss2_hysteresis), sizeof(qss3_hysteresis), sizeof(qss1_minimum),
-      sizeof(qss2_minimum), sizeof(qss3_minimum), sizeof(qss1_maximum),
-      sizeof(qss2_maximum), sizeof(qss3_maximum), sizeof(qss1_wrap),
-      sizeof(qss2_wrap), sizeof(qss3_wrap));
+    return []<typename... Ts>(type_list<Ts...>) {
+        return std::max({ sizeof(Ts)... });
+    }(dynamics_list{});
 }
 
 template<typename Dynamics>
-concept dynamics = std::is_same_v<Dynamics, qss1_integrator> or
-                   std::is_same_v<Dynamics, qss1_multiplier> or
-                   std::is_same_v<Dynamics, qss1_cross> or
-                   std::is_same_v<Dynamics, qss1_max_hold> or
-                   std::is_same_v<Dynamics, qss1_min_hold> or
-                   std::is_same_v<Dynamics, qss1_flipflop> or
-                   std::is_same_v<Dynamics, qss1_filter> or
-                   std::is_same_v<Dynamics, qss1_power> or
-                   std::is_same_v<Dynamics, qss1_square> or
-                   std::is_same_v<Dynamics, qss1_sum_2> or
-                   std::is_same_v<Dynamics, qss1_sum_3> or
-                   std::is_same_v<Dynamics, qss1_sum_4> or
-                   std::is_same_v<Dynamics, qss1_wsum_2> or
-                   std::is_same_v<Dynamics, qss1_wsum_3> or
-                   std::is_same_v<Dynamics, qss1_wsum_4> or
-                   std::is_same_v<Dynamics, qss1_inverse> or
-                   std::is_same_v<Dynamics, qss1_integer> or
-                   std::is_same_v<Dynamics, qss1_compare> or
-                   std::is_same_v<Dynamics, qss1_gain> or
-                   std::is_same_v<Dynamics, qss1_sin> or
-                   std::is_same_v<Dynamics, qss1_cos> or
-                   std::is_same_v<Dynamics, qss1_log> or
-                   std::is_same_v<Dynamics, qss1_exp> or
-                   std::is_same_v<Dynamics, qss2_integrator> or
-                   std::is_same_v<Dynamics, qss2_multiplier> or
-                   std::is_same_v<Dynamics, qss2_cross> or
-                   std::is_same_v<Dynamics, qss2_max_hold> or
-                   std::is_same_v<Dynamics, qss2_min_hold> or
-                   std::is_same_v<Dynamics, qss2_flipflop> or
-                   std::is_same_v<Dynamics, qss2_filter> or
-                   std::is_same_v<Dynamics, qss2_power> or
-                   std::is_same_v<Dynamics, qss2_square> or
-                   std::is_same_v<Dynamics, qss2_sum_2> or
-                   std::is_same_v<Dynamics, qss2_sum_3> or
-                   std::is_same_v<Dynamics, qss2_sum_4> or
-                   std::is_same_v<Dynamics, qss2_wsum_2> or
-                   std::is_same_v<Dynamics, qss2_wsum_3> or
-                   std::is_same_v<Dynamics, qss2_wsum_4> or
-                   std::is_same_v<Dynamics, qss2_inverse> or
-                   std::is_same_v<Dynamics, qss2_integer> or
-                   std::is_same_v<Dynamics, qss2_compare> or
-                   std::is_same_v<Dynamics, qss2_gain> or
-                   std::is_same_v<Dynamics, qss2_sin> or
-                   std::is_same_v<Dynamics, qss2_cos> or
-                   std::is_same_v<Dynamics, qss2_log> or
-                   std::is_same_v<Dynamics, qss2_exp> or
-                   std::is_same_v<Dynamics, qss3_integrator> or
-                   std::is_same_v<Dynamics, qss3_multiplier> or
-                   std::is_same_v<Dynamics, qss3_cross> or
-                   std::is_same_v<Dynamics, qss3_max_hold> or
-                   std::is_same_v<Dynamics, qss3_min_hold> or
-                   std::is_same_v<Dynamics, qss3_flipflop> or
-                   std::is_same_v<Dynamics, qss3_filter> or
-                   std::is_same_v<Dynamics, qss3_power> or
-                   std::is_same_v<Dynamics, qss3_square> or
-                   std::is_same_v<Dynamics, qss3_sum_2> or
-                   std::is_same_v<Dynamics, qss3_sum_3> or
-                   std::is_same_v<Dynamics, qss3_sum_4> or
-                   std::is_same_v<Dynamics, qss3_wsum_2> or
-                   std::is_same_v<Dynamics, qss3_wsum_3> or
-                   std::is_same_v<Dynamics, qss3_wsum_4> or
-                   std::is_same_v<Dynamics, qss3_inverse> or
-                   std::is_same_v<Dynamics, qss3_integer> or
-                   std::is_same_v<Dynamics, qss3_compare> or
-                   std::is_same_v<Dynamics, qss3_gain> or
-                   std::is_same_v<Dynamics, qss3_sin> or
-                   std::is_same_v<Dynamics, qss3_cos> or
-                   std::is_same_v<Dynamics, qss3_log> or
-                   std::is_same_v<Dynamics, qss3_exp> or
-                   std::is_same_v<Dynamics, counter> or
-                   std::is_same_v<Dynamics, queue> or
-                   std::is_same_v<Dynamics, dynamic_queue> or
-                   std::is_same_v<Dynamics, priority_queue> or
-                   std::is_same_v<Dynamics, generator> or
-                   std::is_same_v<Dynamics, constant> or
-                   std::is_same_v<Dynamics, accumulator_2> or
-                   std::is_same_v<Dynamics, time_func> or
-                   std::is_same_v<Dynamics, logical_and_2> or
-                   std::is_same_v<Dynamics, logical_and_3> or
-                   std::is_same_v<Dynamics, logical_or_2> or
-                   std::is_same_v<Dynamics, logical_or_3> or
-                   std::is_same_v<Dynamics, logical_invert> or
-                   std::is_same_v<Dynamics, hsm_wrapper> or
-                   std::is_same_v<Dynamics, simulation_wrapper> or
-                   std::is_same_v<Dynamics, qss1_sample_hold> or
-                   std::is_same_v<Dynamics, qss2_sample_hold> or
-                   std::is_same_v<Dynamics, qss3_sample_hold> or
-                   std::is_same_v<Dynamics, zero_order_hold> or
-                   std::is_same_v<Dynamics, qss1_quantizer> or
-                   std::is_same_v<Dynamics, qss2_quantizer> or
-                   std::is_same_v<Dynamics, qss3_quantizer> or
-                   std::is_same_v<Dynamics, qss1_integrate_and_fire> or
-                   std::is_same_v<Dynamics, qss2_integrate_and_fire> or
-                   std::is_same_v<Dynamics, qss3_integrate_and_fire> or
-                   std::is_same_v<Dynamics, qss1_threshold_crossing> or
-                   std::is_same_v<Dynamics, qss2_threshold_crossing> or
-                   std::is_same_v<Dynamics, qss3_threshold_crossing> or
-                   std::is_same_v<Dynamics, qss1_pwm> or
-                   std::is_same_v<Dynamics, qss2_pwm> or
-                   std::is_same_v<Dynamics, qss3_pwm> or
-                   std::is_same_v<Dynamics, qss1_sqrt> or
-                   std::is_same_v<Dynamics, qss2_sqrt> or
-                   std::is_same_v<Dynamics, qss3_sqrt> or
-                   std::is_same_v<Dynamics, qss1_atan> or
-                   std::is_same_v<Dynamics, qss2_atan> or
-                   std::is_same_v<Dynamics, qss3_atan> or
-                   std::is_same_v<Dynamics, qss1_tan> or
-                   std::is_same_v<Dynamics, qss2_tan> or
-                   std::is_same_v<Dynamics, qss3_tan> or
-                   std::is_same_v<Dynamics, qss1_tanh> or
-                   std::is_same_v<Dynamics, qss2_tanh> or
-                   std::is_same_v<Dynamics, qss3_tanh> or
-                   std::is_same_v<Dynamics, qss1_sigmoid> or
-                   std::is_same_v<Dynamics, qss2_sigmoid> or
-                   std::is_same_v<Dynamics, qss3_sigmoid> or
-                   std::is_same_v<Dynamics, qss1_division> or
-                   std::is_same_v<Dynamics, qss2_division> or
-                   std::is_same_v<Dynamics, qss3_division> or
-                   std::is_same_v<Dynamics, qss1_atan2> or
-                   std::is_same_v<Dynamics, qss2_atan2> or
-                   std::is_same_v<Dynamics, qss3_atan2> or
-                   std::is_same_v<Dynamics, qss1_saturation> or
-                   std::is_same_v<Dynamics, qss2_saturation> or
-                   std::is_same_v<Dynamics, qss3_saturation> or
-                   std::is_same_v<Dynamics, qss1_dead_zone> or
-                   std::is_same_v<Dynamics, qss2_dead_zone> or
-                   std::is_same_v<Dynamics, qss3_dead_zone> or
-                   std::is_same_v<Dynamics, qss1_abs> or
-                   std::is_same_v<Dynamics, qss2_abs> or
-                   std::is_same_v<Dynamics, qss3_abs> or
-                   std::is_same_v<Dynamics, qss1_sign> or
-                   std::is_same_v<Dynamics, qss2_sign> or
-                   std::is_same_v<Dynamics, qss3_sign> or
-                   std::is_same_v<Dynamics, qss1_hysteresis> or
-                   std::is_same_v<Dynamics, qss2_hysteresis> or
-                   std::is_same_v<Dynamics, qss3_hysteresis> or
-                   std::is_same_v<Dynamics, qss1_minimum> or
-                   std::is_same_v<Dynamics, qss2_minimum> or
-                   std::is_same_v<Dynamics, qss3_minimum> or
-                   std::is_same_v<Dynamics, qss1_maximum> or
-                   std::is_same_v<Dynamics, qss2_maximum> or
-                   std::is_same_v<Dynamics, qss3_maximum> or
-                   std::is_same_v<Dynamics, qss1_wrap> or
-                   std::is_same_v<Dynamics, qss2_wrap> or
-                   std::is_same_v<Dynamics, qss3_wrap>;
+concept dynamics = type_list_index<Dynamics>(dynamics_list{}) >= 0;
 
 struct model {
     real          tl     = zero;
@@ -8837,1541 +8803,65 @@ static_assert(std::is_standard_layout_v<model>,
 template<dynamics Dynamics>
 static constexpr dynamics_type dynamics_typeof() noexcept
 {
-    if constexpr (std::is_same_v<Dynamics, qss1_integrator>)
-        return dynamics_type::qss1_integrator;
-    if constexpr (std::is_same_v<Dynamics, qss1_multiplier>)
-        return dynamics_type::qss1_multiplier;
-    if constexpr (std::is_same_v<Dynamics, qss1_cross>)
-        return dynamics_type::qss1_cross;
-    if constexpr (std::is_same_v<Dynamics, qss1_max_hold>)
-        return dynamics_type::qss1_max_hold;
-    if constexpr (std::is_same_v<Dynamics, qss1_min_hold>)
-        return dynamics_type::qss1_min_hold;
-    if constexpr (std::is_same_v<Dynamics, qss1_flipflop>)
-        return dynamics_type::qss1_flipflop;
-    if constexpr (std::is_same_v<Dynamics, qss1_filter>)
-        return dynamics_type::qss1_filter;
-    if constexpr (std::is_same_v<Dynamics, qss1_power>)
-        return dynamics_type::qss1_power;
-    if constexpr (std::is_same_v<Dynamics, qss1_square>)
-        return dynamics_type::qss1_square;
-    if constexpr (std::is_same_v<Dynamics, qss1_sum_2>)
-        return dynamics_type::qss1_sum_2;
-    if constexpr (std::is_same_v<Dynamics, qss1_sum_3>)
-        return dynamics_type::qss1_sum_3;
-    if constexpr (std::is_same_v<Dynamics, qss1_sum_4>)
-        return dynamics_type::qss1_sum_4;
-    if constexpr (std::is_same_v<Dynamics, qss1_wsum_2>)
-        return dynamics_type::qss1_wsum_2;
-    if constexpr (std::is_same_v<Dynamics, qss1_wsum_3>)
-        return dynamics_type::qss1_wsum_3;
-    if constexpr (std::is_same_v<Dynamics, qss1_wsum_4>)
-        return dynamics_type::qss1_wsum_4;
-    if constexpr (std::is_same_v<Dynamics, qss1_inverse>)
-        return dynamics_type::qss1_inverse;
-    if constexpr (std::is_same_v<Dynamics, qss1_integer>)
-        return dynamics_type::qss1_integer;
-    if constexpr (std::is_same_v<Dynamics, qss1_compare>)
-        return dynamics_type::qss1_compare;
-    if constexpr (std::is_same_v<Dynamics, qss1_gain>)
-        return dynamics_type::qss1_gain;
-    if constexpr (std::is_same_v<Dynamics, qss1_sin>)
-        return dynamics_type::qss1_sin;
-    if constexpr (std::is_same_v<Dynamics, qss1_cos>)
-        return dynamics_type::qss1_cos;
-    if constexpr (std::is_same_v<Dynamics, qss1_log>)
-        return dynamics_type::qss1_log;
-    if constexpr (std::is_same_v<Dynamics, qss1_exp>)
-        return dynamics_type::qss1_exp;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_integrator>)
-        return dynamics_type::qss2_integrator;
-    if constexpr (std::is_same_v<Dynamics, qss2_multiplier>)
-        return dynamics_type::qss2_multiplier;
-    if constexpr (std::is_same_v<Dynamics, qss2_cross>)
-        return dynamics_type::qss2_cross;
-    if constexpr (std::is_same_v<Dynamics, qss2_max_hold>)
-        return dynamics_type::qss2_max_hold;
-    if constexpr (std::is_same_v<Dynamics, qss2_min_hold>)
-        return dynamics_type::qss2_min_hold;
-    if constexpr (std::is_same_v<Dynamics, qss2_flipflop>)
-        return dynamics_type::qss2_flipflop;
-    if constexpr (std::is_same_v<Dynamics, qss2_filter>)
-        return dynamics_type::qss2_filter;
-    if constexpr (std::is_same_v<Dynamics, qss2_power>)
-        return dynamics_type::qss2_power;
-    if constexpr (std::is_same_v<Dynamics, qss2_square>)
-        return dynamics_type::qss2_square;
-    if constexpr (std::is_same_v<Dynamics, qss2_sum_2>)
-        return dynamics_type::qss2_sum_2;
-    if constexpr (std::is_same_v<Dynamics, qss2_sum_3>)
-        return dynamics_type::qss2_sum_3;
-    if constexpr (std::is_same_v<Dynamics, qss2_sum_4>)
-        return dynamics_type::qss2_sum_4;
-    if constexpr (std::is_same_v<Dynamics, qss2_wsum_2>)
-        return dynamics_type::qss2_wsum_2;
-    if constexpr (std::is_same_v<Dynamics, qss2_wsum_3>)
-        return dynamics_type::qss2_wsum_3;
-    if constexpr (std::is_same_v<Dynamics, qss2_wsum_4>)
-        return dynamics_type::qss2_wsum_4;
-    if constexpr (std::is_same_v<Dynamics, qss2_inverse>)
-        return dynamics_type::qss2_inverse;
-    if constexpr (std::is_same_v<Dynamics, qss2_integer>)
-        return dynamics_type::qss2_integer;
-    if constexpr (std::is_same_v<Dynamics, qss2_compare>)
-        return dynamics_type::qss2_compare;
-    if constexpr (std::is_same_v<Dynamics, qss2_gain>)
-        return dynamics_type::qss2_gain;
-    if constexpr (std::is_same_v<Dynamics, qss2_sin>)
-        return dynamics_type::qss2_sin;
-    if constexpr (std::is_same_v<Dynamics, qss2_cos>)
-        return dynamics_type::qss2_cos;
-    if constexpr (std::is_same_v<Dynamics, qss2_log>)
-        return dynamics_type::qss2_log;
-    if constexpr (std::is_same_v<Dynamics, qss2_exp>)
-        return dynamics_type::qss2_exp;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_integrator>)
-        return dynamics_type::qss3_integrator;
-    if constexpr (std::is_same_v<Dynamics, qss3_multiplier>)
-        return dynamics_type::qss3_multiplier;
-    if constexpr (std::is_same_v<Dynamics, qss3_cross>)
-        return dynamics_type::qss3_cross;
-    if constexpr (std::is_same_v<Dynamics, qss3_max_hold>)
-        return dynamics_type::qss3_max_hold;
-    if constexpr (std::is_same_v<Dynamics, qss3_min_hold>)
-        return dynamics_type::qss3_min_hold;
-    if constexpr (std::is_same_v<Dynamics, qss3_flipflop>)
-        return dynamics_type::qss3_flipflop;
-    if constexpr (std::is_same_v<Dynamics, qss3_filter>)
-        return dynamics_type::qss3_filter;
-    if constexpr (std::is_same_v<Dynamics, qss3_power>)
-        return dynamics_type::qss3_power;
-    if constexpr (std::is_same_v<Dynamics, qss3_square>)
-        return dynamics_type::qss3_square;
-    if constexpr (std::is_same_v<Dynamics, qss3_sum_2>)
-        return dynamics_type::qss3_sum_2;
-    if constexpr (std::is_same_v<Dynamics, qss3_sum_3>)
-        return dynamics_type::qss3_sum_3;
-    if constexpr (std::is_same_v<Dynamics, qss3_sum_4>)
-        return dynamics_type::qss3_sum_4;
-    if constexpr (std::is_same_v<Dynamics, qss3_wsum_2>)
-        return dynamics_type::qss3_wsum_2;
-    if constexpr (std::is_same_v<Dynamics, qss3_wsum_3>)
-        return dynamics_type::qss3_wsum_3;
-    if constexpr (std::is_same_v<Dynamics, qss3_wsum_4>)
-        return dynamics_type::qss3_wsum_4;
-    if constexpr (std::is_same_v<Dynamics, qss3_inverse>)
-        return dynamics_type::qss3_inverse;
-    if constexpr (std::is_same_v<Dynamics, qss3_integer>)
-        return dynamics_type::qss3_integer;
-    if constexpr (std::is_same_v<Dynamics, qss3_compare>)
-        return dynamics_type::qss3_compare;
-    if constexpr (std::is_same_v<Dynamics, qss3_gain>)
-        return dynamics_type::qss3_gain;
-    if constexpr (std::is_same_v<Dynamics, qss3_sin>)
-        return dynamics_type::qss3_sin;
-    if constexpr (std::is_same_v<Dynamics, qss3_cos>)
-        return dynamics_type::qss3_cos;
-    if constexpr (std::is_same_v<Dynamics, qss3_log>)
-        return dynamics_type::qss3_log;
-    if constexpr (std::is_same_v<Dynamics, qss3_exp>)
-        return dynamics_type::qss3_exp;
-
-    if constexpr (std::is_same_v<Dynamics, counter>)
-        return dynamics_type::counter;
-
-    if constexpr (std::is_same_v<Dynamics, queue>)
-        return dynamics_type::queue;
-    if constexpr (std::is_same_v<Dynamics, dynamic_queue>)
-        return dynamics_type::dynamic_queue;
-    if constexpr (std::is_same_v<Dynamics, priority_queue>)
-        return dynamics_type::priority_queue;
-    if constexpr (std::is_same_v<Dynamics, generator>)
-        return dynamics_type::generator;
-    if constexpr (std::is_same_v<Dynamics, constant>)
-        return dynamics_type::constant;
-
-    if constexpr (std::is_same_v<Dynamics, time_func>)
-        return dynamics_type::time_func;
-    if constexpr (std::is_same_v<Dynamics, accumulator_2>)
-        return dynamics_type::accumulator_2;
-
-    if constexpr (std::is_same_v<Dynamics, logical_and_2>)
-        return dynamics_type::logical_and_2;
-    if constexpr (std::is_same_v<Dynamics, logical_and_3>)
-        return dynamics_type::logical_and_3;
-    if constexpr (std::is_same_v<Dynamics, logical_or_2>)
-        return dynamics_type::logical_or_2;
-    if constexpr (std::is_same_v<Dynamics, logical_or_3>)
-        return dynamics_type::logical_or_3;
-    if constexpr (std::is_same_v<Dynamics, logical_invert>)
-        return dynamics_type::logical_invert;
-
-    if constexpr (std::is_same_v<Dynamics, hsm_wrapper>)
-        return dynamics_type::hsm_wrapper;
-
-    if constexpr (std::is_same_v<Dynamics, simulation_wrapper>)
-        return dynamics_type::simulation_wrapper;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_sample_hold>)
-        return dynamics_type::qss1_sample_hold;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_sample_hold>)
-        return dynamics_type::qss2_sample_hold;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_sample_hold>)
-        return dynamics_type::qss3_sample_hold;
-
-    if constexpr (std::is_same_v<Dynamics, zero_order_hold>)
-        return dynamics_type::zero_order_hold;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_quantizer>)
-        return dynamics_type::qss1_quantizer;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_quantizer>)
-        return dynamics_type::qss2_quantizer;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_quantizer>)
-        return dynamics_type::qss3_quantizer;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_integrate_and_fire>)
-        return dynamics_type::qss1_integrate_and_fire;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_integrate_and_fire>)
-        return dynamics_type::qss2_integrate_and_fire;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_integrate_and_fire>)
-        return dynamics_type::qss3_integrate_and_fire;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_threshold_crossing>)
-        return dynamics_type::qss1_threshold_crossing;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_threshold_crossing>)
-        return dynamics_type::qss2_threshold_crossing;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_threshold_crossing>)
-        return dynamics_type::qss3_threshold_crossing;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_pwm>)
-        return dynamics_type::qss1_pwm;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_pwm>)
-        return dynamics_type::qss2_pwm;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_pwm>)
-        return dynamics_type::qss3_pwm;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_sqrt>)
-        return dynamics_type::qss1_sqrt;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_sqrt>)
-        return dynamics_type::qss2_sqrt;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_sqrt>)
-        return dynamics_type::qss3_sqrt;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_atan>)
-        return dynamics_type::qss1_atan;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_atan>)
-        return dynamics_type::qss2_atan;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_atan>)
-        return dynamics_type::qss3_atan;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_tan>)
-        return dynamics_type::qss1_tan;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_tan>)
-        return dynamics_type::qss2_tan;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_tan>)
-        return dynamics_type::qss3_tan;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_tanh>)
-        return dynamics_type::qss1_tanh;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_tanh>)
-        return dynamics_type::qss2_tanh;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_tanh>)
-        return dynamics_type::qss3_tanh;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_sigmoid>)
-        return dynamics_type::qss1_sigmoid;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_sigmoid>)
-        return dynamics_type::qss2_sigmoid;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_sigmoid>)
-        return dynamics_type::qss3_sigmoid;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_division>)
-        return dynamics_type::qss1_division;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_division>)
-        return dynamics_type::qss2_division;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_division>)
-        return dynamics_type::qss3_division;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_atan2>)
-        return dynamics_type::qss1_atan2;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_atan2>)
-        return dynamics_type::qss2_atan2;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_atan2>)
-        return dynamics_type::qss3_atan2;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_saturation>)
-        return dynamics_type::qss1_saturation;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_saturation>)
-        return dynamics_type::qss2_saturation;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_saturation>)
-        return dynamics_type::qss3_saturation;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_dead_zone>)
-        return dynamics_type::qss1_dead_zone;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_dead_zone>)
-        return dynamics_type::qss2_dead_zone;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_dead_zone>)
-        return dynamics_type::qss3_dead_zone;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_abs>)
-        return dynamics_type::qss1_abs;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_abs>)
-        return dynamics_type::qss2_abs;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_abs>)
-        return dynamics_type::qss3_abs;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_sign>)
-        return dynamics_type::qss1_sign;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_sign>)
-        return dynamics_type::qss2_sign;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_sign>)
-        return dynamics_type::qss3_sign;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_hysteresis>)
-        return dynamics_type::qss1_hysteresis;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_hysteresis>)
-        return dynamics_type::qss2_hysteresis;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_hysteresis>)
-        return dynamics_type::qss3_hysteresis;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_minimum>)
-        return dynamics_type::qss1_minimum;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_minimum>)
-        return dynamics_type::qss2_minimum;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_minimum>)
-        return dynamics_type::qss3_minimum;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_maximum>)
-        return dynamics_type::qss1_maximum;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_maximum>)
-        return dynamics_type::qss2_maximum;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_maximum>)
-        return dynamics_type::qss3_maximum;
-
-    if constexpr (std::is_same_v<Dynamics, qss1_wrap>)
-        return dynamics_type::qss1_wrap;
-
-    if constexpr (std::is_same_v<Dynamics, qss2_wrap>)
-        return dynamics_type::qss2_wrap;
-
-    if constexpr (std::is_same_v<Dynamics, qss3_wrap>)
-        return dynamics_type::qss3_wrap;
-
-    unreachable();
+    return enum_cast<dynamics_type>(type_list_index<Dynamics>(dynamics_list{}));
+}
+
+static_assert(dynamics_typeof<qss1_integrator>() ==
+              dynamics_type::qss1_integrator);
+static_assert(dynamics_typeof<qss1_wrap>() == dynamics_type::qss1_wrap);
+static_assert(dynamics_typeof<qss2_integrator>() ==
+              dynamics_type::qss2_integrator);
+static_assert(dynamics_typeof<qss2_wrap>() == dynamics_type::qss2_wrap);
+static_assert(dynamics_typeof<qss3_integrator>() ==
+              dynamics_type::qss3_integrator);
+static_assert(dynamics_typeof<qss3_wrap>() == dynamics_type::qss3_wrap);
+static_assert(dynamics_typeof<counter>() == dynamics_type::counter);
+static_assert(dynamics_typeof<zero_order_hold>() ==
+              dynamics_type::zero_order_hold);
+
+/// One function per dynamics, called through a table indexed by the
+/// @c dynamics_type: a single indirect call, as a jump table of a switch, and
+/// the body of @c Function stays inlined in each function.
+template<typename Model, typename R, typename Function, typename... Args>
+struct dynamics_dispatch_table {
+    using function_type = R (*)(Model&, Function&, Args&&...) noexcept;
+
+    template<typename... Ts>
+    static constexpr auto make(type_list<Ts...>) noexcept
+    {
+        return std::array<function_type,
+                          sizeof...(Ts)>{ +[](Model& mdl, Function& f,
+                                              Args&&... args) noexcept -> R {
+            using D = std::conditional_t<std::is_const_v<Model>, const Ts, Ts>;
+            return std::invoke(f, *std::launder(reinterpret_cast<D*>(&mdl.dyn)),
+                               std::forward<Args>(args)...);
+        }... };
+    }
+
+    static constexpr auto table = make(dynamics_list{});
+};
+
+template<typename Model, typename Function, typename... Args>
+constexpr auto dispatch_model(Model& mdl, Function& f, Args&&... args) noexcept
+{
+    using D = std::conditional_t<std::is_const_v<Model>, const qss1_integrator,
+                                 qss1_integrator>;
+    using R = std::invoke_result_t<Function&, D&, Args&&...>;
+    using T = dynamics_dispatch_table<Model, R, Function, Args...>;
+
+    return T::table[ordinal(mdl.type)](mdl, f, std::forward<Args>(args)...);
 }
 
 template<typename Function, typename... Args>
 constexpr auto dispatch(const model& mdl, Function&& f, Args&&... args) noexcept
 {
-    switch (mdl.type) {
-    case dynamics_type::qss1_integrator:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_integrator*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_multiplier:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_multiplier*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_cross:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_cross*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_max_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_max_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_min_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_min_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_flipflop:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_flipflop*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_filter:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_filter*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_power:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_power*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_square:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_square*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_wsum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_wsum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_wsum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_inverse:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_inverse*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_integer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_integer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_compare:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_compare*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_gain:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_gain*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_sin:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sin*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_cos:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_cos*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_log:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_log*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss1_exp:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_exp*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_integrator:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_integrator*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_multiplier:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_multiplier*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_cross:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_cross*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_max_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_max_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_min_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_min_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_flipflop:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_flipflop*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_filter:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_filter*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_power:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_power*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_square:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_square*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_wsum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_wsum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_wsum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_inverse:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_inverse*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_integer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_integer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_compare:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_compare*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_gain:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_gain*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_sin:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sin*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_cos:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_cos*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_log:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_log*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss2_exp:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_exp*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_integrator:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_integrator*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_multiplier:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_multiplier*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_cross:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_cross*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_max_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_max_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_min_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_min_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_flipflop:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_flipflop*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_filter:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_filter*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_power:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_power*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_square:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_square*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_wsum_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_wsum_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_4:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_wsum_4*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_inverse:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_inverse*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_integer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_integer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_compare:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_compare*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_gain:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_gain*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_sin:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sin*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_cos:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_cos*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_log:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_log*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::qss3_exp:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_exp*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::counter:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const counter*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::queue:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const queue*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::dynamic_queue:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const dynamic_queue*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::priority_queue:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const priority_queue*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::generator:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const generator*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::constant:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const constant*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::accumulator_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const accumulator_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::time_func:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const time_func*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::logical_and_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const logical_and_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::logical_and_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const logical_and_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::logical_or_2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const logical_or_2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::logical_or_3:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const logical_or_3*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    case dynamics_type::logical_invert:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const logical_invert*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::hsm_wrapper:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const hsm_wrapper*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::simulation_wrapper:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const simulation_wrapper*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sample_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sample_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sample_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sample_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sample_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sample_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::zero_order_hold:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const zero_order_hold*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sqrt:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sqrt*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sqrt:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sqrt*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sqrt:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sqrt*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_atan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_atan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_atan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_atan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_atan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_atan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_tan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_tan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_tan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_tan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_tan:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_tan*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_tanh:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_tanh*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_tanh:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_tanh*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_tanh:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_tanh*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sigmoid:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sigmoid*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sigmoid:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sigmoid*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sigmoid:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sigmoid*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_division:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_division*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_division:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_division*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_division:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_division*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_atan2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_atan2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_atan2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_atan2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_atan2:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_atan2*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_saturation:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_saturation*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_saturation:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_saturation*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_saturation:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_saturation*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_dead_zone:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_dead_zone*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_dead_zone:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_dead_zone*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_dead_zone:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_dead_zone*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_abs:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_abs*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_abs:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_abs*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_abs:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_abs*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sign:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_sign*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sign:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_sign*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sign:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_sign*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_hysteresis:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_hysteresis*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_hysteresis:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_hysteresis*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_hysteresis:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_hysteresis*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_minimum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_minimum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_minimum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_minimum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_minimum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_minimum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_maximum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_maximum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_maximum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_maximum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_maximum:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_maximum*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_wrap:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_wrap*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_wrap:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_wrap*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_wrap:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_wrap*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_quantizer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_quantizer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_quantizer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_quantizer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_quantizer:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_quantizer*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_integrate_and_fire:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss1_integrate_and_fire*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_integrate_and_fire:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss2_integrate_and_fire*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_integrate_and_fire:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss3_integrate_and_fire*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_threshold_crossing:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss1_threshold_crossing*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_threshold_crossing:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss2_threshold_crossing*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_threshold_crossing:
-        return std::invoke(
-          std::forward<Function>(f),
-          *reinterpret_cast<const qss3_threshold_crossing*>(&mdl.dyn),
-          std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_pwm:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss1_pwm*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_pwm:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss2_pwm*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_pwm:
-        return std::invoke(std::forward<Function>(f),
-                           *reinterpret_cast<const qss3_pwm*>(&mdl.dyn),
-                           std::forward<Args>(args)...);
-    }
-
-    unreachable();
+    return dispatch_model(mdl, f, std::forward<Args>(args)...);
 }
 
 template<typename Function, typename... Args>
 constexpr auto dispatch(model& mdl, Function&& f, Args&&... args) noexcept
 {
-    switch (mdl.type) {
-    case dynamics_type::qss1_integrator:
-        return f(*reinterpret_cast<qss1_integrator*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_multiplier:
-        return f(*reinterpret_cast<qss1_multiplier*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_cross:
-        return f(*reinterpret_cast<qss1_cross*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_max_hold:
-        return f(*reinterpret_cast<qss1_max_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_min_hold:
-        return f(*reinterpret_cast<qss1_min_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_flipflop:
-        return f(*reinterpret_cast<qss1_flipflop*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_filter:
-        return f(*reinterpret_cast<qss1_filter*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_power:
-        return f(*reinterpret_cast<qss1_power*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_square:
-        return f(*reinterpret_cast<qss1_square*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_2:
-        return f(*reinterpret_cast<qss1_sum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_3:
-        return f(*reinterpret_cast<qss1_sum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_sum_4:
-        return f(*reinterpret_cast<qss1_sum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_2:
-        return f(*reinterpret_cast<qss1_wsum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_3:
-        return f(*reinterpret_cast<qss1_wsum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_wsum_4:
-        return f(*reinterpret_cast<qss1_wsum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_inverse:
-        return f(*reinterpret_cast<qss1_inverse*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_integer:
-        return f(*reinterpret_cast<qss1_integer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_compare:
-        return f(*reinterpret_cast<qss1_compare*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_gain:
-        return f(*reinterpret_cast<qss1_gain*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_sin:
-        return f(*reinterpret_cast<qss1_sin*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_cos:
-        return f(*reinterpret_cast<qss1_cos*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_log:
-        return f(*reinterpret_cast<qss1_log*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss1_exp:
-        return f(*reinterpret_cast<qss1_exp*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_integrator:
-        return f(*reinterpret_cast<qss2_integrator*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_multiplier:
-        return f(*reinterpret_cast<qss2_multiplier*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_cross:
-        return f(*reinterpret_cast<qss2_cross*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_max_hold:
-        return f(*reinterpret_cast<qss2_max_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_min_hold:
-        return f(*reinterpret_cast<qss2_min_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_flipflop:
-        return f(*reinterpret_cast<qss2_flipflop*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_filter:
-        return f(*reinterpret_cast<qss2_filter*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_power:
-        return f(*reinterpret_cast<qss2_power*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_square:
-        return f(*reinterpret_cast<qss2_square*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_2:
-        return f(*reinterpret_cast<qss2_sum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_3:
-        return f(*reinterpret_cast<qss2_sum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_sum_4:
-        return f(*reinterpret_cast<qss2_sum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_2:
-        return f(*reinterpret_cast<qss2_wsum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_3:
-        return f(*reinterpret_cast<qss2_wsum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_wsum_4:
-        return f(*reinterpret_cast<qss2_wsum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_inverse:
-        return f(*reinterpret_cast<qss2_inverse*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_integer:
-        return f(*reinterpret_cast<qss2_integer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_compare:
-        return f(*reinterpret_cast<qss2_compare*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_gain:
-        return f(*reinterpret_cast<qss2_gain*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_sin:
-        return f(*reinterpret_cast<qss2_sin*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_cos:
-        return f(*reinterpret_cast<qss2_cos*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_log:
-        return f(*reinterpret_cast<qss2_log*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss2_exp:
-        return f(*reinterpret_cast<qss2_exp*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_integrator:
-        return f(*reinterpret_cast<qss3_integrator*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_multiplier:
-        return f(*reinterpret_cast<qss3_multiplier*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_cross:
-        return f(*reinterpret_cast<qss3_cross*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_max_hold:
-        return f(*reinterpret_cast<qss3_max_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_min_hold:
-        return f(*reinterpret_cast<qss3_min_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_flipflop:
-        return f(*reinterpret_cast<qss3_flipflop*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_filter:
-        return f(*reinterpret_cast<qss3_filter*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_power:
-        return f(*reinterpret_cast<qss3_power*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_square:
-        return f(*reinterpret_cast<qss3_square*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_2:
-        return f(*reinterpret_cast<qss3_sum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_3:
-        return f(*reinterpret_cast<qss3_sum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_sum_4:
-        return f(*reinterpret_cast<qss3_sum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_2:
-        return f(*reinterpret_cast<qss3_wsum_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_3:
-        return f(*reinterpret_cast<qss3_wsum_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_wsum_4:
-        return f(*reinterpret_cast<qss3_wsum_4*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_inverse:
-        return f(*reinterpret_cast<qss3_inverse*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_integer:
-        return f(*reinterpret_cast<qss3_integer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_compare:
-        return f(*reinterpret_cast<qss3_compare*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_gain:
-        return f(*reinterpret_cast<qss3_gain*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_sin:
-        return f(*reinterpret_cast<qss3_sin*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_cos:
-        return f(*reinterpret_cast<qss3_cos*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_log:
-        return f(*reinterpret_cast<qss3_log*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::qss3_exp:
-        return f(*reinterpret_cast<qss3_exp*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::counter:
-        return f(*reinterpret_cast<counter*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::queue:
-        return f(*reinterpret_cast<queue*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::dynamic_queue:
-        return f(*reinterpret_cast<dynamic_queue*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::priority_queue:
-        return f(*reinterpret_cast<priority_queue*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::generator:
-        return f(*reinterpret_cast<generator*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::constant:
-        return f(*reinterpret_cast<constant*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::accumulator_2:
-        return f(*reinterpret_cast<accumulator_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::time_func:
-        return f(*reinterpret_cast<time_func*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::logical_and_2:
-        return f(*reinterpret_cast<logical_and_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::logical_and_3:
-        return f(*reinterpret_cast<logical_and_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::logical_or_2:
-        return f(*reinterpret_cast<logical_or_2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::logical_or_3:
-        return f(*reinterpret_cast<logical_or_3*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    case dynamics_type::logical_invert:
-        return f(*reinterpret_cast<logical_invert*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::hsm_wrapper:
-        return f(*reinterpret_cast<hsm_wrapper*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::simulation_wrapper:
-        return f(*reinterpret_cast<simulation_wrapper*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sample_hold:
-        return f(*reinterpret_cast<qss1_sample_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sample_hold:
-        return f(*reinterpret_cast<qss2_sample_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sample_hold:
-        return f(*reinterpret_cast<qss3_sample_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::zero_order_hold:
-        return f(*reinterpret_cast<zero_order_hold*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sqrt:
-        return f(*reinterpret_cast<qss1_sqrt*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sqrt:
-        return f(*reinterpret_cast<qss2_sqrt*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sqrt:
-        return f(*reinterpret_cast<qss3_sqrt*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_atan:
-        return f(*reinterpret_cast<qss1_atan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_atan:
-        return f(*reinterpret_cast<qss2_atan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_atan:
-        return f(*reinterpret_cast<qss3_atan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_tan:
-        return f(*reinterpret_cast<qss1_tan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_tan:
-        return f(*reinterpret_cast<qss2_tan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_tan:
-        return f(*reinterpret_cast<qss3_tan*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_tanh:
-        return f(*reinterpret_cast<qss1_tanh*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_tanh:
-        return f(*reinterpret_cast<qss2_tanh*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_tanh:
-        return f(*reinterpret_cast<qss3_tanh*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sigmoid:
-        return f(*reinterpret_cast<qss1_sigmoid*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sigmoid:
-        return f(*reinterpret_cast<qss2_sigmoid*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sigmoid:
-        return f(*reinterpret_cast<qss3_sigmoid*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_division:
-        return f(*reinterpret_cast<qss1_division*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_division:
-        return f(*reinterpret_cast<qss2_division*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_division:
-        return f(*reinterpret_cast<qss3_division*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_atan2:
-        return f(*reinterpret_cast<qss1_atan2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_atan2:
-        return f(*reinterpret_cast<qss2_atan2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_atan2:
-        return f(*reinterpret_cast<qss3_atan2*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_saturation:
-        return f(*reinterpret_cast<qss1_saturation*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_saturation:
-        return f(*reinterpret_cast<qss2_saturation*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_saturation:
-        return f(*reinterpret_cast<qss3_saturation*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_dead_zone:
-        return f(*reinterpret_cast<qss1_dead_zone*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_dead_zone:
-        return f(*reinterpret_cast<qss2_dead_zone*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_dead_zone:
-        return f(*reinterpret_cast<qss3_dead_zone*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_abs:
-        return f(*reinterpret_cast<qss1_abs*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_abs:
-        return f(*reinterpret_cast<qss2_abs*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_abs:
-        return f(*reinterpret_cast<qss3_abs*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_sign:
-        return f(*reinterpret_cast<qss1_sign*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_sign:
-        return f(*reinterpret_cast<qss2_sign*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_sign:
-        return f(*reinterpret_cast<qss3_sign*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_hysteresis:
-        return f(*reinterpret_cast<qss1_hysteresis*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_hysteresis:
-        return f(*reinterpret_cast<qss2_hysteresis*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_hysteresis:
-        return f(*reinterpret_cast<qss3_hysteresis*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_minimum:
-        return f(*reinterpret_cast<qss1_minimum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_minimum:
-        return f(*reinterpret_cast<qss2_minimum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_minimum:
-        return f(*reinterpret_cast<qss3_minimum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_maximum:
-        return f(*reinterpret_cast<qss1_maximum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_maximum:
-        return f(*reinterpret_cast<qss2_maximum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_maximum:
-        return f(*reinterpret_cast<qss3_maximum*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_wrap:
-        return f(*reinterpret_cast<qss1_wrap*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_wrap:
-        return f(*reinterpret_cast<qss2_wrap*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_wrap:
-        return f(*reinterpret_cast<qss3_wrap*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_quantizer:
-        return f(*reinterpret_cast<qss1_quantizer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_quantizer:
-        return f(*reinterpret_cast<qss2_quantizer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_quantizer:
-        return f(*reinterpret_cast<qss3_quantizer*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_integrate_and_fire:
-        return f(*reinterpret_cast<qss1_integrate_and_fire*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_integrate_and_fire:
-        return f(*reinterpret_cast<qss2_integrate_and_fire*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_integrate_and_fire:
-        return f(*reinterpret_cast<qss3_integrate_and_fire*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_threshold_crossing:
-        return f(*reinterpret_cast<qss1_threshold_crossing*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_threshold_crossing:
-        return f(*reinterpret_cast<qss2_threshold_crossing*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_threshold_crossing:
-        return f(*reinterpret_cast<qss3_threshold_crossing*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss1_pwm:
-        return f(*reinterpret_cast<qss1_pwm*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss2_pwm:
-        return f(*reinterpret_cast<qss2_pwm*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-
-    case dynamics_type::qss3_pwm:
-        return f(*reinterpret_cast<qss3_pwm*>(&mdl.dyn),
-                 std::forward<Args>(args)...);
-    }
-
-    unreachable();
+    return dispatch_model(mdl, f, std::forward<Args>(args)...);
 }
 
 template<dynamics Dynamics>
@@ -10543,6 +9033,15 @@ inline bool is_ports_compatible(const dynamics_type mdl_src,
     case dynamics_type::qss1_maximum:
     case dynamics_type::qss2_maximum:
     case dynamics_type::qss3_maximum:
+    case dynamics_type::qss1_priority_2:
+    case dynamics_type::qss1_priority_3:
+    case dynamics_type::qss1_priority_4:
+    case dynamics_type::qss2_priority_2:
+    case dynamics_type::qss2_priority_3:
+    case dynamics_type::qss2_priority_4:
+    case dynamics_type::qss3_priority_2:
+    case dynamics_type::qss3_priority_3:
+    case dynamics_type::qss3_priority_4:
     case dynamics_type::qss1_wrap:
     case dynamics_type::qss2_wrap:
     case dynamics_type::qss3_wrap:
@@ -10558,9 +9057,6 @@ inline bool is_ports_compatible(const dynamics_type mdl_src,
     case dynamics_type::qss1_pwm:
     case dynamics_type::qss2_pwm:
     case dynamics_type::qss3_pwm:
-    case dynamics_type::qss1_integer:
-    case dynamics_type::qss2_integer:
-    case dynamics_type::qss3_integer:
     case dynamics_type::qss1_compare:
     case dynamics_type::qss2_compare:
     case dynamics_type::qss3_compare:
@@ -10601,22 +9097,6 @@ inline bool is_ports_compatible(const dynamics_type mdl_src,
         }
         return true;
 
-    case dynamics_type::qss2_filter:
-    case dynamics_type::qss3_filter:
-    case dynamics_type::qss1_filter:
-        if (any_equal(o_port_index, 1, 2)) {
-            return any_equal(
-              mdl_dst, dynamics_type::counter, dynamics_type::logical_and_2,
-              dynamics_type::logical_and_3, dynamics_type::logical_or_2,
-              dynamics_type::logical_or_3, dynamics_type::logical_invert);
-        } else {
-            return !any_equal(
-              mdl_dst, dynamics_type::logical_and_2,
-              dynamics_type::logical_and_3, dynamics_type::logical_or_2,
-              dynamics_type::logical_or_3, dynamics_type::logical_invert);
-        }
-        return true;
-
     case dynamics_type::logical_and_2:
     case dynamics_type::logical_and_3:
     case dynamics_type::logical_or_2:
@@ -10643,29 +9123,11 @@ inline bool is_ports_compatible(const model& mdl_src,
  *
  ****************************************************************************/
 
-inline void copy(const model& src, model& dst) noexcept
-{
-    dst.type   = src.type;
-    dst.handle = invalid_heap_handle;
-
-    dispatch(dst, [&src]<typename Dynamics>(Dynamics& dst_dyn) -> void {
-        const auto& src_dyn = get_dyn<Dynamics>(src);
-        std::construct_at(&dst_dyn, src_dyn);
-
-        if constexpr (has_input_port<Dynamics>)
-            for (int i = 0, e = length(dst_dyn.x); i != e; ++i)
-                dst_dyn.x[i].reset();
-
-        if constexpr (has_output_port<Dynamics>)
-            for (int i = 0, e = length(dst_dyn.y); i != e; ++i)
-                dst_dyn.y[i] = undefined<output_port_id>();
-    });
-}
-
 template<typename Dynamics>
 inline status external_source::initialize_source(Dynamics&    dyn,
                                                  source&      src,
-                                                 source_data& data) noexcept
+                                                 source_data& data,
+                                                 const u64    stream) noexcept
 {
 
     switch (src.type) {
@@ -10689,7 +9151,8 @@ inline status external_source::initialize_source(Dynamics&    dyn,
 
         if (auto* rnd_src = random_sources.try_to_get(src.id.random_id))
             return rnd_src->init(sim.srcs.seed,
-                                 sim.models.get_id(get_model(dyn)), src, data);
+                                 sim.models.get_id(get_model(dyn)), stream, src,
+                                 data);
 
         return make_error(simulation_errc::external_source_random_unknown);
 
@@ -10828,16 +9291,18 @@ inline status send_message(simulation&    sim,
                            real           r2,
                            real           r3) noexcept
 {
-    if (auto* y = sim.output_ports.try_to_get(output_port)) {
-        y->msg[0] = r1;
-        y->msg[1] = r2;
-        y->msg[2] = r3;
-
-        if (not sim.active_output_ports.can_alloc(1) and
-            not sim.active_output_ports.grow<3, 2>())
+    if (sim.output_ports.try_to_get(output_port)) {
+        if ((not sim.active_output_ports.can_alloc(1) and
+             not sim.active_output_ports.grow<3, 2>()) or
+            (not sim.active_output_messages.can_alloc(1) and
+             not sim.active_output_messages.grow<3, 2>()))
             return make_error(simulation_errc::emitting_output_ports_full);
 
+        // Two parallel arrays: an output port can send several messages in the
+        // same step (a Parallel DEVS bag) and the counting pass of
+        // simulation::run reads only the dense array of the ports.
         sim.active_output_ports.push_back(output_port);
+        sim.active_output_messages.push_back(message{ r1, r2, r3 });
     }
 
     return success();
@@ -10913,12 +9378,6 @@ constexpr inline auto get_min_message(std::span<const message> msgs) noexcept
     return msgs.empty() ? zero : (*std::ranges::min_element(msgs))[0];
 }
 
-constexpr inline auto get_max_message(std::span<const message> msgs) noexcept
-  -> real
-{
-    return msgs.empty() ? zero : (*std::ranges::max_element(msgs))[0];
-}
-
 /**
  * Get an @a hierarchical_state_machine pointer from the
  * @a hierarchical_state_machine::exec::id index in the
@@ -10944,7 +9403,7 @@ inline auto get_hierarchical_state_machine(simulation&  sim,
 //
 
 template<typename A>
-constexpr heap<A>::heap(constrained_value<int, 512, INT_MAX> pcapacity) noexcept
+constexpr heap<A>::heap(clamped_value<int, 512, INT_MAX> pcapacity) noexcept
 {
     reserve(pcapacity.value());
 }
@@ -11092,17 +9551,14 @@ template<typename A>
 constexpr void heap<A>::destroy(handle elem) noexcept
 {
     debug::ensure(elem != invalid_heap_handle);
+    debug::ensure(not is_in_tree(elem));
 
-    if (m_size == 0) {
-        clear();
-    } else {
-        nodes[elem].prev  = invalid_heap_handle;
-        nodes[elem].child = invalid_heap_handle;
-        nodes[elem].id    = static_cast<model_id>(0);
-        nodes[elem].next  = free_list;
+    nodes[elem].prev  = invalid_heap_handle;
+    nodes[elem].child = invalid_heap_handle;
+    nodes[elem].id    = static_cast<model_id>(0);
+    nodes[elem].next  = free_list;
 
-        free_list = elem;
-    }
+    free_list = elem;
 }
 
 template<typename A>
@@ -11138,16 +9594,17 @@ constexpr void heap<A>::remove(handle elem) noexcept
         return;
     }
 
-    debug::ensure(m_size > 0);
-
     /* If the node `elem` is not already `pop()`, we detach the
      * node and merge children. */
     if (is_in_tree(elem)) {
         m_size--;
         const auto old_elem = elem;
         detach_subheap(elem);
-        elem = merge_subheaps(elem);
-        root = merge(root, elem);
+
+        if (nodes[elem].child != invalid_heap_handle) {
+            elem = merge_subheaps(elem);
+            root = merge(root, elem);
+        }
 
         nodes[old_elem].child = invalid_heap_handle;
         nodes[old_elem].prev  = invalid_heap_handle;
@@ -11198,21 +9655,9 @@ constexpr void heap<A>::increase(time tn, handle elem) noexcept
 }
 
 template<typename A>
-constexpr time heap<A>::tn(handle elem) noexcept
-{
-    return nodes[elem].tn;
-}
-
-template<typename A>
 constexpr unsigned heap<A>::size() const noexcept
 {
     return static_cast<unsigned>(m_size);
-}
-
-template<typename A>
-constexpr int heap<A>::ssize() const noexcept
-{
-    return static_cast<int>(m_size);
 }
 
 template<typename A>
@@ -11245,21 +9690,6 @@ template<typename A>
 constexpr typename heap<A>::handle heap<A>::top() const noexcept
 {
     return root;
-}
-
-template<typename A>
-constexpr void heap<A>::merge(heap& src) noexcept
-{
-    if (this == &src)
-        return;
-
-    if (root == invalid_heap_handle) {
-        root = src.root;
-        return;
-    }
-
-    root = merge(root, src.root);
-    m_size += src.m_size;
 }
 
 template<typename A>
@@ -11365,7 +9795,7 @@ constexpr void heap<A>::detach_subheap(handle elem) noexcept
 
 template<typename A>
 inline scheduller<A>::scheduller(
-  constrained_value<int, 512, INT_MAX> capacity) noexcept
+  clamped_value<int, 512, INT_MAX> capacity) noexcept
   : m_heap(capacity)
 {}
 
@@ -11460,7 +9890,6 @@ inline void scheduller<A>::pop(vector<model_id>& out) noexcept
 {
     time t = tn();
 
-    out.clear();
     out.emplace_back(m_heap[m_heap.pop()].id);
 
     while (!m_heap.empty() && t == tn())
@@ -11491,18 +9920,6 @@ inline bool scheduller<A>::empty() const noexcept
     return m_heap.empty();
 }
 
-template<typename A>
-unsigned scheduller<A>::size() const noexcept
-{
-    return m_heap.size();
-}
-
-template<typename A>
-inline int scheduller<A>::ssize() const noexcept
-{
-    return static_cast<int>(m_heap.size());
-}
-
 //
 // simulation
 //
@@ -11530,12 +9947,6 @@ inline constexpr void time_limit::set_duration(const double begin_,
     }
 }
 
-inline constexpr void time_limit::clear() noexcept
-{
-    m_begin = 0;
-    m_end   = 100;
-}
-
 inline constexpr bool time_limit::expired(const double value) const noexcept
 {
     return not(value < m_end);
@@ -11554,7 +9965,9 @@ inline simulation::simulation(
   const simulation_reserve_definition&      res,
   const external_source_reserve_definition& p_srcs) noexcept
   : immediate_models(res.models.value())
+  , zero_ta_models(res.models.value(), reserve_tag)
   , active_output_ports(res.models.value())
+  , active_output_messages(res.models.value())
   , message_buffer(res.connections.value())
   , parameters(res.models.value())
   , immediate_observers(res.models.value())
@@ -11570,7 +9983,9 @@ inline simulation::simulation(
 
 inline simulation::simulation(const simulation& other) noexcept
   : immediate_models(other.immediate_models)
+  , zero_ta_models(other.zero_ta_models)
   , active_output_ports(other.active_output_ports)
+  , active_output_messages(other.active_output_messages)
   , message_buffer(other.message_buffer)
   , parameters(other.parameters)
   , immediate_observers(other.immediate_observers)
@@ -11593,7 +10008,9 @@ inline simulation& simulation::operator=(const simulation& other) noexcept
         return *this;
 
     immediate_models    = other.immediate_models;
+    zero_ta_models      = other.zero_ta_models;
     active_output_ports = other.active_output_ports;
+    active_output_messages = other.active_output_messages;
     message_buffer      = other.message_buffer;
     parameters          = other.parameters;
     immediate_observers = other.immediate_observers;
@@ -11612,20 +10029,6 @@ inline simulation& simulation::operator=(const simulation& other) noexcept
     return *this;
 }
 
-inline simulation& simulation::operator=(
-  const simulation_snapshot& snap) noexcept
-{
-    models         = snap.models;
-    observers      = snap.observers;
-    nodes          = snap.nodes;
-    output_ports   = snap.output_ports;
-    dated_messages = snap.dated_messages;
-    sched          = snap.sched;
-    t              = snap.t;
-
-    return *this;
-}
-
 template<int Num, int Denum>
 bool simulation::grow_models() noexcept
 {
@@ -11637,7 +10040,7 @@ bool simulation::grow_models() noexcept
                        : nb;
 
     return models.reserve(req) and immediate_models.resize(req) and
-           parameters.resize(req) and observers.reserve(req) and
+           zero_ta_models.reserve(req) and parameters.resize(req) and observers.reserve(req) and
            sched.reserve(req) and immediate_observers.resize(req);
 }
 
@@ -11647,7 +10050,7 @@ inline bool simulation::grow_models_to(std::integral auto capacity) noexcept
         return true;
 
     return models.reserve(capacity) and immediate_models.resize(capacity) and
-           parameters.resize(capacity) and observers.reserve(capacity) and
+           zero_ta_models.reserve(capacity) and parameters.resize(capacity) and observers.reserve(capacity) and
            sched.reserve(capacity) and immediate_observers.reserve(capacity);
 }
 
@@ -11675,7 +10078,9 @@ inline bool simulation::grow_connections_to(
 inline void simulation::destroy() noexcept
 {
     immediate_models.destroy();
+    zero_ta_models.destroy();
     active_output_ports.destroy();
+    active_output_messages.destroy();
     message_buffer.destroy();
     parameters.destroy();
     immediate_observers.destroy();
@@ -11709,7 +10114,9 @@ inline void simulation::clean() noexcept
     sched.clear();
 
     immediate_models.clear();
+    zero_ta_models.clear();
     active_output_ports.clear();
+    active_output_messages.clear();
     message_buffer.clear();
     immediate_observers.clear();
 
@@ -11742,7 +10149,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss1_max_hold:
     case dynamics_type::qss1_min_hold:
     case dynamics_type::qss1_flipflop:
-    case dynamics_type::qss1_filter:
     case dynamics_type::qss1_power:
     case dynamics_type::qss1_square:
     case dynamics_type::qss1_sum_2:
@@ -11752,7 +10158,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss1_wsum_3:
     case dynamics_type::qss1_wsum_4:
     case dynamics_type::qss1_inverse:
-    case dynamics_type::qss1_integer:
     case dynamics_type::qss1_compare:
     case dynamics_type::qss1_gain:
     case dynamics_type::qss1_sin:
@@ -11772,6 +10177,9 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss1_hysteresis:
     case dynamics_type::qss1_maximum:
     case dynamics_type::qss1_minimum:
+    case dynamics_type::qss1_priority_2:
+    case dynamics_type::qss1_priority_3:
+    case dynamics_type::qss1_priority_4:
     case dynamics_type::qss1_saturation:
     case dynamics_type::qss1_sigmoid:
     case dynamics_type::qss1_sign:
@@ -11787,7 +10195,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss2_max_hold:
     case dynamics_type::qss2_min_hold:
     case dynamics_type::qss2_flipflop:
-    case dynamics_type::qss2_filter:
     case dynamics_type::qss2_power:
     case dynamics_type::qss2_square:
     case dynamics_type::qss2_sum_2:
@@ -11797,7 +10204,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss2_wsum_3:
     case dynamics_type::qss2_wsum_4:
     case dynamics_type::qss2_inverse:
-    case dynamics_type::qss2_integer:
     case dynamics_type::qss2_compare:
     case dynamics_type::qss2_gain:
     case dynamics_type::qss2_sin:
@@ -11817,6 +10223,9 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss2_hysteresis:
     case dynamics_type::qss2_maximum:
     case dynamics_type::qss2_minimum:
+    case dynamics_type::qss2_priority_2:
+    case dynamics_type::qss2_priority_3:
+    case dynamics_type::qss2_priority_4:
     case dynamics_type::qss2_saturation:
     case dynamics_type::qss2_sigmoid:
     case dynamics_type::qss2_sign:
@@ -11832,7 +10241,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss3_max_hold:
     case dynamics_type::qss3_min_hold:
     case dynamics_type::qss3_flipflop:
-    case dynamics_type::qss3_filter:
     case dynamics_type::qss3_power:
     case dynamics_type::qss3_square:
     case dynamics_type::qss3_sum_2:
@@ -11842,7 +10250,6 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss3_wsum_3:
     case dynamics_type::qss3_wsum_4:
     case dynamics_type::qss3_inverse:
-    case dynamics_type::qss3_integer:
     case dynamics_type::qss3_compare:
     case dynamics_type::qss3_gain:
     case dynamics_type::qss3_sin:
@@ -11862,6 +10269,9 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
     case dynamics_type::qss3_hysteresis:
     case dynamics_type::qss3_maximum:
     case dynamics_type::qss3_minimum:
+    case dynamics_type::qss3_priority_2:
+    case dynamics_type::qss3_priority_3:
+    case dynamics_type::qss3_priority_4:
     case dynamics_type::qss3_saturation:
     case dynamics_type::qss3_sigmoid:
     case dynamics_type::qss3_sign:
@@ -11880,7 +10290,7 @@ constexpr inline auto get_interpolate_type(const dynamics_type type) noexcept
 
 inline status simulation::observe(model& mdl) noexcept
 {
-    if (debug::check(not observers.exists(mdl.obs_id))) {
+    if (not observers.exists(mdl.obs_id)) {
         if (not observers.can_alloc(1) and not observers.grow<2, 1>(1))
             return make_error(simulation_errc::observers_container_full);
 
@@ -11890,7 +10300,6 @@ inline status simulation::observe(model& mdl) noexcept
         observers.get<resampler>(obs_id) = resampler{
             default_observation_time_step, get_interpolate_type(mdl.type)
         };
-        observers.get<observer_history_cursor>(obs_id) = 0;
         observers.get<observer_name>(obs_id).clear();
 
         mdl.obs_id = obs_id;
@@ -11901,7 +10310,7 @@ inline status simulation::observe(model& mdl) noexcept
 
 inline status simulation::observe(model& mdl, const time dt) noexcept
 {
-    if (debug::check(not observers.exists(mdl.obs_id))) {
+    if (not observers.exists(mdl.obs_id)) {
         if (not observers.can_alloc(1) and not observers.grow<2, 1>(1))
             return make_error(simulation_errc::observers_container_full);
 
@@ -11911,7 +10320,6 @@ inline status simulation::observe(model& mdl, const time dt) noexcept
 
         observers.get<resampler>(
           obs_id) = resampler{ dt, get_interpolate_type(mdl.type) };
-        observers.get<observer_history_cursor>(obs_id) = 0;
         observers.get<observer_name>(obs_id).clear();
 
         mdl.obs_id = obs_id;
@@ -11920,26 +10328,162 @@ inline status simulation::observe(model& mdl, const time dt) noexcept
     return success();
 }
 
-inline status simulation::observe(model&                 mdl,
-                                  const time             dt,
-                                  const interpolate_type type) noexcept
+inline time simulation::next_time() const noexcept
 {
-    if (debug::check(not observers.exists(mdl.obs_id))) {
-        if (not observers.can_alloc(1))
-            return make_error(simulation_errc::observers_container_full);
+    if (not zero_ta_models.empty())
+        return t.load(std::memory_order_relaxed);
 
-        auto& obs = observers.alloc(models.get_id(mdl));
+    return sched.empty() ? time_domain<time>::infinity : sched.tn();
+}
 
-        const auto obs_id = observers.get_id(obs);
+inline void simulation::wake_up(model& mdl, const time t) noexcept
+{
+    // A model with a null time advance already runs at the current date.
+    if (mdl.handle != invalid_heap_handle and not sched.is_in_tree(mdl.handle) and
+        mdl.tn == this->t)
+        return;
 
-        observers.get<resampler>(obs_id)               = resampler{ dt, type };
-        observers.get<observer_history_cursor>(obs_id) = 0;
-        observers.get<observer_name>(obs_id).clear();
+    if (mdl.handle == invalid_heap_handle)
+        sched.alloc(mdl, models.get_id(mdl), t);
+    else if (sched.is_in_tree(mdl.handle))
+        sched.update(mdl, t);
+    else
+        sched.reintegrate(mdl, t);
 
-        mdl.obs_id = obs_id;
+    mdl.tn = t;
+}
+
+inline status simulation::send_value(const model_id id,
+                                     const real     value) noexcept
+{
+    auto* mdl = models.try_to_get(id);
+
+    if (not mdl or mdl->type != dynamics_type::constant)
+        return make_error(simulation_errc::command_model_error);
+
+    if (not std::isfinite(value))
+        return make_error(simulation_errc::constant_value_error);
+
+    get_dyn<constant>(*mdl).value = value;
+
+    // The clock is infinite when no event waits (all the constants are
+    // done): the value is sent at the date of the last event.
+    wake_up(*mdl, time_domain<time>::is_infinity(current_time())
+                    ? last_time()
+                    : current_time());
+
+    return success();
+}
+
+inline bool simulation::is_watched_index(const u32 index) const noexcept
+{
+    const auto word = index >> 6;
+
+    return std::cmp_less(word, m_watched.size()) and
+           (m_watched[word] & (u64{ 1 } << (index & 63u))) != 0u;
+}
+
+inline bool simulation::is_watched(const model_id id) const noexcept
+{
+    return models.try_to_get(id) and is_watched_index(get_index(id));
+}
+
+inline status simulation::watch(const model_id id) noexcept
+{
+    auto* mdl = models.try_to_get(id);
+    if (not mdl)
+        return make_error(simulation_errc::watch_model_error);
+
+    const auto can_tell = dispatch(*mdl, []<typename Dynamics>(Dynamics&) {
+        return has_output_port<Dynamics> or
+               has_watched_value_function<Dynamics>;
+    });
+
+    if (not can_tell)
+        return make_error(simulation_errc::watch_model_error);
+
+    const auto index = get_index(id);
+    const auto word  = index >> 6;
+
+    if (std::cmp_greater_equal(word, m_watched.size()) and
+        not m_watched.resize(word + 1u, u64{ 0 }))
+        return make_error(simulation_errc::watched_events_full);
+
+    const auto bit = u64{ 1 } << (index & 63u);
+    if ((m_watched[word] & bit) == 0u) {
+        m_watched[word] |= bit;
+        ++m_watched_count;
     }
 
     return success();
+}
+
+inline void simulation::unwatch(const model_id id) noexcept
+{
+    const auto index = get_index(id);
+    const auto word  = index >> 6;
+    const auto bit   = u64{ 1 } << (index & 63u);
+
+    if (std::cmp_less(word, m_watched.size()) and
+        (m_watched[word] & bit) != 0u) {
+        m_watched[word] &= ~bit;
+        --m_watched_count;
+    }
+}
+
+inline void simulation::unwatch_all() noexcept
+{
+    m_watched.clear();
+    m_watched_count = 0;
+    m_watched_events.clear();
+}
+
+inline status simulation::push_watched_event(const model_id id,
+                                             const i32      port,
+                                             const real     value) noexcept
+{
+    if (not m_watched_events.can_alloc(1) and not m_watched_events.grow<3, 2>())
+        return make_error(simulation_errc::watched_events_full);
+
+    m_watched_events.push_back(
+      watched_event{ .t = t, .mdl = id, .port = port, .value = value });
+
+    return success();
+}
+
+inline status simulation::make_watched_lambda(model& mdl) noexcept
+{
+    const auto id = models.get_id(mdl);
+
+    return dispatch(mdl, [&]<typename Dynamics>(Dynamics& dyn) -> status {
+        if constexpr (has_lambda_function<Dynamics> and
+                      has_output_port<Dynamics>) {
+            // A message to an output port without connection is dropped by
+            // send_message(): the watched outputs get a port, even after a
+            // rewind to a snapshot taken before the watch.
+            for (auto& y : dyn.y) {
+                if (not output_ports.try_to_get(y)) {
+                    if (not output_ports.can_alloc(1) and
+                        not output_ports.grow<2, 1>())
+                        return make_error(
+                          simulation_errc::output_ports_container_full);
+
+                    y = output_ports.get_id(output_ports.alloc());
+                }
+            }
+
+            const auto first = active_output_ports.size();
+            irt_check(dyn.lambda(*this));
+
+            for (auto i = first, e = active_output_ports.size(); i != e; ++i)
+                for (i32 p = 0, n = length(dyn.y); p != n; ++p)
+                    if (dyn.y[p] == active_output_ports[i])
+                        irt_check(push_watched_event(
+                          id, p, active_output_messages[i][0]));
+        }
+
+        return success();
+    });
 }
 
 inline void simulation::unobserve(model& mdl) noexcept
@@ -11954,6 +10498,8 @@ inline void simulation::deallocate(model_id id) noexcept
 {
     auto* mdl = models.try_to_get(id);
     debug::ensure(mdl);
+
+    unwatch(id);
 
     unobserve(*mdl);
 
@@ -12098,7 +10644,7 @@ inline status simulation::connect(output_port_id& port,
 
     if (not y) {
         if (not output_ports.can_alloc(1) and not output_ports.grow<2, 1>())
-            return make_error(simulation_errc::output_port_error);
+            return make_error(simulation_errc::output_ports_container_full);
 
         auto& new_y = output_ports.alloc();
         port        = output_ports.get_id(new_y);
@@ -12224,6 +10770,7 @@ inline status simulation::initialize() noexcept
 
     for (auto& obs : observers) {
         obs.reset();
+        observers.get<resampler>(observers.get_id(obs)).reset();
 
         if (auto* mdl = models.try_to_get(obs.model())) {
             dispatch(*mdl, [&]<typename Dynamics>(Dynamics& dyn) {
@@ -12255,11 +10802,25 @@ status simulation::make_initialize(model& mdl, Dynamics& dyn, time t) noexcept
             dyn.x[i].reset();
     }
 
+    // A NaN breaks the order of the scheduler and a negative time advance
+    // moves the time backward.
+    if (not(dyn.sigma >= zero))
+        return make_error(simulation_errc::ta_abnormal);
+
     mdl.tl     = t;
     mdl.tn     = t + dyn.sigma;
     mdl.handle = invalid_heap_handle;
 
+    // A passive model stays out of the scheduler: a message or a wake up
+    // brings it back. A model with a null time advance runs at the next step
+    // without going through the scheduler.
     sched.alloc(mdl, models.get_id(mdl), mdl.tn);
+    if (time_domain<time>::is_infinity(mdl.tn)) {
+        sched.remove(mdl);
+    } else if (dyn.sigma == zero) {
+        sched.remove(mdl);
+        zero_ta_models.emplace_back(models.get_id(mdl));
+    }
 
     return success();
 }
@@ -12302,21 +10863,31 @@ status simulation::make_transition(model& mdl, Dynamics& dyn, time t) noexcept
         }
     }
 
-    if (mdl.tn == sched.tn(mdl.handle)) {
-        if constexpr (has_lambda_function<Dynamics>)
-            if constexpr (has_output_port<Dynamics>)
-                irt_check(dyn.lambda(*this));
+    [[maybe_unused]] bool watched = false;
+    [[maybe_unused]] real before  = zero;
+    if constexpr (has_watched_value_function<Dynamics>) {
+        watched = m_watched_count > 0 and
+                  is_watched_index(get_index(models.get_id(mdl)));
+        if (watched)
+            before = dyn.watched_value();
     }
 
     if constexpr (has_transition_function<Dynamics>)
         irt_check(dyn.transition(*this, t, t - mdl.tl, mdl.tn - t));
+
+    if constexpr (has_watched_value_function<Dynamics>) {
+        if (watched and dyn.watched_value() != before)
+            irt_check(
+              push_watched_event(models.get_id(mdl), -1, dyn.watched_value()));
+    }
 
     if constexpr (has_input_port<Dynamics>) {
         for (auto& elem : dyn.x)
             elem.reset();
     }
 
-    debug::ensure(mdl.tn >= t);
+    if (not(dyn.sigma >= zero))
+        return make_error(simulation_errc::ta_abnormal);
 
     mdl.tl = t;
     mdl.tn = t + dyn.sigma;
@@ -12324,7 +10895,10 @@ status simulation::make_transition(model& mdl, Dynamics& dyn, time t) noexcept
         mdl.tn = std::nextafter(t, t + irt::one);
 
     debug::ensure(not sched.is_in_tree(mdl.handle));
-    sched.reintegrate(mdl, mdl.tn);
+    if (dyn.sigma == zero)
+        zero_ta_models.emplace_back(models.get_id(mdl));
+    else if (not time_domain<time>::is_infinity(mdl.tn))
+        sched.reintegrate(mdl, mdl.tn);
 
     return success();
 }
@@ -12333,6 +10907,20 @@ inline status simulation::make_transition(model& mdl, time t) noexcept
 {
     return dispatch(mdl, [this, &mdl, t]<typename Dynamics>(Dynamics& dyn) {
         return this->make_transition(mdl, dyn, t);
+    });
+}
+
+inline status simulation::make_lambda(model& mdl) noexcept
+{
+    if (m_watched_count > 0 and is_watched_index(get_index(models.get_id(mdl))))
+        return make_watched_lambda(mdl);
+
+    return dispatch(mdl, [this]<typename Dynamics>(Dynamics& dyn) -> status {
+        if constexpr (has_lambda_function<Dynamics> and
+                      has_output_port<Dynamics>)
+            return dyn.lambda(*this);
+        else
+            return success();
     });
 }
 
@@ -12385,6 +10973,43 @@ inline status simulation::finalize() noexcept
     return success();
 }
 
+namespace detail {
+
+// The total order of IEEE 754: the bits of a negative value, except the sign,
+// are flipped so that the integer order is the order of the reals, with -0 <
+// +0 and the NaN at both ends. std::strong_order on floating points is not
+// available in the libstdc++ of gcc 11.
+inline auto total_order_key(const real x) noexcept
+{
+    using bits_t    = std::conditional_t<sizeof(real) == 8, i64, i32>;
+    const auto bits = std::bit_cast<bits_t>(x);
+
+    return bits ^ ((bits >> (sizeof(bits_t) * 8 - 1)) &
+                   std::numeric_limits<bits_t>::max());
+}
+
+inline bool message_less(const message& a, const message& b) noexcept
+{
+    for (sz i = 0; i != a.size(); ++i) {
+        const auto ka = total_order_key(a[i]);
+        const auto kb = total_order_key(b[i]);
+        if (ka != kb)
+            return ka < kb;
+    }
+
+    return false;
+}
+
+// A bag is a multiset: the order of the messages, which comes from the order of
+// the emitters and of the connections, must not reach the transitions.
+inline void sort_bag(std::span<message> bag) noexcept
+{
+    if (bag.size() > 1u)
+        std::ranges::sort(bag, message_less);
+}
+
+} // namespace detail
+
 inline status simulation::run() noexcept
 {
     debug::ensure(std::isfinite(t.load()));
@@ -12392,25 +11017,32 @@ inline status simulation::run() noexcept
     immediate_models.clear();
     immediate_observers.clear();
 
-    if (sched.empty()) {
-        t = time_domain<time>::infinity;
-        return success();
-    }
-
     last_valid_t = t;
-    t            = sched.tn();
+    t            = next_time();
 
     if (limits.expired(t)) {
         t = limits.end();
         return success();
     }
 
-    sched.pop(immediate_models);
+    for (const auto id : zero_ta_models)
+        immediate_models.emplace_back(id);
+    zero_ta_models.clear();
 
+    if (not sched.empty() and sched.tn() == t)
+        sched.pop(immediate_models);
+
+    if (immediate_models.empty())
+        return success();
+
+    // A step of Parallel DEVS: the outputs of all the imminent models, the
+    // routing of the messages, then one transition for each imminent or
+    // receiving model with its bag.
     active_output_ports.clear();
+    active_output_messages.clear();
     for (const auto id : immediate_models)
         if (auto* mdl = models.try_to_get(id); mdl)
-            irt_check(make_transition(*mdl, t));
+            irt_check(make_lambda(*mdl));
 
     // First, we compute the input_port::capacity.
 
@@ -12441,19 +11073,20 @@ inline status simulation::run() noexcept
         }
     }
 
-    // Finally, we copy the @c output_port::msg messages on the @c
-    // message_buffer vector according to the @c input_port::capacity,
-    // index and position.
+    // Then, we copy the @c active_output_messages on the @c message_buffer
+    // vector according to the @c input_port::capacity, index and position.
+    // A receiver still in the scheduler is not imminent: it leaves the
+    // scheduler to make its transition in this step.
 
     message_buffer.resize(global_messages_number);
     u32 global_position = 0;
 
-    for (const auto y_id : active_output_ports) {
-        if (auto* y = output_ports.try_to_get(y_id)) {
+    for (auto i = 0; i < active_output_ports.ssize(); ++i) {
+        if (auto* y = output_ports.try_to_get(active_output_ports[i])) {
             y->for_each(
               models, nodes,
-              [](auto& mdl, const auto port_index, auto& sched, const auto t,
-                 const auto& msg, auto& message_buffer, auto& global_position) {
+              [this, &global_position](auto& mdl, const auto port_index,
+                                       const auto& msg) {
                   dispatch(mdl, [&]<typename Dynamics>(Dynamics& dyn) {
                       if constexpr (has_input_port<Dynamics>) {
                           auto& x = dyn.x[port_index];
@@ -12461,83 +11094,42 @@ inline status simulation::run() noexcept
                           if (x.size == 0) {
                               x.position = global_position;
                               global_position += x.capacity;
-                              sched.update(mdl, t);
+
+                              // The first message of the step for a model
+                              // not imminent: an imminent model has tn equal
+                              // to t, a passive model is out of the scheduler.
+                              debug::ensure(mdl.handle != invalid_heap_handle);
+                              const auto first = std::ranges::all_of(
+                                dyn.x,
+                                [](const auto& p) { return p.size == 0; });
+
+                              if (first and mdl.tn != t) {
+                                  if (sched.is_in_tree(mdl.handle))
+                                      sched.remove(mdl);
+
+                                  immediate_models.emplace_back(
+                                    models.get_id(mdl));
+                              }
                           }
 
                           const auto start_at = x.position + x.size;
                           ++x.size;
 
                           message_buffer[start_at] = msg;
+
+                          if (x.size == x.capacity)
+                              detail::sort_bag(std::span(
+                                message_buffer.data() + x.position, x.size));
                       }
                   });
               },
-              sched, t.load(), y->msg, message_buffer, global_position);
+              active_output_messages[i]);
         }
     }
 
-    return success();
-}
-
-template<typename Fn, typename... Args>
-inline status simulation::run_with_cb(Fn&& fn, Args&&... args) noexcept
-{
-    debug::ensure(std::isfinite(t.load()));
-
-    immediate_models.clear();
-    immediate_observers.clear();
-
-    if (sched.empty()) {
-        t = time_domain<time>::infinity;
-        return success();
-    }
-
-    last_valid_t = t;
-    t            = sched.tn();
-
-    if (limits.expired(t)) {
-        t = limits.end();
-        return success();
-    }
-
-    sched.pop(immediate_models);
-
-    // emitting_output_ports.clear();
     for (const auto id : immediate_models)
         if (auto* mdl = models.try_to_get(id); mdl)
             irt_check(make_transition(*mdl, t));
-
-    fn(std::as_const(*this),
-       std::span(immediate_models.data(), immediate_models.size()),
-       std::forward<Args>(args)...);
-
-    // for (int i = 0, e = length(emitting_output_ports); i != e; ++i) {
-    //     auto* mdl =
-    //     models.try_to_get(emitting_output_ports[i].model); if (!mdl)
-    //         continue;
-
-    //    debug::ensure(sched.is_in_tree(mdl->handle));
-    //    sched.update(*mdl, t);
-
-    //    if (not messages.can_alloc(1))
-    //        return
-    //        make_error(simulation_errc::messages_container_full);
-
-    //    auto  port = emitting_output_ports[i].port;
-    //    auto& msg  = emitting_output_ports[i].msg;
-
-    //    dispatch(*mdl, [&]<typename Dynamics>(Dynamics& dyn) {
-    //        if constexpr (has_input_port<Dynamics>) {
-    //            auto* list = messages.try_to_get(dyn.x[port]);
-    //            if (not list) {
-    //                auto& new_list = messages.alloc();
-    //                dyn.x[port]    = messages.get_id(new_list);
-    //                list           = &new_list;
-    //            }
-
-    //            list->push_back({ msg[0], msg[1], msg[2] });
-    //        }
-    //    });
-    //}
 
     return success();
 }
@@ -12560,6 +11152,8 @@ inline status hsm_wrapper::initialize(simulation& sim) noexcept
 
     if (auto machine = get_hierarchical_state_machine(sim, id);
         machine.has_value()) {
+        irt_check((*machine)->check());
+
         if ((*machine)->flags[hierarchical_state_machine::option::use_source]) {
             irt_check(sim.srcs.initialize_source(*this, exec.source_value,
                                                  exec.src_data));
@@ -12567,26 +11161,11 @@ inline status hsm_wrapper::initialize(simulation& sim) noexcept
 
         irt_check((*machine)->start(exec, sim.srcs));
 
-        sigma = time_domain<time>::infinity;
+        // The initial state is the state after its completion: the messages
+        // of the enter actions and of the completion leave in the first bag.
+        irt_check((*machine)->run_to_completion(exec, false, sim.srcs));
 
-        if (exec.current_state !=
-              hierarchical_state_machine::invalid_state_id and
-            not(*machine)->states[exec.current_state].is_terminal()) {
-            switch ((*machine)->states[exec.current_state].condition.type) {
-            case hierarchical_state_machine::condition_type::sigma:
-                sigma = exec.timer;
-                break;
-            case irt::hierarchical_state_machine::condition_type::port:
-                sigma = time_domain<time>::infinity;
-                break;
-            default:
-                sigma = time_domain<time>::zero;
-                break;
-            }
-        }
-
-        if (exec.messages > 0)
-            sigma = time_domain<time>::zero;
+        sigma = exec.messages > 0 ? time_domain<time>::zero : exec.next_timer();
 
         return success();
     } else {
@@ -12601,74 +11180,40 @@ inline status hsm_wrapper::transition(simulation& sim,
 {
     if (auto machine = get_hierarchical_state_machine(sim, id);
         machine.has_value()) {
+        exec.messages = 0;
+
+        // sigma - r is exact for the internal events (r is null): the timer
+        // which defines sigma expires exactly.
+        if (not time_domain<time>::is_infinity(sigma))
+            exec.advance_timers(sigma - r);
+
+        // The output of the messages is not an event: a transition which only
+        // flushes them must not evaluate the completion condition again. Only
+        // an expired timer runs the machine before the bag. The bag is written
+        // after this run, as the confluent transition of Parallel DEVS: a wake
+        // up does not read the new bag.
+        if (exec.next_timer() <= 0.0)
+            irt_check((*machine)->run_to_completion(exec, false, sim.srcs));
+
+        auto input_received = false;
 
         for (int i = 0, e = length(x); i != e; ++i) {
             const auto lst = get_message(sim, x[i]);
             if (not lst.empty()) {
+                input_received = true;
                 exec.values.set(e - 1 - i, true);
 
-                for (auto& elem : lst)
-                    exec.ports[e - 1 - i] = elem[0];
+                // The order of the messages in the bag is not defined by the
+                // model: the maximum, commutative and idempotent, does not
+                // depend on it.
+                exec.ports[e - 1 - i] = get_qss_message<1>(lst)[0];
             }
         }
 
-        exec.messages = 0;
-        bool wait_timer, wait_msg, is_terminal;
+        if (input_received)
+            irt_check((*machine)->run_to_completion(exec, true, sim.srcs));
 
-        do {
-            exec.previous_state = exec.current_state;
-
-            switch ((*machine)->states[exec.current_state].condition.type) {
-            case irt::hierarchical_state_machine::condition_type::sigma:
-                exec.timer = r;
-                if (r == 0.0) {
-                    irt_check((*machine)->dispatch(
-                      hierarchical_state_machine::event_type::wake_up, exec,
-                      sim.srcs));
-                } else {
-                    debug::ensure(exec.values.any());
-
-                    irt_check((*machine)->dispatch(
-                      hierarchical_state_machine::event_type::input_changed,
-                      exec, sim.srcs));
-                }
-                break;
-
-            case irt::hierarchical_state_machine::condition_type::port:
-                if (exec.values.any()) {
-                    irt_check((*machine)->dispatch(
-                      hierarchical_state_machine::event_type::input_changed,
-                      exec, sim.srcs));
-                }
-                break;
-
-            default:
-                irt_check((*machine)->dispatch(
-                  hierarchical_state_machine::event_type::internal, exec,
-                  sim.srcs));
-                break;
-            }
-
-            debug::ensure(exec.current_state !=
-                          hierarchical_state_machine::invalid_state_id);
-
-            wait_timer = (*machine)
-                           ->states[exec.current_state]
-                           .condition.type ==
-                         hierarchical_state_machine::condition_type::sigma;
-
-            wait_msg = (*machine)->states[exec.current_state].condition.type ==
-                       hierarchical_state_machine::condition_type::port;
-
-            is_terminal = (*machine)->states[exec.current_state].is_terminal();
-
-        } while (not(wait_timer or wait_msg or is_terminal));
-
-        sigma = exec.messages ? 0.0
-                : wait_timer  ? exec.timer
-                : wait_msg    ? time_domain<time>::infinity
-                : is_terminal ? time_domain<time>::infinity
-                              : 0.0;
+        sigma = exec.messages > 0 ? time_domain<time>::zero : exec.next_timer();
 
         return success();
     } else {
@@ -12707,29 +11252,6 @@ inline raw_sample hsm_wrapper::observation(time t, time /*e*/) const noexcept
 inline bool simulation::can_alloc(std::integral auto place) const noexcept
 {
     return models.can_alloc(place);
-}
-
-inline bool simulation::can_alloc(dynamics_type      type,
-                                  std::integral auto place) const noexcept
-{
-    if (type == dynamics_type::hsm_wrapper)
-        return models.can_alloc(place) && hsms.can_alloc(place);
-    else if (type == dynamics_type::simulation_wrapper)
-        return models.can_alloc(place) and sims.can_alloc(place);
-    else
-        return models.can_alloc(place);
-}
-
-template<typename Dynamics>
-inline bool simulation::can_alloc_dynamics(
-  std::integral auto place) const noexcept
-{
-    if constexpr (std::is_same_v<Dynamics, hsm_wrapper>)
-        return models.can_alloc(place) && hsms.can_alloc(place);
-    else if constexpr (std::is_same_v<Dynamics, simulation_wrapper>)
-        return models.can_alloc(place) && sims.can_alloc(place);
-    else
-        return models.can_alloc(place);
 }
 
 template<typename Dynamics>
@@ -12902,50 +11424,139 @@ inline bool is_ports_compatible(const model& mdl_src,
 ///
 /// Model implementation
 
+/// Gets the @c fifo of a queue with room for a new message: allocates it if it
+/// does not exist and applies the @a overflow policy if it is full.
+/// @return The fifo, or nullptr when the new message is forgotten.
+inline expected<ring_buffer<dated_message>*> get_queue_fifo(
+  simulation&         sim,
+  dated_message_id&   fifo,
+  const fifo_overflow overflow,
+  const i32           capacity) noexcept
+{
+    auto* ar = sim.dated_messages.try_to_get(fifo);
+
+    if (not ar) {
+        if (not sim.dated_messages.can_alloc(1) and
+            not sim.dated_messages.grow<2, 1>())
+            return make_error(simulation_errc::dated_messages_container_full);
+
+        // A ring buffer keeps one empty slot.
+        ar   = &sim.dated_messages.alloc(capacity + 1);
+        fifo = sim.dated_messages.get_id(*ar);
+    }
+
+    if (not ar->full())
+        return ar;
+
+    switch (overflow) {
+    case fifo_overflow::grow:
+        if (not ar->reserve(ar->capacity() * 2))
+            return make_error(simulation_errc::dated_messages_container_full);
+        return ar;
+
+    case fifo_overflow::error:
+        return make_error(simulation_errc::queue_full);
+
+    case fifo_overflow::replace_first:
+        ar->pop_head();
+        return ar;
+
+    case fifo_overflow::replace_last:
+        ar->pop_tail();
+        return ar;
+
+    case fifo_overflow::forget:
+        return nullptr;
+    }
+
+    unreachable();
+}
+
+/// Removes the message sent by the @c lambda: the head of the @c fifo if its
+/// date is lower or equal to @a t.
+inline void queue_remove_sent_message(simulation&            sim,
+                                      const dated_message_id fifo,
+                                      const time             t) noexcept
+{
+    if (auto* ar = sim.dated_messages.try_to_get(fifo))
+        if (not ar->empty() and ar->front()[0] <= t)
+            ar->pop_head();
+}
+
+/// @return The time advance to the date of the head of the @c fifo.
+inline time queue_time_advance(simulation&            sim,
+                               const dated_message_id fifo,
+                               const time             t) noexcept
+{
+    if (auto* ar = sim.dated_messages.try_to_get(fifo);
+        ar and not ar->empty()) {
+        const auto next = ar->front()[0] - t;
+        return next <= time_domain<time>::zero ? time_domain<time>::zero : next;
+    }
+
+    return time_domain<time>::infinity;
+}
+
+/// Sends the head of the @c fifo. An output port stores one message: the
+/// messages with the same date leave one by one with a time advance of zero.
+inline status queue_send_head_message(simulation&            sim,
+                                      const dated_message_id fifo,
+                                      const output_port_id   port) noexcept
+{
+    if (auto* ar = sim.dated_messages.try_to_get(fifo);
+        ar and not ar->empty()) {
+        const auto& msg = ar->front();
+        return send_message(sim, port, msg[1], msg[2], msg[3]);
+    }
+
+    return success();
+}
+
+/// Reads the next delay of a queue in its source.
+inline expected<time> queue_next_ta(simulation&  sim,
+                                    source&      src,
+                                    source_data& data) noexcept
+{
+    if (src.is_empty())
+        irt_check(sim.srcs.update_source(src, data));
+
+    const auto ta = src.next();
+    if (not std::isfinite(ta) or std::signbit(ta))
+        return make_error(simulation_errc::ta_abnormal);
+
+    return ta;
+}
+
+inline status queue::lambda(simulation& sim) noexcept
+{
+    return queue_send_head_message(sim, fifo, y[0]);
+}
+
 inline status queue::transition(simulation& sim,
                                 time        t,
                                 time /*e*/,
                                 time /*r*/) noexcept
 {
-    if (auto* ar = sim.dated_messages.try_to_get(fifo))
-        while (not ar->empty() and ar->head()->data()[0] <= t)
-            ar->pop_head();
+    queue_remove_sent_message(sim, fifo, t);
 
-    const auto lst = get_message(sim, x[0]);
-    if (not lst.empty()) {
-        auto* ar = sim.dated_messages.try_to_get(fifo);
+    // The time advance is constant: the dates of the fifo are sorted.
+    for (const auto& msg : get_message(sim, x[0])) {
+        auto ar = get_queue_fifo(sim, fifo, overflow, capacity);
+        if (not ar)
+            return ar.error();
 
-        if (not ar) {
-            if (not sim.dated_messages.can_alloc(1) and
-                not sim.dated_messages.grow<2, 1>())
-                return make_error(simulation_errc::queue_fifo_error);
-
-            auto& new_ar = sim.dated_messages.alloc(32);
-            fifo         = sim.dated_messages.get_id(new_ar);
-            ar           = &new_ar;
-        }
-
-        for (const auto& msg : lst) {
-            const auto success = ar->push_tail(
-              { irt::real(t + ta), msg[0], msg[1], msg[2] });
-
-            if (not success)
-                log(log_level::alert, [](auto& m) {
-                    m = "simulation: queue::transition: failed to push message "
-                        "to fifo";
-                });
-        }
+        if (*ar)
+            (*ar)->push_tail({ t + ta, msg[0], msg[1], msg[2] });
     }
 
-    sigma = time_domain<time>::infinity;
-    if (auto* ar = sim.dated_messages.try_to_get(fifo)) {
-        if (not ar->empty()) {
-            const auto next_ta = ar->head()->data()[0] - t;
-            sigma = next_ta <= zero ? time_domain<time>::zero : next_ta;
-        }
-    }
+    sigma = queue_time_advance(sim, fifo, t);
 
     return success();
+}
+
+inline status dynamic_queue::lambda(simulation& sim) noexcept
+{
+    return queue_send_head_message(sim, fifo, y[0]);
 }
 
 inline status dynamic_queue::transition(simulation& sim,
@@ -12953,56 +11564,38 @@ inline status dynamic_queue::transition(simulation& sim,
                                         time /*e*/,
                                         time /*r*/) noexcept
 {
-    if (auto* ar = sim.dated_messages.try_to_get(fifo); ar) {
-        while (not ar->empty() and ar->tail()->data()[0] <= t)
-            ar->pop_tail();
+    queue_remove_sent_message(sim, fifo, t);
 
-        const auto lst = get_message(sim, x[0]);
+    const auto lst = get_message(sim, x[0]);
 
-        if (not lst.empty()) {
-            for (const auto& msg : lst) {
-                if (!sim.dated_messages.can_alloc(1))
-                    return make_error(
-                      simulation_errc::dated_messages_container_full);
+    for (const auto& msg : lst) {
+        auto fifo_ar = get_queue_fifo(sim, fifo, overflow, capacity);
+        if (not fifo_ar)
+            return fifo_ar.error();
 
-                if (source_ta.is_empty())
-                    irt_check(sim.srcs.update_source(source_ta, src_data));
+        auto* ar = *fifo_ar;
+        if (not ar)
+            continue;
 
-                const auto ta = source_ta.next();
+        auto ta = queue_next_ta(sim, source_ta, src_data);
+        if (not ta)
+            return ta.error();
 
-                ar->push_head({ t + ta, msg[0], msg[1], msg[2] });
-            }
-        }
+        // FIFO: a message never leaves before the previous one.
+        const auto date = ar->empty() ? t + *ta
+                                      : std::max(t + *ta, ar->back()[0]);
 
-        if (not lst.empty()) {
-            sigma = lst.front().data()[0] - t;
-            sigma = sigma <= time_domain<time>::zero ? time_domain<time>::zero
-                                                     : sigma;
-        } else {
-            sigma = time_domain<time>::infinity;
-        }
-    } else {
-        sigma = time_domain<time>::infinity;
+        ar->push_tail({ date, msg[0], msg[1], msg[2] });
     }
+
+    sigma = queue_time_advance(sim, fifo, t);
 
     return success();
 }
 
-inline status priority_queue::try_to_insert(simulation&    sim,
-                                            const time     t,
-                                            const message& msg) noexcept
+inline status priority_queue::lambda(simulation& sim) noexcept
 {
-    if (not sim.dated_messages.can_alloc(1))
-        return make_error(simulation_errc::dated_messages_container_full);
-
-    if (auto* ar = sim.dated_messages.try_to_get(fifo); ar) {
-        ar->push_head({ irt::real(t), msg[0], msg[1], msg[2] });
-        ar->sort([](auto& l, auto& r) noexcept -> bool {
-            return l.data()[0] < r.data()[0];
-        });
-    }
-
-    return success();
+    return queue_send_head_message(sim, fifo, y[0]);
 }
 
 inline status priority_queue::transition(simulation& sim,
@@ -13010,38 +11603,44 @@ inline status priority_queue::transition(simulation& sim,
                                          time /*e*/,
                                          time /*r*/) noexcept
 {
-    if (auto* ar = sim.dated_messages.try_to_get(fifo); ar) {
-        while (not ar->empty() and ar->tail()->data()[0] <= t)
-            ar->pop_tail();
+    queue_remove_sent_message(sim, fifo, t);
 
-        const auto lst = get_message(sim, x[0]);
+    const auto lst = get_message(sim, x[0]);
 
-        if (not lst.empty()) {
-            for (const auto& msg : lst) {
+    for (const auto& msg : lst) {
+        auto fifo_ar = get_queue_fifo(sim, fifo, overflow, capacity);
+        if (not fifo_ar)
+            return fifo_ar.error();
 
-                if (source_ta.is_empty())
-                    irt_check(sim.srcs.update_source(source_ta, src_data));
+        auto* ar = *fifo_ar;
+        if (not ar)
+            continue;
 
-                real value = source_ta.next();
+        auto ta = queue_next_ta(sim, source_ta, src_data);
+        if (not ta)
+            return ta.error();
 
-                if (auto ret = try_to_insert(sim, static_cast<real>(value) + t,
-                                             msg);
-                    !ret)
-                    return make_error(
-                      simulation_errc::dated_messages_container_full);
-            }
+        ar->push_tail({ t + *ta, msg[0], msg[1], msg[2] });
+
+        // Keeps the fifo sorted by date: the new message moves before the
+        // messages with a greater date only (the order of arrival is kept
+        // for the same date).
+        const auto head = ar->head();
+        auto       it   = ar->tail();
+        while (it != head) {
+            auto prev = it;
+            --prev;
+
+            if (not((*it)[0] < (*prev)[0]))
+                break;
+
+            using std::swap;
+            swap(*it, *prev);
+            it = prev;
         }
-
-        if (not lst.empty()) {
-            sigma = lst.front()[0] - t;
-            sigma = sigma <= time_domain<time>::zero ? time_domain<time>::zero
-                                                     : sigma;
-        } else {
-            sigma = time_domain<time>::infinity;
-        }
-    } else {
-        sigma = time_domain<time>::infinity;
     }
+
+    sigma = queue_time_advance(sim, fifo, t);
 
     return success();
 }
@@ -13107,7 +11706,6 @@ inline source& source::operator=(source&& src) noexcept
 {
     if (&src != this) {
         buffer = std::exchange(src.buffer, std::span<double>());
-        std::copy_n(src.buffer.data(), src.buffer.size(), buffer.data());
         type  = std::exchange(src.type, source_type::constant);
         index = std::exchange(src.index, 0);
         id    = std::exchange(src.id, undefined<constant_source_id>());
@@ -13132,7 +11730,9 @@ inline void source::reset(const i64 param) noexcept
     const auto p_type = left(static_cast<u64>(param));
     const auto p_id   = right(static_cast<u64>(param));
 
-    type = p_type <= 4 ? enum_cast<source_type>(p_type) : source_type::constant;
+    type = p_type <= ordinal(source_type::random)
+             ? enum_cast<source_type>(p_type)
+             : source_type::constant;
 
     switch (type) {
     case source_type::constant:
@@ -13196,23 +11796,6 @@ inline constexpr void input_port::reset() noexcept
 }
 
 // output-port implementation
-
-template<typename Function, typename... Args>
-void output_port::for_each(const data_array<model, model_id>&           models,
-                           const data_array<block_node, block_node_id>& nodes,
-                           Function&&                                   fn,
-                           Args&&... args) const noexcept
-{
-    for (const auto& node : connections)
-        if (const auto* mdl = models.try_to_get(node.model))
-            std::invoke(fn, *mdl, node.port_index, args...);
-
-    for (const auto* block = nodes.try_to_get(next); block;
-         block             = nodes.try_to_get(block->next))
-        for (const auto& elem : block->nodes)
-            if (const auto* mdl = models.try_to_get(elem.model))
-                std::invoke(fn, *mdl, elem.port_index, args...);
-}
 
 template<typename Function, typename... Args>
 void output_port::for_each(data_array<model, model_id>&           models,

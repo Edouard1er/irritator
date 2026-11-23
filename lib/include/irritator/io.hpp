@@ -15,13 +15,6 @@
 
 namespace irt {
 
-static inline constexpr const std::string_view component_status_string[] = {
-    "unread",
-    "modified",
-    "unmodified",
-    "unreadable"
-};
-
 static constexpr inline const char* component_type_names[] = {
     "none", "simple", "grid", "graph", "hsm", "simulation"
 };
@@ -46,11 +39,6 @@ static constexpr inline const char* internal_component_names[] = {
     "qss3_negative_lif", "qss3_seirs", "qss3_van_der_pol"
 };
 
-//! Try to get internal component type from a string. If the string is unknown,
-//! optional returns \c std::nullopt.
-auto get_internal_component_type(std::string_view name) noexcept
-  -> std::optional<internal_component>;
-
 static constexpr inline const char* dynamics_type_names[] = {
     "qss1_integrator",
     "qss1_multiplier",
@@ -58,7 +46,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss1_max_hold",
     "qss1_min_hold",
     "qss1_flipflop",
-    "qss1_filter",
     "qss1_power",
     "qss1_square",
     "qss1_sum_2",
@@ -68,7 +55,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss1_wsum_3",
     "qss1_wsum_4",
     "qss1_inverse",
-    "qss1_integer",
     "qss1_compare",
     "qss1_gain",
     "qss1_sin",
@@ -88,6 +74,9 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss1_hysteresis",
     "qss1_maximum",
     "qss1_minimum",
+    "qss1_priority_2",
+    "qss1_priority_3",
+    "qss1_priority_4",
     "qss1_saturation",
     "qss1_sigmoid",
     "qss1_sign",
@@ -101,7 +90,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss2_max_hold",
     "qss2_min_hold",
     "qss2_flipflop",
-    "qss2_filter",
     "qss2_power",
     "qss2_square",
     "qss2_sum_2",
@@ -111,7 +99,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss2_wsum_3",
     "qss2_wsum_4",
     "qss2_inverse",
-    "qss2_integer",
     "qss2_compare",
     "qss2_gain",
     "qss2_sin",
@@ -131,6 +118,9 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss2_hysteresis",
     "qss2_maximum",
     "qss2_minimum",
+    "qss2_priority_2",
+    "qss2_priority_3",
+    "qss2_priority_4",
     "qss2_saturation",
     "qss2_sigmoid",
     "qss2_sign",
@@ -144,7 +134,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss3_max_hold",
     "qss3_min_hold",
     "qss3_flipflop",
-    "qss3_filter",
     "qss3_power",
     "qss3_square",
     "qss3_sum_2",
@@ -154,7 +143,6 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss3_wsum_3",
     "qss3_wsum_4",
     "qss3_inverse",
-    "qss3_integer",
     "qss3_compare",
     "qss3_gain",
     "qss3_sin",
@@ -174,6 +162,9 @@ static constexpr inline const char* dynamics_type_names[] = {
     "qss3_hysteresis",
     "qss3_maximum",
     "qss3_minimum",
+    "qss3_priority_2",
+    "qss3_priority_3",
+    "qss3_priority_4",
     "qss3_saturation",
     "qss3_sigmoid",
     "qss3_sign",
@@ -255,9 +246,9 @@ static constexpr inline std::string_view norm_type_names[] = { "min-max",
 
 static constexpr inline std::string_view operation_type_names[] = {
     "equal",
+    "not-equal",
     "greater-equal",
     "less-equal",
-    "not-equal",
 };
 
 template<typename RandomGenerator, typename Distribution>

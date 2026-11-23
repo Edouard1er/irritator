@@ -2,7 +2,6 @@
 // Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
-#include <irritator/archiver.hpp>
 #include <irritator/core.hpp>
 #include <irritator/file.hpp>
 #include <irritator/io.hpp>
@@ -407,6 +406,8 @@ void simulation_to_cpp::show(const project_editor& ed) noexcept
         auto& app = container_of(this, &application::sim_to_cpp);
 
         app.add_gui_task([&]() {
+            const auto structure = ed.sim_player.player.lock_structure();
+
             const auto ret = write_test_simulation(
               stdout, ed.pj.name.sv(), ed.pj.sim, ed.pj.sim.limits.begin(),
               ed.pj.sim.limits.end(),
@@ -461,7 +462,7 @@ void simulation_to_cpp::show(const project_editor& ed) noexcept
 }
 
 application::application(log_history& jn_) noexcept
-  : task_mgr{ 4, 1 }
+  : task_mgr{ task_manager_options{ .list_count = 4, .worker_count = 0 } }
   , config(get_config_home(true))
   , jn{ jn_ }
   , pjs(16)
@@ -477,15 +478,22 @@ application::application(log_history& jn_) noexcept
     settings_wnd.apply_style(config.vars.theme.load());
 
     task_mgr.start();
-    journal_scope j;
 
     log(log_level::info, [&](auto& m) noexcept {
         format(m,
-               "Starting with {} ordered list {} unordered list and {} "
-               "threads\n",
-               task_mgr.ordered_size(), task_mgr.unordered_size(),
-               task_mgr.ordered_size() + task_mgr.unordered_size());
+               "Starting with {} list and {} ordered - {} unordered threads\n",
+               task_mgr.list_size(), task_mgr.ordered_worker_size(),
+               task_mgr.unordered_worker_size());
     });
+}
+
+void application::set_player_task_list(project_editor& ed) noexcept
+{
+    ed.sim_player.player.set_task_list(task_mgr,
+                                       get_task_manager_list(pjs.get_id(ed)));
+
+    // Opened during a frame: its views are drawn in this frame.
+    ed.sim_player.frame_lock = ed.sim_player.player.try_lock_structure();
 }
 
 application::~application() noexcept
@@ -499,16 +507,11 @@ application::~application() noexcept
     log(log_level::info, "Application shutdown\n"sv);
 }
 
-unordered_task_list& application::get_unordered_task_list() noexcept
-{
-    return task_mgr.unordered(0);
-}
-
 void application::try_set_component_as_project(const file_access& /*files*/,
                                                const component_access& ids,
                                                const component_id id) noexcept
 {
-    if (debug::check(ids.exists(id))) {
+    if (ids.exists(id)) {
         add_gui_task([this, id]() {
             if (new_project_req.try_request()) {
                 mod.ids.read([&](const auto& ids, auto) noexcept {
@@ -518,10 +521,13 @@ void application::try_set_component_as_project(const file_access& /*files*/,
                         if (const auto ret = pj->set(ids, fs, id);
                             ret.has_error()) {
                             log(log_level::error, [&](auto& m) {
-                                format(m, "project: error during import ({}))",
+                                format(m, "project: error during import ({})",
                                        ret.error());
                             });
 
+                            // Otherwise the request stays pending and no other
+                            // project can be opened.
+                            new_project_req.fail();
                             return;
                         }
 
@@ -569,6 +575,7 @@ void application::try_open_project_window(const file_access& /*files*/,
                                        ret.error());
                             });
 
+                            new_project_req.fail();
                             return;
                         }
 
@@ -649,36 +656,6 @@ bool application::init() noexcept
     add_gui_task([&]() noexcept { this->component_sel.update(); });
 
     return true;
-}
-
-template<typename DataArray>
-static void cleanup_sim_or_gui_task(DataArray& d_array) noexcept
-{
-    typename DataArray::value_type* task   = nullptr;
-    typename DataArray::value_type* to_del = nullptr;
-
-    while (d_array.next(task)) {
-        if (to_del) {
-            d_array.free(*to_del);
-            to_del = nullptr;
-        }
-
-        if (task->state == task_status::finished) {
-            to_del = task;
-        }
-    }
-
-    if (to_del)
-        d_array.free(*to_del);
-}
-
-void application::request_open_directory_dlg(
-  const registred_path_id id) noexcept
-{
-    debug::ensure(not show_select_reg_path);
-
-    show_select_reg_path = true;
-    selected_reg_path    = id;
 }
 
 auto application::show_menu() noexcept -> show_result_t
@@ -795,8 +772,10 @@ void application::show_dock() noexcept
                           const auto dot      = filename.find_last_of('.');
                           const auto label    = filename.substr(0, dot);
 
-                          auto& pj = pjs.alloc(label, std::move(*pj_released));
+                          auto&      pj    = pjs.alloc(mod, label,
+                                                       std::move(*pj_released));
                           const auto pj_id = pjs.get_id(pj);
+                          set_player_task_list(pj);
                           library_wnd.add_open_file(f_id, pj_id);
                           output_ed.add_project(pj_id);
                           return true;
@@ -808,8 +787,10 @@ void application::show_dock() noexcept
                 if (not opened) {
                     const auto next_key = pjs.next_key();
                     const auto label    = format_n<32>("project-{}", next_key);
-                    auto& pj = pjs.alloc(label.sv(), std::move(*pj_released));
+                    auto&      pj       = pjs.alloc(mod, label.sv(),
+                                                    std::move(*pj_released));
                     const auto pj_id = pjs.get_id(pj);
+                    set_player_task_list(pj);
                     output_ed.add_project(pj_id);
                 }
             }
@@ -825,7 +806,6 @@ void application::show_dock() noexcept
                 to_close = nullptr;
             }
 
-            pj->update_simulation_state(*this);
             ImGui::PushID(pj);
 
             if (pj->show(*this) ==
@@ -903,6 +883,11 @@ void application::show_dock() noexcept
 
 auto application::show() noexcept -> show_result_t
 {
+    for (auto& ed : pjs) {
+        ed.sim_player.frame_lock = ed.sim_player.player.try_lock_structure();
+        ed.sim_player.curves.receive();
+    }
+
     auto ret = show_menu();
     show_dock();
 
@@ -915,35 +900,13 @@ auto application::show() noexcept -> show_result_t
     if (settings_wnd.is_open)
         settings_wnd.show();
 
-    return ret;
-}
+    // Released before the scheduling: simulation_init() and the next tasks
+    // must never wait for the views.
+    for (auto& ed : pjs)
+        ed.sim_player.frame_lock = {};
 
-auto build_unique_component_vector(application& app, tree_node& tn)
-  -> vector<component_id>
-{
-    vector<component_id> ret;
-    vector<tree_node*>   stack;
-
-    if (auto* child = tn.tree.get_child(); child)
-        stack.emplace_back(child);
-
-    while (!stack.empty()) {
-        auto* cur = stack.back();
-        stack.pop_back();
-
-        app.mod.ids.read([&](const auto& ids, auto) {
-            if (ids.exists(cur->id))
-                if (auto it = std::find(ret.begin(), ret.end(), cur->id);
-                    it == ret.end())
-                    ret.emplace_back(cur->id);
-        });
-
-        if (auto* sibling = cur->tree.get_sibling(); sibling)
-            stack.emplace_back(sibling);
-
-        if (auto* child = cur->tree.get_child(); child)
-            stack.emplace_back(child);
-    }
+    for (auto& ed : pjs)
+        ed.schedule_player(*this);
 
     return ret;
 }
@@ -1051,103 +1014,6 @@ bool show_select_model_box(const char*     button_label,
     return ret;
 }
 
-void application::start_load_project(const project_id pj_id) noexcept
-{
-    add_gui_task([&, pj_id]() noexcept {
-        auto* pj = pjs.try_to_get(pj_id);
-        if (not pj or is_undefined(pj->pj.project_file))
-            return;
-
-        mod.files.read([&](const auto& fs, auto) noexcept {
-            mod.ids.read([&](const auto& ids, auto) noexcept {
-                if (auto ret = pj->pj.load(fs, ids); ret.has_value()) {
-                    log(log_level::info, [&](auto& msg) noexcept {
-                        mod.files.read([&](const auto& fs,
-                                           const auto /*vesr*/) {
-                            format(
-                              msg, "Loading project file {} success",
-                              fs.file_paths.get(pj->pj.project_file).path.sv());
-                        });
-                    });
-                } else {
-                    log(log_level::error, [&](auto& msg) noexcept {
-                        mod.files.read([&](const auto& fs,
-                                           const auto /*vesr*/) {
-                            format(
-                              msg, "Loading project file {} error",
-                              fs.file_paths.get(pj->pj.project_file).path.sv());
-                            format(msg, "{}", ret.error());
-                        });
-                    });
-                }
-            });
-        });
-    });
-}
-
-void application::start_save_project(const project_id pj_id) noexcept
-{
-    add_gui_task([&, pj_id]() noexcept {
-        auto* pj_ed = pjs.try_to_get(pj_id);
-        if (not pj_ed)
-            return;
-
-        mod.files.read([&](const auto& fs, auto) noexcept {
-            mod.ids.read([&](const auto& ids, auto) noexcept {
-                if (auto ret = pj_ed->pj.save(fs, ids); ret) {
-                    log(log_level::info, [&](auto& msg) noexcept {
-                        mod.files.read(
-                          [&](const auto& fs, const auto /*vers*/) {
-                              format(msg, "Saving project file {} success",
-                                     fs.file_paths.get(pj_ed->pj.project_file)
-                                       .path.sv());
-                          });
-                    });
-                } else {
-                    log(log_level::error, [&](auto& msg) noexcept {
-                        const small_string<127> name = mod.files.read(
-                          [&](const auto& fs, const auto /*vers*/) {
-                              const auto* f = fs.file_paths.try_to_get(
-                                pj_ed->pj.project_file);
-                              return f ? f->path.sv() : std::string_view{ "-" };
-                          });
-
-                        format(msg, "Saving project file {} error {}",
-                               name.sv(), ret.error());
-                    });
-                }
-            });
-        });
-    });
-}
-
-void application::start_save_component(const component_id id) noexcept
-{
-    add_gui_task([&, id]() noexcept {
-        mod.ids.read([&](const auto& ids, auto) noexcept {
-            mod.files.read([&](const auto& fs, auto) noexcept {
-                if (ids.exists(id)) {
-                    const auto& compo = ids.components[id];
-
-                    if (auto ret = mod.save(ids, fs, id); not ret) {
-                        log(log_level::error, [&](auto& msg) {
-                            format(msg,
-                                   "component: fail to save {} (part: {} {}",
-                                   compo.name.sv(), ordinal(ret.error().cat()),
-                                   ret.error().value());
-                        });
-                    } else {
-                        log(log_level::notice, [&](auto& msg) {
-                            format(msg, "component: save {} success",
-                                   compo.name.sv());
-                        });
-                    }
-                }
-            });
-        });
-    });
-}
-
 void application::start_init_source(const project_id  pj_id,
                                     const u64         id,
                                     const source_type type) noexcept
@@ -1156,23 +1022,30 @@ void application::start_init_source(const project_id  pj_id,
 
     add_gui_task([this, pj_id, id, type]() noexcept {
         if (auto* sim_ed = pjs.try_to_get(pj_id)) {
+            // The preview works on a copy: the source of the simulation, maybe
+            // used by a step now, keeps its state.
+            const auto structure = sim_ed->sim_player.player.lock_structure();
+
             if (type == source_type::constant) {
                 const auto constant_id = enum_cast<constant_source_id>(id);
 
-                if (auto* c = sim_ed->pj.sim.srcs.constant_sources.try_to_get(
-                      constant_id)) {
-                    if (c->init().has_error())
+                if (const auto* src = sim_ed->pj.sim.srcs.constant_sources
+                                        .try_to_get(constant_id)) {
+                    constant_source c(*src);
+
+                    if (c.init().has_error())
                         return;
 
-                    data_ed.fill_plot(std::span(c->buffer.data(), c->length));
+                    data_ed.fill_plot(std::span(c.buffer.data(), c.length));
                 }
             } else {
                 const auto random_id = enum_cast<random_source_id>(id);
 
-                if (auto* c = sim_ed->pj.sim.srcs.random_sources.try_to_get(
-                      random_id)) {
+                if (const auto* original = sim_ed->pj.sim.srcs.random_sources
+                                             .try_to_get(random_id)) {
+                    random_source c(*original);
 
-                    if (c->init().has_error())
+                    if (c.init().has_error())
                         return;
 
                     source      src;
@@ -1183,7 +1056,7 @@ void application::start_init_source(const project_id  pj_id,
 
                     data.chunk_id[0] = 0x648593178264597;
                     data.chunk_id[1] = static_cast<u64>(
-                      reinterpret_cast<uintptr_t>(c));
+                      reinterpret_cast<uintptr_t>(original));
                     data.chunk_id[2] = 0;
                     data.chunk_id[3] = 0;
                     data.chunk_id[4] = 0;
@@ -1191,19 +1064,12 @@ void application::start_init_source(const project_id  pj_id,
 
                     chunk_type buffer;
 
-                    c->fill(std::span(buffer), src, data);
+                    c.fill(std::span(buffer), src, data);
 
                     data_ed.fill_plot(buffer);
                 }
             }
         }
-    });
-}
-
-void application::start_dir_path_refresh(const dir_path_id id) noexcept
-{
-    add_gui_task([&, id]() noexcept {
-        mod.files.write([&](auto& fs) { fs.refresh(id); });
     });
 }
 

@@ -36,6 +36,22 @@ template<typename T>
 concept not_integral = not std::is_integral_v<T>;
 
 /**
+ * True if the memory returned by @c allocator<>::allocate with its default
+ * alignment (@c alignof(std::max_align_t)) is suitable for @c T.
+ *
+ * The containers that allocate a buffer of @c T without passing @c alignof(T)
+ * to the allocator (@c vector, @c ring_buffer, @c pool, @c dynamic_buffer)
+ * check it: an over-aligned @c T (for example one that contains a @c
+ * shared_buffer, @c alignas(64)) would be built in a misaligned buffer and a
+ * compiler is free to use aligned instructions on it. @c data_array and the
+ * extra columns of @c id_data_array pass @c alignof to the allocator and
+ * support over-aligned types.
+ */
+template<typename T>
+inline constexpr bool is_default_aligned_v = alignof(T) <=
+                                             alignof(std::max_align_t);
+
+/**
  *  tag to allow vector<T, A> and other container to reserve memory without
  *  resize in the constructor.
  *
@@ -50,6 +66,10 @@ struct reserve_tag_t {
 };
 
 constexpr inline reserve_tag_t reserve_tag;
+
+/// Reaches the private members of the containers to dump them (see
+/// binary-containers.hpp).
+struct container_binary_access;
 
 /**
  * Returns true if the integer @c t is greater or equal to @c min_include and
@@ -355,62 +375,42 @@ struct human_readable_time {
     display_type type;
 };
 
-//! Assign a value constrained by the template parameters.
-//!
-//! @code
-//! static int v = 0;
-//! if (ImGui::InputInt("test", &v)) {
-//!     f(v);
-//! }
-//!
-//! void f(constrained_value<int, 0, 100> v)
-//! {
-//!     assert(0 <= *v && *v <= 100);
-//! }
-//! @endcode
+/** A value clamped between @a Lower and @a Upper at construction.
+ *
+ * For capacity hints and user interface values, where the nearest bound is a
+ * sound answer. A value read from a file must be refused with an error
+ * instead.
+ *
+ * @code
+ * static int v = 0;
+ * if (ImGui::InputInt("test", &v)) {
+ *     f(v);
+ * }
+ *
+ * void f(clamped_value<int, 0, 100> v)
+ * {
+ *     assert(0 <= *v && *v <= 100);
+ * }
+ * @endcode
+ */
 template<typename T = int, T Lower = 0, T Upper = 100>
-class constrained_value
+class clamped_value
 {
 public:
     using value_type = T;
 
 private:
-    static_assert(std::is_trivial_v<T>,
-                  "T must be a trivial type in ratio_parameter");
+    static_assert(std::integral<T> or std::floating_point<T>);
     static_assert(Lower < Upper);
 
-    T m_value;
+    T m_value = Lower;
 
 public:
     /// Default is to assign @a Lower value.
-    constexpr constrained_value() noexcept
-      : m_value(Lower)
-    {}
-
-    constexpr constrained_value(const constrained_value& o) noexcept
-      : m_value(o.m_value)
-    {}
-
-    constexpr constrained_value(constrained_value&& o) noexcept
-      : m_value(std::exchange(o.m_value, T{}))
-    {}
-
-    constexpr constrained_value& operator=(const constrained_value& o) noexcept
-    {
-        m_value = o.m_value;
-        return *this;
-    }
-
-    constexpr constrained_value& operator=(constrained_value&& o) noexcept
-    {
-        m_value = std::exchange(o.m_value, T{});
-        return *this;
-    }
+    constexpr clamped_value() noexcept = default;
 
     /// Assign a clamp value between @a Lower and @a Upper.
-    ///
-    /// \param value_ The value to copy.
-    constexpr constrained_value(const T value_) noexcept
+    constexpr clamped_value(const T value_) noexcept
       : m_value(value_ < Lower   ? Lower
                 : value_ < Upper ? value_
                                  : Upper)
@@ -419,16 +419,53 @@ public:
     constexpr explicit   operator T() const noexcept { return m_value; }
     constexpr value_type operator*() const noexcept { return m_value; }
     constexpr value_type value() const noexcept { return m_value; }
+
+    static constexpr T lower_bound() noexcept { return Lower; }
+    static constexpr T upper_bound() noexcept { return Upper; }
 };
 
+/**
+ * The default memory resource of all containers. Allocations go through two
+ * replaceable functions so a host application (for example a game engine
+ * with its own allocator) can take over the whole memory of irritator.
+ *
+ * @code
+ * irt::new_delete_memory_resource::instance().set_functions({
+ *   [](std::size_t b, std::size_t a) noexcept { return my_malloc(b, a); },
+ *   [](void* p, std::size_t, std::size_t) noexcept { my_free(p); } });
+ * @endcode
+ */
 class new_delete_memory_resource
 {
 public:
+    struct functions {
+        void* (*allocate)(std::size_t bytes,
+                          std::size_t alignment) noexcept  = nullptr;
+        void (*deallocate)(void*       p,
+                           std::size_t bytes,
+                           std::size_t alignment) noexcept = nullptr;
+    };
+
     class data
     {
     private:
-        std::size_t allocated   = 0;
-        std::size_t deallocated = 0;
+        functions fn{ &default_allocate, &default_deallocate };
+
+        std::atomic<std::size_t> allocated   = 0;
+        std::atomic<std::size_t> deallocated = 0;
+
+        static void* default_allocate(std::size_t bytes,
+                                      std::size_t alignment) noexcept
+        {
+            return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+        }
+
+        static void default_deallocate(void*       p,
+                                       std::size_t bytes,
+                                       std::size_t alignment) noexcept
+        {
+            std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
+        }
 
     public:
         void* allocate(
@@ -439,9 +476,8 @@ public:
                           debug::enable_ensure == true) {
                 return debug_allocate(bytes, alignment);
             } else {
-                allocated += bytes;
-                return std::pmr::new_delete_resource()->allocate(bytes,
-                                                                 alignment);
+                allocated.fetch_add(bytes, std::memory_order_relaxed);
+                return fn.allocate(bytes, alignment);
             }
         }
 
@@ -454,240 +490,37 @@ public:
                           debug::enable_ensure == true) {
                 debug_deallocate(p, bytes, alignment);
             } else {
-                deallocated += bytes;
-                return std::pmr::new_delete_resource()->deallocate(p, bytes,
-                                                                   alignment);
+                deallocated.fetch_add(bytes, std::memory_order_relaxed);
+                fn.deallocate(p, bytes, alignment);
             }
         }
 
-        void release() noexcept {}
-
-        std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
+        /**
+         * Replaces the allocation functions. A function left to @c nullptr
+         * restores the default @c std::pmr::new_delete_resource.
+         *
+         * @return false if memory is still alive: freeing a block with
+         * another allocator than the one that built it would corrupt the
+         * heap. Call it before the first allocation or after the last
+         * deallocation.
+         */
+        bool set_functions(const functions& f) noexcept
         {
-            return std::make_pair(allocated, deallocated);
-        }
+            if (allocated.load(std::memory_order_relaxed) !=
+                deallocated.load(std::memory_order_relaxed))
+                return false;
 
-    private:
-        void* debug_allocate(std::size_t bytes, std::size_t alignment) noexcept;
-        void  debug_deallocate(void*       p,
-                               std::size_t bytes,
-                               std::size_t alignment) noexcept;
-    };
-
-    static data& instance() noexcept
-    {
-        static data d;
-        return d;
-    }
-};
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-class synchronized_pool_resource
-{
-public:
-    class data
-    {
-    private:
-        std::pmr::synchronized_pool_resource mr{ std::pmr::pool_options{
-          max_blocks_per_chunk, largest_required_pool_block } };
-
-        std::size_t allocated   = 0;
-        std::size_t deallocated = 0;
-
-    public:
-        void* allocate(
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            allocated += bytes;
-            return mr.allocate(bytes, alignment);
-        }
-
-        void deallocate(
-          void*       p,
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            deallocated += bytes;
-            return mr.deallocate(p, bytes, alignment);
+            fn.allocate   = f.allocate ? f.allocate : &default_allocate;
+            fn.deallocate = f.deallocate ? f.deallocate : &default_deallocate;
+            return true;
         }
 
         void release() noexcept {}
 
         std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
         {
-            return std::make_pair(allocated, deallocated);
-        }
-
-    private:
-        void* debug_allocate(std::size_t bytes, std::size_t alignment) noexcept;
-        void  debug_deallocate(void*       p,
-                               std::size_t bytes,
-                               std::size_t alignment) noexcept;
-    };
-
-    static data& instance() noexcept
-    {
-        static data d;
-        return d;
-    }
-};
-
-template<std::size_t max_blocks_per_chunk,
-         std::size_t largest_required_pool_block>
-class unsynchronized_pool_resource
-{
-public:
-    class data
-    {
-    private:
-        std::pmr::unsynchronized_pool_resource mr{ std::pmr::pool_options{
-          max_blocks_per_chunk, largest_required_pool_block } };
-
-        std::size_t allocated   = 0;
-        std::size_t deallocated = 0;
-
-    public:
-        void* allocate(
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            allocated += bytes;
-            return mr.allocate(bytes, alignment);
-        }
-
-        void deallocate(
-          void*       p,
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            deallocated += bytes;
-            return mr.deallocate(p, bytes, alignment);
-        }
-
-        void release() noexcept {}
-
-        std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
-        {
-            return std::make_pair(allocated, deallocated);
-        }
-
-    private:
-        void* debug_allocate(std::size_t bytes, std::size_t alignment) noexcept;
-        void  debug_deallocate(void*       p,
-                               std::size_t bytes,
-                               std::size_t alignment) noexcept;
-    };
-
-    static data& instance() noexcept
-    {
-        static data d;
-        return d;
-    }
-};
-
-template<std::size_t Length = 1024u * 1024u, int ID = 0>
-class monotonic_small_buffer
-{
-public:
-    static inline constexpr std::size_t size = Length;
-    static inline constexpr int         id   = ID;
-
-    static_assert(Length > 0);
-
-    class data
-    {
-    private:
-        std::array<std::byte, Length> buffer;
-
-        std::pmr::monotonic_buffer_resource mr{
-            buffer.data(), buffer.size(), std::pmr::new_delete_resource()
-        };
-
-        std::size_t allocated   = 0;
-        std::size_t deallocated = 0;
-
-    public:
-        void* allocate(
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            allocated += bytes;
-            return mr.allocate(bytes, alignment);
-        }
-
-        void deallocate(
-          void*       p,
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            deallocated += bytes;
-
-            return mr.deallocate(p, bytes, alignment);
-        }
-
-        void release() noexcept { mr.release(); }
-
-        std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
-        {
-            return std::make_pair(allocated, deallocated);
-        }
-
-    private:
-        void* debug_allocate(std::size_t bytes, std::size_t alignment) noexcept;
-        void  debug_deallocate(void*       p,
-                               std::size_t bytes,
-                               std::size_t alignment) noexcept;
-    };
-
-    static data& instance() noexcept
-    {
-        static data d;
-        return d;
-    }
-};
-
-template<int ID = 0>
-class monotonic_buffer
-{
-public:
-    static inline constexpr int id = ID;
-
-    class data
-    {
-    private:
-        std::pmr::monotonic_buffer_resource mr{
-            std::pmr::new_delete_resource()
-        };
-
-        std::size_t allocated   = 0;
-        std::size_t deallocated = 0;
-
-    public:
-        void* allocate(
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            allocated += bytes;
-            return mr.allocate(bytes, alignment);
-        }
-
-        void deallocate(
-          void*       p,
-          std::size_t bytes,
-          std::size_t alignment = alignof(std::max_align_t)) noexcept
-        {
-            deallocated += bytes;
-
-            return mr.deallocate(p, bytes, alignment);
-        }
-
-        void release() noexcept { mr.release(); }
-
-        std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
-        {
-            return std::make_pair(allocated, deallocated);
+            return std::make_pair(allocated.load(std::memory_order_relaxed),
+                                  deallocated.load(std::memory_order_relaxed));
         }
 
     private:
@@ -708,19 +541,61 @@ public:
  * A stateless allocator class to wrap static memory resource.
  *
  * @verbatim
- *                                +----------+
- *                                |new-delete|
- *                                +----^-----+
- * +-----------+        +---------+        |
- * |vector<T,A>+------->|allocator+--------+
- * +-----------+ static +---------+ static |
- *                                +----v-----+
- *                                |fixed-size|
- *                                +----------+
+ * +-----------+        +---------+        +-----------------+
+ * |vector<T,A>+------->|allocator+------->|MemoryResource   |
+ * +-----------+ static +---------+ static |  ::instance()   |
+ *                                         +-----------------+
  * @endverbatim
  *
- * Enable the @c IRRITATOR_ENABLE_DEBUG preprocessor variable to enable a debug
- * for all allocation/deallocation for each memory resource.
+ * A @c MemoryResource provides a @c static @c instance() function whose
+ * returned object implements:
+ * - @c void* @c allocate(std::size_t bytes, std::size_t alignment) noexcept,
+ *   returning @c nullptr on failure;
+ * - @c void @c deallocate(void* p, std::size_t bytes, std::size_t alignment)
+ *   noexcept;
+ * - @c void @c release() noexcept, frees all the memory at once or does
+ *   nothing;
+ * - @c std::pair<std::size_t,std::size_t> @c get_memory_usage() noexcept,
+ *   the allocated and deallocated bytes.
+ *
+ * @code
+ * struct arena_resource {
+ *     struct data {
+ *         std::array<std::byte, 4096> buffer;
+ *         std::size_t                 used = 0;
+ *
+ *         void* allocate(std::size_t bytes, std::size_t alignment) noexcept
+ *         {
+ *             void*       p     = buffer.data() + used;
+ *             std::size_t space = buffer.size() - used;
+ *             if (not std::align(alignment, bytes, p, space))
+ *                 return nullptr;
+ *             used = buffer.size() - space + bytes;
+ *             return p;
+ *         }
+ *
+ *         void deallocate(void*, std::size_t, std::size_t) noexcept {}
+ *         void release() noexcept { used = 0; }
+ *
+ *         std::pair<std::size_t, std::size_t> get_memory_usage() noexcept
+ *         {
+ *             return { used, 0 };
+ *         }
+ *     };
+ *
+ *     static data& instance() noexcept
+ *     {
+ *         static data d;
+ *         return d;
+ *     }
+ * };
+ *
+ * irt::vector<int, irt::allocator<arena_resource>> v;
+ * @endcode
+ *
+ * The default @c new_delete_memory_resource forwards to replaceable functions
+ * to plug the allocator of a host application. Enable the @c
+ * IRRITATOR_ENABLE_DEBUG preprocessor variable to log its allocations.
  */
 template<typename MemoryResource = new_delete_memory_resource>
 struct allocator {
@@ -842,6 +717,8 @@ public:
     static_assert(Size > 0);
     static_assert(std::is_default_constructible_v<T>,
                   "T must be default-constructible for dynamic_buffer");
+    static_assert(is_default_aligned_v<T>,
+                  "T is over-aligned: replace with alignof(T)");
 
     using size_type  = small_storage_size_t<Size>;
     using index_type = std::make_signed_t<size_type>;
@@ -1579,11 +1456,6 @@ protected:
 template<typename T, typename Identifier, typename A>
 class data_array;
 
-/** Specialization of data_array for void types */
-template<typename T, typename Identifier, typename A>
-    requires std::is_void_v<T>
-class data_array<T, Identifier, A>;
-
 template<typename T, typename Identifier, typename A, class... Ts>
 class id_data_array;
 
@@ -1607,6 +1479,8 @@ public:
                   "T must be nothrow move constructible");
     static_assert(std::is_nothrow_destructible_v<T>,
                   "T must be nothrow destructible");
+    static_assert(is_default_aligned_v<T>,
+                  "T is over-aligned: replace with alignof(T)");
 
     using value_type             = T;
     using size_type              = std::size_t;
@@ -1942,6 +1816,8 @@ private:
     static constexpr index_type get_key(Identifier id) noexcept;
 
 public:
+    friend struct container_binary_access;
+
     constexpr id_array() noexcept = default;
 
     constexpr id_array(const id_array& other) noexcept;
@@ -2239,7 +2115,8 @@ private:
         if (std::cmp_less(0, len) and
             std::cmp_less(len, std::numeric_limits<index_type>::max()))
             buffer.reset(
-              reinterpret_cast<std::byte*>(A::allocate(sizeof(SubT) * len)));
+              reinterpret_cast<std::byte*>(
+                A::allocate(sizeof(SubT) * len, alignof(SubT))));
     }
 
     /**
@@ -2259,7 +2136,7 @@ private:
     {
         if (buffer.get()) {
             std::destroy_n(buffer.get(), len);
-            A::deallocate(buffer.get(), sizeof(SubT) * len);
+            A::deallocate(buffer.get(), sizeof(SubT) * len, alignof(SubT));
             buffer.reset(nullptr);
         }
     }
@@ -2332,7 +2209,7 @@ private:
                                buffer_view<SubT>& buffer) noexcept
     {
         auto* ptr = reinterpret_cast<std::byte*>(
-          A::allocate(sizeof(SubT) * req));
+          A::allocate(sizeof(SubT) * req, alignof(SubT)));
         auto* new_ptr = reinterpret_cast<SubT*>(ptr);
 
         if (buffer.get()) {
@@ -2343,7 +2220,7 @@ private:
             }
 
             std::destroy_n(buffer.get(), old);
-            A::deallocate(buffer.get(), sizeof(SubT) * old);
+            A::deallocate(buffer.get(), sizeof(SubT) * old, alignof(SubT));
             buffer.reset(nullptr);
         }
 
@@ -2364,6 +2241,8 @@ public:
     using iterator       = typename identifier_container_type::iterator;
     using const_iterator = typename identifier_container_type::const_iterator;
     using size_type      = typename identifier_container_type::size_type;
+
+    friend struct container_binary_access;
 
     id_data_array() noexcept = default;
     explicit id_data_array(std::integral auto capacity) noexcept;
@@ -2597,6 +2476,8 @@ public:
 
 public:
     static constexpr index_type none = std::numeric_limits<index_type>::max();
+
+    friend struct container_binary_access;
 
     constexpr data_array() noexcept = default;
     constexpr data_array(const data_array& other) noexcept;
@@ -2869,6 +2750,8 @@ public:
     static_assert((std::is_nothrow_constructible_v<T> ||
                    std::is_nothrow_move_constructible_v<T>) &&
                   std::is_nothrow_destructible_v<T>);
+    static_assert(is_default_aligned_v<T>,
+                  "T is over-aligned: replace with alignof(T)");
 
 private:
     T*         buffer     = nullptr;
@@ -3540,6 +3423,9 @@ public:
     using value_type      = T;
     using reference       = T&;
     using const_reference = const T&;
+
+    static_assert(is_default_aligned_v<T>,
+                  "T is over-aligned: replace with alignof(T)");
 
     constexpr static inline index_type
       active = std::numeric_limits<index_type>::max();
@@ -4684,7 +4570,7 @@ constexpr data_array<T, Identifier, A>::data_array(
 {
     if (other.m_capacity > 0) {
         m_items = reinterpret_cast<item*>(
-          A::allocate(sizeof(item) * other.m_capacity));
+          A::allocate(sizeof(item) * other.m_capacity, alignof(item)));
         m_capacity = other.m_capacity;
 
         if constexpr (std::is_trivially_copyable_v<T>) {
@@ -4762,7 +4648,8 @@ constexpr data_array<T, Identifier, A>::data_array(
         debug::ensure(
           std::cmp_less(capacity, std::numeric_limits<index_type>::max()));
 
-        m_items = reinterpret_cast<item*>(A::allocate(sizeof(item) * capacity));
+        m_items = reinterpret_cast<item*>(
+          A::allocate(sizeof(item) * capacity, alignof(item)));
         m_capacity = static_cast<index_type>(capacity);
     }
 
@@ -4778,7 +4665,7 @@ constexpr data_array<T, Identifier, A>::~data_array() noexcept
     clear();
 
     if (m_items)
-        A::deallocate(m_items, sizeof(item) * m_capacity);
+        A::deallocate(m_items, sizeof(item) * m_capacity, alignof(item));
 }
 
 template<typename T, typename Identifier, typename A>
@@ -4813,7 +4700,7 @@ bool data_array<T, Identifier, A>::reserve(std::integral auto capacity) noexcept
         capacity = 8;
 
     item* new_buffer = reinterpret_cast<item*>(
-      A::allocate(sizeof(item) * capacity));
+      A::allocate(sizeof(item) * capacity, alignof(item)));
     if (new_buffer == nullptr)
         return false;
 
@@ -4849,7 +4736,7 @@ bool data_array<T, Identifier, A>::reserve(std::integral auto capacity) noexcept
     }
 
     if (m_items)
-        A::deallocate(m_items, sizeof(item) * m_capacity);
+        A::deallocate(m_items, sizeof(item) * m_capacity, alignof(item));
 
     m_items    = new_buffer;
     m_capacity = static_cast<index_type>(capacity);
@@ -4897,7 +4784,7 @@ void data_array<T, Identifier, A>::destroy() noexcept
     clear();
 
     if (m_items)
-        A::deallocate(m_items, sizeof(item) * m_capacity);
+        A::deallocate(m_items, sizeof(item) * m_capacity, alignof(item));
 
     m_items    = nullptr;
     m_capacity = 0;

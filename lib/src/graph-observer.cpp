@@ -40,7 +40,7 @@ static void build_graph(graph_observer&  graph_obs,
 
     const auto* to = pj.tree_nodes.try_to_get(graph_obs.tn_id);
 
-    if (debug::check(to)) {
+    if (to) {
         const auto relative_path =
           pj.build_relative_path(graph_parent, *to, graph_obs.mdl_id);
 
@@ -110,12 +110,6 @@ status graph_observer::init(project& pj, const modeling& mod) noexcept
     });
 }
 
-void graph_observer::clear() noexcept
-{
-    observers.clear();
-    values.clear();
-}
-
 void graph_observer::update(const project& pj) noexcept
 {
     if (values.size() == observers.size()) {
@@ -123,12 +117,8 @@ void graph_observer::update(const project& pj) noexcept
             const auto  obs_id = observers[i];
             const auto* obs    = pj.sim.observers.try_to_get(obs_id);
 
-            if (obs) {
-                obs->read_history([&](const auto& h, const auto) {
-                    if (not h.empty())
-                        values[i] = h.back().value;
-                });
-            }
+            if (obs)
+                values[i] = obs->last_value();
         }
     }
 }

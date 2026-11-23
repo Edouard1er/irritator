@@ -28,7 +28,7 @@ status variable_observer::init(project& pj) noexcept
                     return make_error(
                       simulation_errc::observers_container_full);
 
-                pj.sim.observe(*mdl, timestep.to_double());
+                irt_check(pj.sim.observe(*mdl, timestep.to_double()));
             }
 
             subs.get<observer_id>(id) = mdl->obs_id;
@@ -65,12 +65,6 @@ void variable_observer::erase(const tree_node_id tn,
     for (const auto id : subs)
         if (subs.get<tree_node_id>(id) == tn and subs.get<model_id>(id) == mdl)
             subs.free(id);
-}
-
-void variable_observer::erase(const sub_id i) noexcept
-{
-    if (subs.exists(i))
-        subs.free(i);
 }
 
 variable_observer::sub_id variable_observer::push_back(

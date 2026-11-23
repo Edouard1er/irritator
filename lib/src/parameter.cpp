@@ -31,11 +31,6 @@ static void model_init(const parameter&         param,
 }
 
 template<size_t QssLevel>
-static void model_init(const parameter& /*param*/,
-                       abstract_integer<QssLevel>& /*dyn*/) noexcept
-{}
-
-template<size_t QssLevel>
 static void parameter_init(parameter&                        param,
                            const abstract_compare<QssLevel>& dyn) noexcept
 {
@@ -49,11 +44,6 @@ static void parameter_init(parameter&                     param,
 {
     param.reals[qss_gain_tag::k] = dyn.k;
 }
-
-template<size_t QssLevel>
-static void parameter_init(parameter& /*param*/,
-                           const abstract_integer<QssLevel>& /*dyn*/) noexcept
-{}
 
 template<size_t QssLevel>
 static void parameter_init(parameter& /*param*/,
@@ -154,36 +144,75 @@ static void parameter_init(parameter& /*param*/,
                            const accumulator<PortNumber>& /*dyn*/) noexcept
 {}
 
+static_assert(
+  ordinal(queue_tag::i_overflow) == ordinal(dynamic_queue_tag::i_overflow) and
+  ordinal(queue_tag::i_overflow) == ordinal(priority_queue_tag::i_overflow) and
+  ordinal(queue_tag::i_capacity) == ordinal(dynamic_queue_tag::i_capacity) and
+  ordinal(queue_tag::i_capacity) == ordinal(priority_queue_tag::i_capacity));
+
+static fifo_overflow get_fifo_overflow(const parameter& param) noexcept
+{
+    const auto i = param.integers[queue_tag::i_overflow];
+
+    return 0 <= i and i < std::ssize(fifo_overflow_names)
+             ? enum_cast<fifo_overflow>(i)
+             : fifo_overflow::grow;
+}
+
+static i32 get_fifo_capacity(const parameter& param) noexcept
+{
+    const auto i = param.integers[queue_tag::i_capacity];
+
+    // The ring buffer of the fifo needs one more slot.
+    return 0 < i and i < std::numeric_limits<i32>::max()
+             ? static_cast<i32>(i)
+             : default_fifo_capacity;
+}
+
+template<typename Queue>
+static void fifo_parameter_init(parameter& param, const Queue& dyn) noexcept
+{
+    param.integers[queue_tag::i_overflow] = ordinal(dyn.overflow);
+    param.integers[queue_tag::i_capacity] = dyn.capacity;
+}
+
 static void model_init(const parameter& param, queue& dyn) noexcept
 {
-    dyn.ta = param.reals[queue_tag::sigma];
+    dyn.ta       = param.reals[queue_tag::sigma];
+    dyn.overflow = get_fifo_overflow(param);
+    dyn.capacity = get_fifo_capacity(param);
 }
 
 static void parameter_init(parameter& param, const queue& dyn) noexcept
 {
     param.reals[queue_tag::sigma] = dyn.ta;
+    fifo_parameter_init(param, dyn);
 }
 
 static void model_init(const parameter& param, dynamic_queue& dyn) noexcept
 {
     dyn.source_ta.reset(param.integers[dynamic_queue_tag::source_ta]);
+    dyn.overflow = get_fifo_overflow(param);
+    dyn.capacity = get_fifo_capacity(param);
 }
 
 static void parameter_init(parameter& param, const dynamic_queue& dyn) noexcept
 {
     param.integers[dynamic_queue_tag::source_ta] = from_source(dyn.source_ta);
+    fifo_parameter_init(param, dyn);
 }
 
 static void model_init(const parameter& param, priority_queue& dyn) noexcept
 {
-    dyn.ta = param.reals[priority_queue_tag::sigma];
     dyn.source_ta.reset(param.integers[priority_queue_tag::source_ta]);
+    dyn.overflow = get_fifo_overflow(param);
+    dyn.capacity = get_fifo_capacity(param);
 }
 
 static void parameter_init(parameter& param, const priority_queue& dyn) noexcept
 {
-    param.reals[priority_queue_tag::sigma]        = dyn.ta;
     param.integers[priority_queue_tag::source_ta] = from_source(dyn.source_ta);
+    fifo_parameter_init(param, dyn);
 }
 
 static void model_init(const parameter& param, generator& dyn) noexcept
@@ -362,22 +391,6 @@ template<size_t QssLevel>
 static void parameter_init(parameter& /*param*/,
                            const abstract_flipflop<QssLevel>& /*dyn*/) noexcept
 {}
-
-template<size_t QssLevel>
-static void model_init(const parameter&           param,
-                       abstract_filter<QssLevel>& dyn) noexcept
-{
-    dyn.lower_threshold = param.reals[qss_filter_tag::lower_bound];
-    dyn.upper_threshold = param.reals[qss_filter_tag::upper_bound];
-}
-
-template<size_t QssLevel>
-static void parameter_init(parameter&                       param,
-                           const abstract_filter<QssLevel>& dyn) noexcept
-{
-    param.reals[qss_filter_tag::lower_bound] = dyn.lower_threshold;
-    param.reals[qss_filter_tag::upper_bound] = dyn.upper_threshold;
-}
 
 template<size_t QssLevel>
 static void model_init(const parameter&                param,
@@ -561,6 +574,28 @@ static void parameter_init(
   parameter& /*param*/,
   const abstract_min_max<QssLevel, IsMax>& /*dyn*/) noexcept
 {}
+
+template<size_t QssLevel, size_t PortNumber>
+static void model_init(const parameter&                         param,
+                       abstract_priority<QssLevel, PortNumber>& dyn) noexcept
+{
+    for (size_t i = 0; i != PortNumber; ++i) {
+        const auto type_i = param.integers[i];
+        dyn.selections[i] = 0 <= type_i and
+                                type_i < std::ssize(priority_selection_names)
+                              ? enum_cast<priority_selection>(type_i)
+                              : priority_selection::maximum;
+    }
+}
+
+template<size_t QssLevel, size_t PortNumber>
+static void parameter_init(
+  parameter&                                     param,
+  const abstract_priority<QssLevel, PortNumber>& dyn) noexcept
+{
+    for (size_t i = 0; i != PortNumber; ++i)
+        param.integers[i] = static_cast<i64>(ordinal(dyn.selections[i]));
+}
 
 template<size_t QssLevel>
 static void model_init(const parameter&               param,
@@ -798,11 +833,6 @@ void parameter::init_from(const dynamics_type type) noexcept
               param.set_power(1.0);
           }
 
-          if constexpr (std::is_same_v<Tag, qss_filter_tag>) {
-              param.set_filter(-std::numeric_limits<real>::infinity(),
-                               +std::numeric_limits<real>::infinity());
-          }
-
           if constexpr (std::is_same_v<Tag, sample_hold_tag>) {
               param.reals[sample_hold_tag::ts] = 0.1;
           }
@@ -874,12 +904,14 @@ void parameter::init_from(const dynamics_type type) noexcept
               param.set_time_func(zero, 0.01, 0);
           }
 
-          if constexpr (std::is_same_v<Tag, priority_queue_tag>) {
-              param.set_priority_queue(one);
-          }
-
           if constexpr (std::is_same_v<Tag, queue_tag>) {
               param.set_queue(one);
+          }
+
+          if constexpr (std::is_same_v<Tag, queue_tag> or
+                        std::is_same_v<Tag, dynamic_queue_tag> or
+                        std::is_same_v<Tag, priority_queue_tag>) {
+              param.set_queue_fifo(fifo_overflow::grow, default_fifo_capacity);
           }
       },
       *this);
@@ -923,24 +955,6 @@ parameter& parameter::set_power(real expoonent) noexcept
     return *this;
 }
 
-parameter& parameter::set_filter(real lower_bound, real upper_bound) noexcept
-{
-    reals[qss_filter_tag::lower_bound] = std::isfinite(lower_bound)
-                                           ? lower_bound
-                                           : -std::numeric_limits<
-                                               real>::infinity();
-    reals[qss_filter_tag::upper_bound] = std::isfinite(upper_bound)
-                                           ? upper_bound
-                                           : +std::numeric_limits<
-                                               real>::infinity();
-
-    if (reals[qss_filter_tag::lower_bound] > reals[qss_filter_tag::upper_bound])
-        std::swap(reals[qss_filter_tag::lower_bound],
-                  reals[qss_filter_tag::upper_bound]);
-
-    return *this;
-}
-
 parameter& parameter::set_compare(real equal, real not_equal) noexcept
 {
     reals[qss_compare_tag::equal]     = std::isfinite(equal) ? equal : one;
@@ -961,12 +975,6 @@ parameter& parameter::set_integrator(real X, real dQ) noexcept
 {
     reals[qss_integrator_tag::X]  = std::isfinite(X) ? X : 0.0;
     reals[qss_integrator_tag::dQ] = std::isfinite(dQ) ? dQ : 0.01;
-    return *this;
-}
-
-parameter& parameter::set_integrator(real X) noexcept
-{
-    reals[qss_integrator_tag::X] = std::isfinite(X) ? X : 0.0;
     return *this;
 }
 
@@ -1016,9 +1024,15 @@ parameter& parameter::set_queue(real sigma) noexcept
     return *this;
 }
 
-parameter& parameter::set_priority_queue(real sigma) noexcept
+parameter& parameter::set_queue_fifo(fifo_overflow overflow,
+                                     i32           capacity) noexcept
 {
-    reals[priority_queue_tag::sigma] = std::isfinite(sigma) ? sigma : 1.0;
+    const auto is_valid = capacity > 0 and
+                          capacity < std::numeric_limits<i32>::max();
+
+    integers[queue_tag::i_overflow] = ordinal(overflow);
+    integers[queue_tag::i_capacity] = is_valid ? capacity
+                                               : default_fifo_capacity;
     return *this;
 }
 
@@ -1039,7 +1053,9 @@ parameter& parameter::set_hsm_wrapper(i64  i1,
     integers[hsm_wrapper_tag::i2] = i2;
     reals[hsm_wrapper_tag::r1]    = r1;
     reals[hsm_wrapper_tag::r2]    = r2;
-    reals[hsm_wrapper_tag::timer] = std::isfinite(timer) ? timer : 0.0;
+    reals[hsm_wrapper_tag::timer] = std::isnan(timer)
+                                      ? time_domain<time>::infinity
+                                      : timer;
 
     return *this;
 }
@@ -1059,18 +1075,6 @@ parameter& parameter::set_generator_ta(const source_type   type,
 
     integers[generator_tag::i_options] = static_cast<i64>(flags.to_unsigned());
     integers[generator_tag::source_ta] = from_source(type, id);
-    return *this;
-}
-
-parameter& parameter::set_generator_value(real value) noexcept
-{
-    bitflags<generator::option> flags(integers[generator_tag::i_options]);
-    flags.set(generator::option::value_use_source, false);
-    integers[generator_tag::i_options] = static_cast<i64>(flags.to_unsigned());
-
-    integers[generator_tag::source_value] = 0;
-    reals[generator_tag::value]           = value;
-
     return *this;
 }
 
@@ -1096,13 +1100,6 @@ parameter& parameter::set_priority_queue_ta(const source_type   type,
                                             const source_any_id id) noexcept
 {
     integers[priority_queue_tag::source_ta] = from_source(type, id);
-    return *this;
-}
-
-parameter& parameter::set_hsm_wrapper_value(
-  const external_source_definition::id id) noexcept
-{
-    integers[hsm_wrapper_tag::source_value] = ordinal(id);
     return *this;
 }
 

@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(libirritator VERSION 0.1.0 LANGUAGES CXX)
 
 set(public_irritator_header
-    include/irritator/archiver.hpp
+    include/irritator/binary.hpp
+    include/irritator/binary-containers.hpp
+    include/irritator/binary-simulation.hpp
     include/irritator/container.hpp
     include/irritator/core.hpp
     include/irritator/dot-parser.hpp
@@ -17,12 +19,13 @@ set(public_irritator_header
     include/irritator/modeling-helpers.hpp
     include/irritator/modeling.hpp
     include/irritator/random.hpp
-    include/irritator/thread.hpp
-    include/irritator/timeline.hpp)
+    include/irritator/simulation-player.hpp
+    include/irritator/thread.hpp)
 
 set(private_irritator_sources
-    src/archiver.cpp
+    src/binary.cpp
     src/dot-parser.cpp
+    src/embedded-simulation.cpp
     src/error.cpp
     src/external_source.cpp
     src/filesystem.cpp
@@ -44,8 +47,7 @@ set(private_irritator_sources
     src/parameter.cpp
     src/project.cpp
     src/project-simulation.cpp
-    src/simulation.cpp
-    src/timeline.cpp
+    src/simulation-player.cpp
     src/thread.cpp
     src/variable-observer.cpp)
 
@@ -74,7 +76,8 @@ target_compile_definitions(libirritator PRIVATE
       $<$<CXX_COMPILER_ID:MSVC>:BOOST_UT_DISABLE_MODULE>
       VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
       VERSION_MINOR=${PROJECT_VERSION_MINOR}
-      VERSION_PATCH=${PROJECT_VERSION_PATCH})
+      VERSION_PATCH=${PROJECT_VERSION_PATCH}
+      IRT_DATAROOTDIR="${CMAKE_INSTALL_FULL_DATAROOTDIR}")
 
 target_include_directories(libirritator PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

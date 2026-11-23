@@ -85,6 +85,14 @@ bool ordered_task_list::stopping() const noexcept
     return m_stopping;
 }
 
+ordered_task_list::status ordered_task_list::get_status() const noexcept
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return status{ .queued   = m_queue.size(),
+                   .running  = static_cast<u32>(m_tasks_running),
+                   .stopping = m_stopping };
+}
+
 ordered_worker::ordered_worker(ordered_task_list& list) noexcept
   : m_list(&list)
 {}
@@ -107,15 +115,14 @@ void ordered_worker::start() noexcept
         m_initialized.store(true, std::memory_order_release);
 
         while (true) {
-            task t; // destroyed at each iteration: captures do not outlive it
+            task t;
             if (!m_list->pop(t))
                 break;
 
             const auto start = std::chrono::steady_clock::now();
-            try {
-                t();
-            } catch (...) {
-            }
+            t();
+            // Before notify_done(): the captures must not outlive wait_empty().
+            t.reset();
             const auto
               ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                      std::chrono::steady_clock::now() - start)
@@ -223,6 +230,17 @@ bool unordered_task_list::stopping() const noexcept
     return m_stopping;
 }
 
+unordered_task_list::status unordered_task_list::get_status() const noexcept
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return status{ .current    = m_phase,
+                   .pending    = static_cast<u32>(m_pending.size()),
+                   .incoming   = static_cast<u32>(m_incoming.size()),
+                   .batch_size = m_batch_size,
+                   .started    = m_next_index,
+                   .completed  = m_completed };
+}
+
 unordered_worker::unordered_worker(std::span<unordered_task_list> lists,
                                    worker_signal& signal) noexcept
   : m_lists(lists)
@@ -259,10 +277,10 @@ void unordered_worker::start() noexcept
                     found = true;
 
                     const auto start = std::chrono::steady_clock::now();
-                    try {
-                        t();
-                    } catch (...) {
-                    }
+                    t();
+                    // Before notify_done(): the captures must not outlive
+                    // wait_completion().
+                    t.reset();
                     const auto
                       ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                              std::chrono::steady_clock::now() - start)
@@ -292,17 +310,36 @@ void unordered_worker::join() noexcept
         m_thread.join();
 }
 
-task_manager::task_manager(size_t ordered_count,
-                           size_t unordered_count,
-                           size_t unordered_worker_count) noexcept
-  : m_ordered_lists(ordered_count)
-  , m_ordered_workers(ordered_count, reserve_tag)
-  , m_unordered_lists(unordered_count)
-  , m_unordered_workers(unordered_count == 0          ? 0
-                        : unordered_worker_count == 0 ? 1
-                                                      : unordered_worker_count,
-                        reserve_tag)
+/// Number of unordered workers when the user does not choose. Heuristic: a
+/// worker of an ordered list that runs a simulation uses a core, and at most
+/// a quarter of the hardware threads (and at most one by list) are supposed to
+/// run a simulation at the same time; the other threads serve the parallel
+/// tick of the observers. Always at least one worker.
+static constexpr u32 default_worker_count(const u32 list_count,
+                                          const u32 hardware_threads) noexcept
 {
+    const u32 hw       = std::max(1u, hardware_threads);
+    const u32 lists    = std::max(1u, list_count);
+    const u32 reserved = std::min(lists, std::max(1u, hw / 4u));
+
+    return hw > reserved ? hw - reserved : 1u;
+}
+
+task_manager::task_manager(const options opt) noexcept
+{
+    const auto list_count   = std::max<u32>(opt.list_count, 1u);
+    const auto hw           = std::thread::hardware_concurrency();
+    const auto worker_count = opt.worker_count != 0
+                                ? opt.worker_count
+                                : default_worker_count(
+                                    list_count, hw == 0 ? list_count : hw);
+
+    m_ordered_lists.resize(list_count);
+    m_unordered_lists.resize(list_count);
+
+    m_ordered_workers.reserve(list_count);
+    m_unordered_workers.reserve(worker_count);
+
     for (auto& l : m_ordered_lists)
         m_ordered_workers.emplace_back(l);
 
@@ -312,7 +349,7 @@ task_manager::task_manager(size_t ordered_count,
     const auto span = std::span<unordered_task_list>(m_unordered_lists.data(),
                                                      m_unordered_lists.size());
 
-    for (sz i = 0, e = m_unordered_workers.capacity(); i < e; ++i)
+    for (u32 i = 0; i != worker_count; ++i)
         m_unordered_workers.emplace_back(span, m_signal);
 }
 

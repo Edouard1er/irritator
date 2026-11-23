@@ -2,7 +2,6 @@
 // Version 1.0. (See accompanying file LICENSE_1_0.txt or copy at
 // http://www.boost.org/LICENSE_1_0.txt)
 
-#include <irritator/archiver.hpp>
 #include <irritator/core.hpp>
 #include <irritator/ext.hpp>
 #include <irritator/file.hpp>
@@ -19,36 +18,19 @@
 
 #include <boost/ut.hpp>
 
-static irt::vector<char> read_entire_file(std::FILE* f) noexcept
-{
-    using namespace boost::ut;
-
-    expect(f != nullptr) << fatal;
-
-    expect(0 == std::fseek(f, 0, SEEK_END)) << fatal;
-
-    const auto size = std::ftell(f);
-    expect(size >= 0) << fatal;
-    expect(0 == std::fseek(f, 0, SEEK_SET)) << fatal;
-
-    irt::vector<char> buffer(size);
-
-    const auto read_size =
-      std::fread(buffer.data(), 1, static_cast<size_t>(size), f);
-    expect(static_cast<std::size_t>(read_size) == buffer.size()) << fatal;
-
-    return buffer;
-}
-
 struct file_output {
     using value_type = irt::observation;
 
-    std::FILE*     os = nullptr;
-    irt::observer& obs;
+    std::FILE*       os = nullptr;
+    irt::simulation& sim;
+    irt::observer_id id;
 
-    file_output(irt::observer& obs_, const char* filename) noexcept
+    file_output(irt::simulation&       sim_,
+                const irt::observer_id id_,
+                const char*            filename) noexcept
       : os{ std::fopen(filename, "w") }
-      , obs{ obs_ }
+      , sim{ sim_ }
+      , id{ id_ }
     {
         using namespace boost::ut;
 
@@ -61,37 +43,18 @@ struct file_output {
     ~file_output() noexcept
     {
         if (os) {
-            obs.read_history([&](const auto& h, const auto) {
-                for (std::size_t i = 0, e = h.size(); i != e; ++i)
-                    fmt::print(os, "{},{}\n", h[i].t, h[i].value);
-            });
+            (void)sim.drain_observations(
+              [&](const irt::observation_batch& b) noexcept -> irt::status {
+                  if (b.id == id)
+                      for (const auto& p : b.points)
+                          fmt::print(os, "{},{}\n", p.t, p.value);
+                  return irt::success();
+              });
 
             std::fflush(os);
             std::fclose(os);
         }
     }
-};
-
-bool function_ref_called = false;
-
-void function_ref_f() { function_ref_called = true; }
-
-struct function_ref_class {
-    bool baz_called = false;
-
-    void baz() { baz_called = true; }
-
-    bool qux_called = false;
-
-    void qux() { qux_called = true; }
-};
-
-struct function_ref_multiple_operator {
-    int i;
-
-    void operator()(bool) { i = 1; }
-
-    void operator()(double) { i++; }
 };
 
 struct global_allocator_t {
@@ -103,38 +66,9 @@ struct global_deallocator_t {
     int free_number = 0;
 } global_deallocator;
 
-void* global_alloc(size_t size) noexcept
-{
-    global_allocator.allocation_size += size;
-    global_allocator.allocation_number++;
-
-    fmt::print("global_alloc {} (global size: {}, number: {})\n",
-               size,
-               global_allocator.allocation_size,
-               global_allocator.allocation_number);
-
-    return std::malloc(size);
-}
-
-void global_free(void* ptr) noexcept
-{
-    if (ptr) {
-        global_deallocator.free_number++;
-        fmt::print(
-          "global_free {} (number: {})\n", ptr, global_deallocator.free_number);
-        std::free(ptr);
-    }
-}
-
 struct struct_with_static_member {
     static int i;
     static int j;
-
-    static void clear() noexcept
-    {
-        i = 0;
-        j = 0;
-    }
 
     struct_with_static_member() noexcept { ++i; }
     ~struct_with_static_member() noexcept { ++j; }
@@ -165,8 +99,8 @@ inline int make_input_node_id(const irt::model_id mdl, const int port) noexcept
 
 inline int make_output_node_id(const irt::model_id mdl, const int port) noexcept
 {
-    fmt::print(
-      "make_output_node_id({},{})\n", static_cast<irt::u64>(mdl), port);
+    fmt::print("make_output_node_id({},{})\n", static_cast<irt::u64>(mdl),
+               port);
     boost::ut::expect(port >= 0 && port < 8);
 
     auto index = irt::get_index(mdl);
@@ -176,8 +110,9 @@ inline int make_output_node_id(const irt::model_id mdl, const int port) noexcept
     fmt::print("{0:32b} <- port\n", port);
     fmt::print("{0:32b} <- port + 8u\n", 8u + static_cast<unsigned>(port));
 
-    irt::u32 port_index =
-      static_cast<irt::u32>(8u + static_cast<unsigned>(port)) << 28u;
+    irt::u32 port_index = static_cast<irt::u32>(8u +
+                                                static_cast<unsigned>(port))
+                          << 28u;
     fmt::print("{0:32b} <- port_index\n", port_index);
 
     index |= port_index;
@@ -233,37 +168,72 @@ inline std::pair<irt::u32, irt::u32> get_model_output_port(
     return std::make_pair(index, port);
 }
 
-template<typename Data>
-static bool check_data_array_loop(const Data& d) noexcept
-{
-    using value_type = typename Data::value_type;
-
-    irt::small_vector<const value_type*, 16> test_vec;
-
-    if (test_vec.capacity() < d.ssize())
-        return false;
-
-    const value_type* ptr = nullptr;
-    while (d.next(ptr))
-        test_vec.emplace_back(ptr);
-
-    int i = 0;
-    for (const auto& elem : d) {
-        if (test_vec[i] != &elem)
-            return false;
-
-        ++i;
-    }
-
-    return true;
-}
-
 template<typename Dynamics>
 inline auto get_p(irt::simulation& sim, const Dynamics& d) noexcept
   -> irt::parameter&
 {
     return sim.parameters[sim.get_id(d)];
 }
+
+/// Runs @c sim from 0 to @c end.
+static bool run_until(irt::simulation& sim, const irt::real end) noexcept
+{
+    sim.limits.set_bound(0, end);
+    if (not sim.srcs.prepare() or not sim.initialize())
+        return false;
+
+    do {
+        if (not sim.run())
+            return false;
+    } while (not sim.current_time_expired());
+
+    return true;
+}
+
+/// A simulation of a @c hsm_wrapper whose outputs y[0] and y[1] go to the
+/// counters @c ticks and @c stops. The machine is the root 0 > Marche 1 >
+/// Tic 2, and Arret 3: Tic sends a tick every 2 and Marche leaves to Arret
+/// with a message on y[1]. Each test sets the condition of Marche.
+struct hsm_bench {
+    using hsm_t = irt::hierarchical_state_machine;
+    using var   = hsm_t::variable;
+
+    irt::simulation sim{ irt::simulation_reserve_definition(),
+                         irt::external_source_reserve_definition() };
+
+    hsm_t&            machine = sim.hsms.alloc();
+    irt::hsm_wrapper& hsmw    = sim.alloc<irt::hsm_wrapper>();
+    irt::counter&     ticks   = sim.alloc<irt::counter>();
+    irt::counter&     stops   = sim.alloc<irt::counter>();
+
+    hsm_bench() noexcept
+    {
+        (void)machine.set_state(0u, hsm_t::invalid_state_id, 1u);
+        (void)machine.set_state(1u, 0u, 2u);
+        (void)machine.set_state(2u, 1u);
+        (void)machine.set_state(3u, 0u);
+
+        machine.states[1u].if_transition = 3u;
+        machine.states[1u].if_action.set_output(var::port_1, 1.f);
+
+        machine.states[2u].enter_action.set_affect(var::var_timer, 2.f);
+        machine.states[2u].condition.set_timer();
+        machine.states[2u].if_transition = 2u;
+        machine.states[2u].if_action.set_output(var::port_0, 1.f);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(machine)));
+        (void)sim.connect_dynamics(hsmw, 0, ticks, 0);
+        (void)sim.connect_dynamics(hsmw, 1, stops, 0);
+    }
+
+    /// Sends @c value on the input port @c port of the machine at @c t.
+    void send_at(const irt::real t, const int port) noexcept
+    {
+        auto& cst = sim.alloc<irt::constant>();
+        get_p(sim, cst).set_constant(1.0, t);
+        (void)sim.connect_dynamics(cst, 0, hsmw, port);
+    }
+};
 
 int main()
 {
@@ -332,6 +302,19 @@ int main()
         fmt::print("model size:              |{:5}\n", sizeof(irt::model));
     };
 
+    "dynamics_type_name_round_trip"_test = [] {
+        for (auto i = 0, e = irt::dynamics_type_size(); i != e; ++i) {
+            const auto opt =
+              irt::get_dynamics_type(irt::dynamics_type_names[i]);
+            expect(opt.has_value() >> fatal);
+            expect(*opt == irt::enum_cast<irt::dynamics_type>(i));
+        }
+
+        expect(not irt::get_dynamics_type("unknown").has_value());
+        expect(not irt::get_dynamics_type("").has_value());
+        expect(not irt::get_dynamics_type("qss1_integrato").has_value());
+    };
+
     "model_constepxr"_test = [] {
         static_assert(irt::has_initialize_function<irt::constant>);
         static_assert(irt::has_lambda_function<irt::constant>);
@@ -360,13 +343,6 @@ int main()
         static_assert(irt::has_input_port<irt::qss1_cross>);
         static_assert(irt::has_output_port<irt::qss1_cross>);
         static_assert(irt::has_observation_function<irt::qss1_cross>);
-
-        static_assert(irt::has_initialize_function<irt::qss1_filter>);
-        static_assert(irt::has_lambda_function<irt::qss1_filter>);
-        static_assert(irt::has_transition_function<irt::qss1_filter>);
-        static_assert(irt::has_input_port<irt::qss1_filter>);
-        static_assert(irt::has_output_port<irt::qss1_filter>);
-        static_assert(irt::has_observation_function<irt::qss1_filter>);
 
         static_assert(irt::has_initialize_function<irt::qss1_sample_hold>);
         static_assert(irt::has_lambda_function<irt::qss1_sample_hold>);
@@ -792,6 +768,20 @@ int main()
         static_assert(irt::has_output_port<irt::qss3_maximum>);
         static_assert(irt::has_observation_function<irt::qss3_maximum>);
 
+        static_assert(irt::has_initialize_function<irt::qss1_priority_2>);
+        static_assert(irt::has_lambda_function<irt::qss1_priority_2>);
+        static_assert(irt::has_transition_function<irt::qss1_priority_2>);
+        static_assert(irt::has_input_port<irt::qss1_priority_2>);
+        static_assert(irt::has_output_port<irt::qss1_priority_2>);
+        static_assert(irt::has_observation_function<irt::qss1_priority_2>);
+
+        static_assert(irt::has_initialize_function<irt::qss3_priority_4>);
+        static_assert(irt::has_lambda_function<irt::qss3_priority_4>);
+        static_assert(irt::has_transition_function<irt::qss3_priority_4>);
+        static_assert(irt::has_input_port<irt::qss3_priority_4>);
+        static_assert(irt::has_output_port<irt::qss3_priority_4>);
+        static_assert(irt::has_observation_function<irt::qss3_priority_4>);
+
         static_assert(irt::has_initialize_function<irt::qss1_wrap>);
         static_assert(irt::has_lambda_function<irt::qss1_wrap>);
         static_assert(irt::has_transition_function<irt::qss1_wrap>);
@@ -875,14 +865,6 @@ int main()
         static_assert(irt::has_input_port<irt::qss1_inverse>);
         static_assert(irt::has_output_port<irt::qss1_inverse>);
         static_assert(irt::has_observation_function<irt::qss1_inverse>);
-
-        static_assert(irt::has_initialize_function<irt::qss1_integer>);
-        static_assert(irt::has_lambda_function<irt::qss1_integer>);
-        static_assert(irt::has_transition_function<irt::qss1_integer>);
-        static_assert(irt::has_input_port<irt::qss1_integer>);
-        static_assert(irt::has_output_port<irt::qss1_integer>);
-        static_assert(irt::has_observation_function<irt::qss1_integer>);
-
         static_assert(irt::has_initialize_function<irt::qss1_compare>);
         static_assert(irt::has_lambda_function<irt::qss1_compare>);
         static_assert(irt::has_transition_function<irt::qss1_compare>);
@@ -959,6 +941,20 @@ int main()
                irt::time_domain<irt::time>::zero);
         expect(irt::time_domain<irt::time>::zero >
                irt::time_domain<irt::time>::negative_infinity);
+    };
+
+    "path: extensions of the observation files"_test = [] {
+        using irt::file_type;
+
+        irt::path p{ "dir/run-0-0001.irb" };
+        expect(p.has_extension() == file_type::irb_file);
+
+        p.replace_extension(file_type::irt_manifest_file);
+        expect(eq(p.sv(), std::string_view{ "dir/run-0-0001.manifest.jsonl" }));
+        expect(p.has_extension() == file_type::irt_manifest_file);
+
+        p.replace_extension(file_type::data_file);
+        expect(eq(p.sv(), std::string_view{ "dir/run-0-0001.csv" }));
     };
 
     "message"_test = [] {
@@ -1275,17 +1271,70 @@ int main()
 
         sim.tick_resamplers();
 
-        auto& obs = *sim.observers.begin();
+        irt::vector<irt::resampled_sample> h;
+        expect(
+          sim
+            .drain_observations([&](const irt::observation_batch& b) noexcept {
+                h.insert(h.end(), b.points.begin(), b.points.end());
+                return irt::success();
+            })
+            .has_value());
 
-        obs.read_history([&](const auto& h, const auto) {
-            expect(fatal(eq(h.ssize(), 3)));
-            expect(eq(h[0].value, 10.0));
-            expect(eq(h[0].t, 0.0));
-            expect(eq(h[1].value, 110.0));
-            expect(eq(h[1].t, 1.0));
-            expect(eq(h[2].value, 1110.0));
-            expect(eq(h[2].t, 2.0));
-        });
+        expect(fatal(eq(h.ssize(), 3)));
+        expect(eq(h[0].value, 10.0));
+        expect(eq(h[0].t, 0.0));
+        expect(eq(h[1].value, 110.0));
+        expect(eq(h[1].t, 1.0));
+        expect(eq(h[2].value, 1110.0));
+        expect(eq(h[2].t, 2.0));
+    };
+
+    "resampler_outputs"_test = [] {
+        irt::resampler r(0.5, irt::interpolate_type::none);
+
+        const irt::raw_sample first[] = { { 0.0, 1.0 }, { 0.5, 2.0 } };
+        r.tick(first, 0.5);
+
+        // The last sample waits for a later date.
+        expect(fatal(eq(r.output().size(), 1u)));
+        expect(eq(r.output()[0].t, 0.0));
+        expect(eq(r.output_index(), 0u));
+        expect(eq(r.raw_output().size(), 2u));
+        expect(eq(r.raw_output_index(), 0u));
+
+        r.clear_outputs();
+        expect(r.output().empty() and r.raw_output().empty());
+        expect(eq(r.output_index(), 1u));
+        expect(eq(r.raw_output_index(), 2u));
+
+        const irt::raw_sample second[] = { { 1.0, 4.0 } };
+        r.tick(second, irt::time_domain<irt::time>::infinity);
+
+        expect(fatal(eq(r.output().size(), 2u)));
+        expect(eq(r.output()[0].value, 2.0));
+        expect(eq(r.output()[1].value, 4.0));
+        expect(eq(r.output_index(), 1u));
+        expect(eq(r.point_count(), 3u));
+        expect(eq(r.raw_output_index(), 2u));
+
+        r.reset();
+        expect(eq(r.point_count(), 0u));
+        expect(r.output().empty() and r.raw_output().empty());
+    };
+
+    "observer_last_value"_test = [] {
+        irt::observer obs(irt::undefined<irt::model_id>());
+        expect(eq(obs.last_value(), 0.0));
+
+        expect(obs.observe(irt::raw_sample(1.0, 3.0)) ==
+               irt::buffer_status::ok);
+        expect(eq(obs.last_value(), 3.0));
+
+        const auto copy = obs;
+        expect(eq(copy.last_value(), 3.0));
+
+        obs.reset();
+        expect(eq(obs.last_value(), 0.0));
     };
 
     "cross_simulation"_test = [] {
@@ -1340,8 +1389,7 @@ int main()
         expect(eq(exec.messages, 0));
 
         const auto processed = hsmw.dispatch(
-          irt::hierarchical_state_machine::event_type::input_changed,
-          exec,
+          irt::hierarchical_state_machine::event_type::input_changed, exec,
           srcs);
         expect(!!processed);
         expect(processed.value() == true);
@@ -1359,8 +1407,9 @@ int main()
 
         expect(!!hsmw.set_state(1u, 0u));
 
-        hsmw.states[1u].condition.type =
-          irt::hierarchical_state_machine::condition_type::port;
+        hsmw.states[1u]
+          .condition
+          .type = irt::hierarchical_state_machine::condition_type::port;
         hsmw.states[1u].condition.set(3u, 7u);
         hsmw.states[1u].if_transition = 2u;
 
@@ -1382,8 +1431,7 @@ int main()
         expect(eq(exec.messages, 0));
 
         const auto processed = hsmw.dispatch(
-          irt::hierarchical_state_machine::event_type::input_changed,
-          exec,
+          irt::hierarchical_state_machine::event_type::input_changed, exec,
           srcs);
         expect(!!processed);
         expect(processed.value() == true);
@@ -1588,6 +1636,1525 @@ int main()
         expect(eq(hsmw.exec.r1, 1.0));
     };
 
+    "hsm_hierarchy_exit_effect_enter_order"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > A 1 > A1 2, and B 3. A leaves to B on a message on
+        // port_0 while A1 waits its timer.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 0u));
+        expect(!!h.check());
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_transition = 3u;
+        h.states[1u].if_action.set_output(var::port_0, 3.f);
+        h.states[1u].exit_action.set_output(var::port_0, 2.f);
+
+        h.states[2u].enter_action.set_affect(var::var_timer, 5.f);
+        h.states[2u].condition.set_timer();
+        h.states[2u].if_transition = 2u;
+        h.states[2u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[3u].enter_action.set_output(var::port_0, 4.f);
+
+        expect(!!h.start(exec, srcs));
+        expect(eq((int)exec.current_state, 2));
+        expect(eq(exec.timers[2], 5.0));
+
+        exec.values    = 0b1000;
+        const auto ret = h.dispatch(hsm_t::event_type::input_changed, exec,
+                                    srcs);
+        expect(ret.has_value() and *ret);
+        expect(eq((int)exec.current_state, 3));
+
+        // Exit of the leaf, exit of its super state, effect, enter.
+        expect(eq(exec.messages, 4) >> fatal);
+        expect(eq(exec.message_values[0], 1.0));
+        expect(eq(exec.message_values[1], 2.0));
+        expect(eq(exec.message_values[2], 3.0));
+        expect(eq(exec.message_values[3], 4.0));
+        expect(eq(exec.next_timer(), irt::time_domain<irt::time>::infinity));
+    };
+
+    "hsm_hierarchy_completion_of_composite"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > A 1 > (A1 2 -> A2 3), and B 4: A2 is a final state, the
+        // completion of A goes to B.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+        expect(!!h.set_state(4u, 0u));
+
+        h.states[1u].if_transition = 4u;
+        h.states[2u].if_transition = 3u;
+
+        expect(!!h.start(exec, srcs));
+        expect(eq((int)exec.current_state, 2));
+
+        expect(!!h.run_to_completion(exec, false, srcs));
+        expect(eq((int)exec.current_state, 4));
+    };
+
+    "hsm_hierarchy_self_transition_of_composite"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > A 1 > (A1 2, A2 3): A restarts on a message, the
+        // external transition exits A and enters A and its initial state.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_transition = 1u;
+        h.states[1u].enter_action.set_plus(var::var_i1, 1);
+
+        h.states[2u].condition.set(0b0100u, 0b0100u);
+        h.states[2u].if_transition = 3u;
+        h.states[2u].enter_action.set_plus(var::var_i2, 1);
+
+        expect(!!h.start(exec, srcs));
+        exec.values = 0b0100;
+        expect(!!h.dispatch(hsm_t::event_type::input_changed, exec, srcs));
+        expect(eq((int)exec.current_state, 3));
+
+        exec.values = 0b1000;
+        expect(!!h.dispatch(hsm_t::event_type::input_changed, exec, srcs));
+        expect(eq((int)exec.current_state, 2));
+        expect(eq(exec.i1, 2));
+        expect(eq(exec.i2, 2));
+    };
+
+    "hsm_hierarchy_check"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+
+        // The invalid machines are expected errors.
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+
+        {
+            hsm_t h;
+            expect(not h.check());
+        }
+
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            h.states[2u].super_id = 1u;
+            expect(not h.check());
+            h.states[1u].sub_id = 2u;
+            expect(!!h.check());
+        }
+
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u, 2u));
+            expect(!!h.set_state(2u, 1u, 1u));
+            h.states[1u].super_id = 2u;
+            expect(not h.check());
+        }
+
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            for (irt::u8 i = 1u; i != hsm_t::max_depth; ++i)
+                expect(!!h.set_state(i, i - 1u, i + 1u));
+            h.states[hsm_t::max_depth - 1].sub_id = hsm_t::invalid_state_id;
+            expect(!!h.check());
+
+            h.states[hsm_t::max_depth - 1].sub_id = hsm_t::max_depth;
+            expect(!!h.set_state(hsm_t::max_depth, hsm_t::max_depth - 1));
+            expect(not h.check());
+        }
+
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            h.states[1u].if_transition = 0u;
+            expect(not h.check());
+        }
+
+        irt::on_error_callback = callback;
+    };
+
+    "hsm_hierarchy_dispatch_returns_source_error"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        expect(!!h.start(exec, srcs));
+
+        // The source of the execution references no external source: the
+        // error must not be taken for an unconsumed event.
+        h.flags.set(hsm_t::option::use_source);
+        exec.values = 0b1000;
+
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+        const auto ret      = h.dispatch(hsm_t::event_type::input_changed, exec,
+                                         srcs);
+        irt::on_error_callback = callback;
+
+        expect(not ret.has_value());
+        expect(eq((int)exec.current_state, 1));
+    };
+
+    "hsm_hierarchy_devs_nested_timers"_test = [] {
+        using var = hsm_bench::var;
+
+        // Marche leaves at t = 9 while Tic loops every 2.
+        hsm_bench b;
+        b.machine.states[1u].enter_action.set_affect(var::var_timer, 9.f);
+        b.machine.states[1u].condition.set_timer();
+
+        expect(run_until(b.sim, 8.5) >> fatal);
+        expect(eq(b.ticks.event_number, 4));
+        expect(eq(b.stops.event_number, 0));
+
+        hsm_bench c;
+        c.machine.states[1u].enter_action.set_affect(var::var_timer, 9.f);
+        c.machine.states[1u].condition.set_timer();
+
+        expect(run_until(c.sim, 20.0) >> fatal);
+        expect(eq(c.ticks.event_number, 4));
+        expect(eq(c.stops.event_number, 1));
+        expect(eq((int)c.hsmw.exec.current_state, 3));
+        expect(eq(c.hsmw.sigma, irt::time_domain<irt::time>::infinity));
+    };
+
+    "hsm_hierarchy_devs_interruption"_test = [] {
+        // A message on x[0] at t = 3.5 stops Marche and its Tic loop.
+        hsm_bench b;
+        b.machine.states[1u].condition.set(0b1000u, 0b1000u);
+        b.send_at(3.5, 0);
+
+        expect(run_until(b.sim, 10.0) >> fatal);
+        expect(eq(b.ticks.event_number, 1));
+        expect(eq(b.stops.event_number, 1));
+        expect(eq((int)b.hsmw.exec.current_state, 3));
+        expect(
+          eq(b.hsmw.exec.next_timer(), irt::time_domain<irt::time>::infinity));
+    };
+
+    "hsm_completion_goes_before_the_next_timer"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > Y 1 > (A 2 -> M 3 -> Z 5), and C 4: the timers of Y and A
+        // expire together at t = 2. Z is entered before the timer of Y leaves
+        // it, so each state sends its message.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+        expect(!!h.set_state(5u, 1u));
+        expect(!!h.set_state(4u, 0u));
+
+        h.states[1u].enter_action.set_affect(var::var_timer, 2.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 4u;
+
+        h.states[2u].enter_action.set_affect(var::var_timer, 2.f);
+        h.states[2u].condition.set_timer();
+        h.states[2u].if_transition = 3u;
+        h.states[2u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[3u].if_transition = 5u;
+        h.states[3u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[5u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[4u].enter_action.set_output(var::port_0, 1.f);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)hsmw.exec.current_state, 4));
+        expect(eq(out.event_number, 4));
+    };
+
+    "hsm_completion_goes_before_the_message"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > Y 1 > (A 2 -> M 3 -> Z 5), and C 4: A leaves on its timer,
+        // M has a completion transition and Y leaves on a message.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+        expect(!!h.set_state(5u, 1u));
+        expect(!!h.set_state(4u, 0u));
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_transition = 4u;
+
+        h.states[2u].enter_action.set_affect(var::var_timer, 2.f);
+        h.states[2u].condition.set_timer();
+        h.states[2u].if_transition = 3u;
+
+        h.states[3u].if_transition = 5u;
+        h.states[5u].enter_action.set_plus(var::var_i1, 1);
+
+        expect(!!h.start(exec, srcs));
+        exec.advance_timers(2.0);
+        exec.values.set(3, true);
+        expect(!!h.run_to_completion(exec, true, srcs));
+
+        expect(eq((int)exec.current_state, 4));
+        expect(eq(exec.i1, 1));
+    };
+
+    "hsm_message_goes_before_the_condition_of_the_current_state"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > Y 1 > (S 2 -> T 3), and C 4: the condition of S reads the
+        // value of the message, and Y leaves on the same message.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+        expect(!!h.set_state(4u, 0u));
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_transition = 4u;
+
+        h.states[2u].condition.set_greater(var::port_0, 0.f);
+        h.states[2u].if_transition = 3u;
+
+        h.states[3u].enter_action.set_plus(var::var_i1, 1);
+
+        exec.clear();
+        expect(!!h.start(exec, srcs));
+        expect(!!h.run_to_completion(exec, false, srcs));
+        expect(eq((int)exec.current_state, 2));
+
+        exec.ports[3] = 1.0;
+        exec.values.set(3, true);
+        expect(!!h.run_to_completion(exec, true, srcs));
+        expect(eq((int)exec.current_state, 4));
+        expect(eq(exec.i1, 0));
+    };
+
+    "hsm_condition_is_checked_after_an_internal_transition"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        hsm_t                h;
+        hsm_t::execution     exec;
+        irt::external_source srcs;
+
+        // root 0 > Y 1 > (S 2 -> T 3): a message runs the internal transition
+        // of Y, and its action validates the condition of S.
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_action.set_plus(var::var_i1, 1);
+
+        h.states[2u].condition.set_equal_to(var::var_i1, 1);
+        h.states[2u].if_transition = 3u;
+
+        expect(!!h.start(exec, srcs));
+        expect(!!h.run_to_completion(exec, false, srcs));
+        expect(eq((int)exec.current_state, 2));
+
+        exec.values.set(3, true);
+        expect(!!h.run_to_completion(exec, true, srcs));
+        expect(eq((int)exec.current_state, 3));
+    };
+
+    "hsm_timer_and_message_at_the_same_time"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > Y 1 > (A 2 -> M 3 -> Z 5), and C 4: the timer of A and the
+        // message of x[0] are both at t = 2. The kernel delivers the message
+        // at the next step of t, after the internal transition of the machine.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+        auto&           cst  = sim.alloc<irt::constant>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u, 2u));
+        expect(!!h.set_state(2u, 1u));
+        expect(!!h.set_state(3u, 1u));
+        expect(!!h.set_state(5u, 1u));
+        expect(!!h.set_state(4u, 0u));
+
+        h.states[1u].condition.set(0b1000u, 0b1000u);
+        h.states[1u].if_transition = 4u;
+
+        h.states[2u].enter_action.set_affect(var::var_timer, 2.f);
+        h.states[2u].condition.set_timer();
+        h.states[2u].if_transition = 3u;
+        h.states[2u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[3u].if_transition = 5u;
+        h.states[3u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[5u].exit_action.set_output(var::port_0, 1.f);
+
+        h.states[4u].enter_action.set_output(var::port_0, 1.f);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        get_p(sim, cst).set_constant(1.0, 2.0);
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+        expect(!!sim.connect_dynamics(cst, 0, hsmw, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)hsmw.exec.current_state, 4));
+        expect(eq(out.event_number, 4));
+    };
+
+    "hsm_hierarchy_devs_unconsumed_message_keeps_timer"_test = [] {
+        // Marche waits x[1]: the message on x[0] at t = 3.5 is lost and
+        // Tic still wakes up at t = 4.
+        hsm_bench b;
+        b.machine.states[1u].condition.set(0b0100u, 0b0100u);
+        b.send_at(3.5, 0);
+
+        expect(run_until(b.sim, 4.5) >> fatal);
+        expect(eq(b.ticks.event_number, 2));
+        expect(eq(b.stops.event_number, 0));
+        expect(eq((int)b.hsmw.exec.current_state, 2));
+    };
+
+    "hsm_hierarchy_devs_completion"_test = [] {
+        using var = hsm_bench::var;
+
+        // Tic goes to the final state 4 at t = 2: the completion of Marche
+        // goes to Arret at the same date.
+        hsm_bench b;
+        expect(!!b.machine.set_state(4u, 1u));
+        b.machine.states[2u].if_transition = 4u;
+        b.machine.states[2u].if_action.set_output(var::port_0, 1.f);
+
+        expect(run_until(b.sim, 3.0) >> fatal);
+        expect(eq(b.ticks.event_number, 1));
+        expect(eq(b.stops.event_number, 1));
+        expect(eq((int)b.hsmw.exec.current_state, 3));
+    };
+
+    "hsm_hierarchy_devs_timer_before_message"_test = [] {
+        using var = hsm_bench::var;
+
+        // At t = 2, Tic wakes up to Wait 4 which waits x[0], then the message
+        // of the same date is dispatched to Wait.
+        hsm_bench b;
+        expect(!!b.machine.set_state(4u, 1u));
+        b.machine.states[2u].if_transition = 4u;
+        b.machine.states[2u].if_action.clear();
+        b.machine.states[4u].condition.set(0b1000u, 0b1000u);
+        b.machine.states[4u].if_transition = 3u;
+        b.machine.states[4u].if_action.set_output(var::port_1, 1.f);
+        b.send_at(2.0, 0);
+
+        expect(run_until(b.sim, 3.0) >> fatal);
+        expect(eq(b.ticks.event_number, 0));
+        expect(eq(b.stops.event_number, 1));
+        expect(eq((int)b.hsmw.exec.current_state, 3));
+    };
+
+    "hsm_completion_cycle_check"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        const auto cycle = irt::simulation_errc::hsm_completion_cycle_error;
+        const auto none  = irt::simulation_errc::none;
+
+        // root 0 > (A 1, B 2): the completion transitions without guard
+        // A -> B -> A never stop.
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            h.states[1u].if_transition = 2u;
+            h.states[2u].if_transition = 1u;
+            expect(h.find_error() == cycle);
+
+            // A chain is valid.
+            h.states[2u].if_transition = hsm_t::invalid_state_id;
+            expect(h.find_error() == none);
+
+            // A self-transition re-enters A for ever.
+            h.states[2u].if_transition = 2u;
+            expect(h.find_error() == cycle);
+        }
+
+        // root 0 > (S 1 > A 2, B 3): A has no transition, its completion
+        // goes to S, which leaves to B, and B goes back to S, so to A.
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u, 2u));
+            expect(!!h.set_state(2u, 1u));
+            expect(!!h.set_state(3u, 0u));
+            h.states[1u].if_transition = 3u;
+            h.states[3u].if_transition = 1u;
+            expect(h.find_error() == cycle);
+
+            // A port condition of A does not stop its completion: it is
+            // ignored, and A then has no completion event at all.
+            h.states[2u].condition.set(0b1000u, 0b1000u);
+            expect(h.find_error() == none);
+        }
+
+        // A guard or a timer makes the transition uncertain.
+        {
+            hsm_t h;
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            h.states[1u].condition.set_equal_to(var::var_i1, 0);
+            h.states[1u].if_transition = 2u;
+            h.states[2u].if_transition = 1u;
+            expect(h.find_error() == none);
+
+            h.states[1u].condition.set_timer();
+            expect(h.find_error() == none);
+        }
+    };
+
+    "hsm_run_to_completion_is_bounded"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+
+        // root 0 > (A 1, B 2): the guards of A and B are always true.
+        {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            h.states[1u].condition.set_equal_to(var::var_i1, 0);
+            h.states[1u].if_transition = 2u;
+            h.states[2u].condition.set_equal_to(var::var_i1, 0);
+            h.states[2u].if_transition = 1u;
+
+            expect(h.find_error() == irt::simulation_errc::none);
+            expect(!!h.start(exec, srcs));
+            expect(not h.run_to_completion(exec, false, srcs));
+        }
+
+        // root 0 > (A 1, B 2): two timers of null duration.
+        {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            for (const irt::u8 i : { 1u, 2u }) {
+                h.states[i].enter_action.set_affect(var::var_timer, 0.f);
+                h.states[i].condition.set_timer();
+            }
+            h.states[1u].if_transition = 2u;
+            h.states[2u].if_transition = 1u;
+
+            expect(h.find_error() == irt::simulation_errc::none);
+            expect(!!h.start(exec, srcs));
+            expect(not h.run_to_completion(exec, false, srcs));
+        }
+
+        irt::on_error_callback = callback;
+
+        // root 0 > (A 1, B 2, C 3): A goes to B while i1 <= 9 and B
+        // increments i1, then A leaves to C.
+        {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            expect(!!h.set_state(3u, 0u));
+            h.states[1u].condition.set_less_equal(var::var_i1, 9);
+            h.states[1u].if_transition   = 2u;
+            h.states[1u].else_transition = 3u;
+            h.states[2u].enter_action.set_plus(var::var_i1, 1);
+            h.states[2u].if_transition = 1u;
+            h.states[3u].condition.set(0b1000u, 0b1000u);
+
+            expect(h.find_error() == irt::simulation_errc::none);
+            expect(!!h.start(exec, srcs));
+            expect(!!h.run_to_completion(exec, false, srcs));
+            expect(eq((int)exec.current_state, 3));
+            expect(eq(exec.i1, 10));
+        }
+    };
+
+    "hsm_output_overflow"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // A hierarchy of n levels whose enter actions send a message each.
+        const auto make = [](hsm_t& h, const irt::u8 n) {
+            for (irt::u8 i = 0u; i != n; ++i) {
+                const auto super = i == 0u ? hsm_t::invalid_state_id
+                                           : static_cast<irt::u8>(i - 1u);
+                const auto sub   = i + 1u == n ? hsm_t::invalid_state_id
+                                               : static_cast<irt::u8>(i + 1u);
+                expect(!!h.set_state(i, super, sub));
+                h.states[i].enter_action.set_output(var::port_0, 1.f);
+            }
+
+            h.states[n - 1u].condition.set(0b1000u, 0b1000u);
+        };
+
+        {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            make(h, 4u);
+            expect(!!h.start(exec, srcs));
+            expect(eq(exec.messages, 4));
+            expect(not exec.message_overflow);
+        }
+
+        {
+            hsm_t                h;
+            hsm_t::execution     exec;
+            irt::external_source srcs;
+
+            make(h, 5u);
+
+            const auto callback = std::exchange(irt::on_error_callback,
+                                                nullptr);
+            expect(not h.start(exec, srcs));
+            irt::on_error_callback = callback;
+
+            expect(exec.message_overflow);
+        }
+    };
+
+    "hsm_output_overflow_stops_the_simulation"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1 -> B 2 -> C 3 -> D 4): at t = 1, the timer of A
+        // runs the exit of A, B and C and the enter of B, C and D.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        for (const irt::u8 i : { 1u, 2u, 3u, 4u })
+            expect(!!h.set_state(i, 0u));
+
+        h.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[1u].exit_action.set_output(var::port_0, 1.f);
+
+        for (const irt::u8 i : { 2u, 3u }) {
+            h.states[i].enter_action.set_output(var::port_0, 1.f);
+            h.states[i].exit_action.set_output(var::port_0, 1.f);
+            h.states[i].if_transition = i + 1u;
+        }
+
+        h.states[4u].enter_action.set_output(var::port_0, 1.f);
+        h.states[4u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+        expect(not run_until(sim, 10.0));
+        irt::on_error_callback = callback;
+
+        expect(eq(out.event_number, 0));
+    };
+
+    "hsm_port_reads_the_maximum_of_the_bag"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1, B 2): A goes to B if port_0 > 2. Two constants send
+        // 1 and 3 on x[0] at t = 1, in both orders of the bag.
+        for (const auto three_first : { true, false }) {
+            irt::simulation sim{ irt::simulation_reserve_definition(),
+                                 irt::external_source_reserve_definition() };
+            auto&           h    = sim.hsms.alloc();
+            auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+            auto&           out  = sim.alloc<irt::counter>();
+            auto&           c1   = sim.alloc<irt::constant>();
+            auto&           c2   = sim.alloc<irt::constant>();
+
+            expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+            expect(!!h.set_state(1u, 0u));
+            expect(!!h.set_state(2u, 0u));
+            h.states[1u].condition.set_greater(var::port_0, 2.f);
+            h.states[1u].if_transition = 2u;
+            h.states[2u].enter_action.set_output(var::port_0, 1.f);
+            h.states[2u].condition.set(0b1000u, 0b1000u);
+
+            get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+            get_p(sim, c1).set_constant(three_first ? 3.0 : 1.0, 1.0);
+            get_p(sim, c2).set_constant(three_first ? 1.0 : 3.0, 1.0);
+            expect(!!sim.connect_dynamics(c1, 0, hsmw, 0));
+            expect(!!sim.connect_dynamics(c2, 0, hsmw, 0));
+            expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+            expect(run_until(sim, 10.0) >> fatal);
+            expect(eq((int)hsmw.exec.current_state, 2)) << three_first;
+            expect(eq(out.event_number, 1)) << three_first;
+        }
+    };
+
+    "hsm_output_flush_does_not_run_the_machine"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > A 1: the guard of A is always true and its self-transition
+        // sends a message. The flush of this message must not fire it again.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        h.states[1u].condition.set_equal_to(var::var_i1, 0);
+        h.states[1u].if_transition = 1u;
+        h.states[1u].if_action.set_output(var::port_0, 1.f);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        sim.limits.set_bound(0, 10.0);
+        expect(!!sim.srcs.prepare() >> fatal);
+        expect(!!sim.initialize() >> fatal);
+
+        // Without the fix, the simulation stays at t = 0 forever.
+        for (auto step = 0; step < 100 and not sim.current_time_expired();
+             ++step)
+            expect(!!sim.run() >> fatal);
+
+        expect(sim.current_time_expired() >> fatal);
+        expect(eq(out.event_number, 1));
+    };
+
+    "hsm_negative_initial_timer"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1, B 2): the enter action of A arms the timer to -3.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        expect(!!h.set_state(2u, 0u));
+        h.states[1u].enter_action.set_affect(var::var_timer, -3.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[2u].enter_action.set_output(var::port_0, 1.f);
+        h.states[2u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        sim.limits.set_bound(0, 10.0);
+        expect(!!sim.srcs.prepare() >> fatal);
+        expect(!!sim.initialize() >> fatal);
+        expect(eq(hsmw.sigma, 0.0));
+
+        while (not sim.current_time_expired())
+            expect(!!sim.run() >> fatal);
+
+        expect(eq((int)hsmw.exec.current_state, 2));
+        expect(eq(out.event_number, 1));
+    };
+
+    "hsm_infinite_timeout_is_passive"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        {
+            irt::parameter p;
+            p.set_hsm_wrapper(0, 0, 0.0, 0.0,
+                              std::numeric_limits<irt::real>::quiet_NaN());
+            expect(irt::time_domain<irt::time>::is_infinity(
+              p.reals[irt::hsm_wrapper_tag::timer]));
+        }
+
+        // root 0 > (A 1, B 2): A has a timer condition but no enter action,
+        // its timer is the timeout of the parameter.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        expect(!!h.set_state(2u, 0u));
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[2u].enter_action.set_output(var::port_0, 1.f);
+        h.states[2u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw)
+          .set_hsm_wrapper(ordinal(sim.hsms.get_id(h)))
+          .set_hsm_wrapper(0, 0, 0.0, 0.0,
+                           irt::time_domain<irt::time>::infinity);
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)hsmw.exec.current_state, 1));
+        expect(eq(out.event_number, 0));
+    };
+
+    "output_port_sends_several_messages_in_one_step"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+
+        // State 1 goes to state 2 at once: the exit action sends 8 and the
+        // enter action sends 1 on the same port. Both messages arrive in the
+        // same bag and the receiver reads the maximum of the bag.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           r    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           recv = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        expect(!!h.set_state(2u, 0u));
+        h.states[1u].exit_action.set_output(hsm_t::variable::port_0, 8.f);
+        h.states[2u].enter_action.set_output(hsm_t::variable::port_0, 1.f);
+        h.states[1u].if_transition = 2u;
+
+        expect(!!r.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!r.set_state(1u, 0u));
+        r.states[1u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        get_p(sim, recv).set_hsm_wrapper(ordinal(sim.hsms.get_id(r)));
+        expect(!!sim.connect_dynamics(hsmw, 0, recv, 0));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq(out.event_number, 2));
+        expect(eq(out.sum_values, irt::real(9)));
+        expect(eq(recv.exec.ports[3], irt::real(8)));
+    };
+
+    "message_at_the_date_of_an_emission"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // At t = 1, the quantizer receives 1 from a constant, then 3 from a
+        // wrapper at the date of the emission of the level 1: both levels
+        // must leave the quantizer.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           cst  = sim.alloc<irt::constant>();
+        auto&           q    = sim.alloc<irt::qss1_quantizer>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        expect(!!h.set_state(2u, 0u));
+        h.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[1u].if_action.set_output(var::port_0, 3.f);
+        h.states[2u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        get_p(sim, cst).set_constant(1.0, 1.0);
+        expect(!!sim.connect_dynamics(cst, 0, q, 0));
+        expect(!!sim.connect_dynamics(hsmw, 0, q, 0));
+        expect(!!sim.connect_dynamics(q, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq(out.event_number, 2));
+        expect(eq(out.last_value, irt::real(3)));
+    };
+
+    "hsm_timer_and_bag_in_the_same_transition"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1, B 2, C 3, D 4): at t = 1, the timer of A goes to B
+        // and a constant sends 3 on x[0]. The completion of B reads port_0
+        // before the bag: B goes to D, which sends 6.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           cst  = sim.alloc<irt::constant>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        for (const irt::u8 i : { 1u, 2u, 3u, 4u })
+            expect(!!h.set_state(i, 0u));
+
+        h.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[2u].condition.set_greater(var::port_0, 2.f);
+        h.states[2u].if_transition   = 3u;
+        h.states[2u].else_transition = 4u;
+        h.states[3u].enter_action.set_output(var::port_0, 5.f);
+        h.states[3u].condition.set(0b0001u, 0b0001u);
+        h.states[4u].enter_action.set_output(var::port_0, 6.f);
+        h.states[4u].condition.set(0b0001u, 0b0001u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        get_p(sim, cst).set_constant(3.0, 1.0);
+        expect(!!sim.connect_dynamics(cst, 0, hsmw, 0));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)hsmw.exec.current_state, 4));
+        expect(eq(out.event_number, 1));
+        expect(eq(out.last_value, irt::real(6)));
+    };
+
+    "messages_of_a_timer_and_of_a_source_in_the_same_bag"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // At t = 1, the timer of W1 sends 1 to x[0] of W2, and a constant
+        // sends to W3, which sends 2 to x[1] of W2. Both messages arrive in
+        // the same bag: the completion of W2 reads port_1 = 2 and sends 5.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h1  = sim.hsms.alloc();
+        auto&           h2  = sim.hsms.alloc();
+        auto&           h3  = sim.hsms.alloc();
+        auto&           w1  = sim.alloc<irt::hsm_wrapper>();
+        auto&           w2  = sim.alloc<irt::hsm_wrapper>();
+        auto&           w3  = sim.alloc<irt::hsm_wrapper>();
+        auto&           cst = sim.alloc<irt::constant>();
+        auto&           out = sim.alloc<irt::counter>();
+
+        expect(!!h1.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h1.set_state(1u, 0u));
+        expect(!!h1.set_state(2u, 0u));
+        h1.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        h1.states[1u].condition.set_timer();
+        h1.states[1u].if_transition = 2u;
+        h1.states[1u].if_action.set_output(var::port_0, 1.f);
+        h1.states[2u].condition.set(0b0001u, 0b0001u);
+
+        expect(!!h3.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h3.set_state(1u, 0u));
+        expect(!!h3.set_state(2u, 0u));
+        h3.states[1u].condition.set(0b1000u, 0b1000u);
+        h3.states[1u].if_transition = 2u;
+        h3.states[1u].if_action.set_output(var::port_0, 2.f);
+        h3.states[2u].condition.set(0b0001u, 0b0001u);
+
+        expect(!!h2.set_state(0u, hsm_t::invalid_state_id, 1u));
+        for (const irt::u8 i : { 1u, 2u, 3u, 4u })
+            expect(!!h2.set_state(i, 0u));
+        h2.states[1u].condition.set(0b1000u, 0b1000u);
+        h2.states[1u].if_transition = 2u;
+        h2.states[2u].condition.set_greater_equal(var::port_1, 2.f);
+        h2.states[2u].if_transition   = 3u;
+        h2.states[2u].else_transition = 4u;
+        h2.states[3u].enter_action.set_output(var::port_0, 5.f);
+        h2.states[3u].condition.set(0b0001u, 0b0001u);
+        h2.states[4u].enter_action.set_output(var::port_0, 6.f);
+        h2.states[4u].condition.set(0b0001u, 0b0001u);
+
+        get_p(sim, w1).set_hsm_wrapper(ordinal(sim.hsms.get_id(h1)));
+        get_p(sim, w2).set_hsm_wrapper(ordinal(sim.hsms.get_id(h2)));
+        get_p(sim, w3).set_hsm_wrapper(ordinal(sim.hsms.get_id(h3)));
+        get_p(sim, cst).set_constant(1.0, 1.0);
+        expect(!!sim.connect_dynamics(cst, 0, w3, 0));
+        expect(!!sim.connect_dynamics(w1, 0, w2, 0));
+        expect(!!sim.connect_dynamics(w3, 0, w2, 1));
+        expect(!!sim.connect_dynamics(w2, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)w2.exec.current_state, 3));
+        expect(eq(out.event_number, 1));
+        expect(eq(out.last_value, irt::real(5)));
+    };
+
+    "hsm_initial_completion_leaves_in_the_first_bag"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1, B 2): the enter action of A sends 1, the completion
+        // of A goes to B, whose enter action sends 2. Both messages leave in
+        // the first step.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        expect(!!h.set_state(2u, 0u));
+        h.states[1u].enter_action.set_output(var::port_0, 1.f);
+        h.states[1u].if_transition = 2u;
+        h.states[2u].enter_action.set_output(var::port_0, 2.f);
+        h.states[2u].condition.set(0b1000u, 0b1000u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        sim.limits.set_bound(0, 10.0);
+        expect(!!sim.srcs.prepare() >> fatal);
+        expect(!!sim.initialize() >> fatal);
+        expect(eq((int)hsmw.exec.current_state, 2));
+        expect(eq(hsmw.exec.messages, 2));
+
+        expect(!!sim.run() >> fatal);
+        expect(eq(out.event_number, 2));
+        expect(eq(out.sum_values, irt::real(3)));
+    };
+
+    "hsm_condition_compares_the_exact_values"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        const auto inf = irt::time_domain<irt::time>::infinity;
+
+        std::array<irt::real, hsm_t::max_constants> constants{};
+        constants[0] = 2.0;
+
+        hsm_t::execution        e;
+        hsm_t::condition_action c;
+
+        // A real and an integer of the same value are equal, in both orders.
+        e.r1 = 3.0;
+        e.i1 = 3;
+        c.set_equal_to(var::var_r1, var::var_i1);
+        expect(c.check(constants, e));
+        c.set_equal_to(var::var_i1, var::var_r1);
+        expect(c.check(constants, e));
+        c.set_less_equal(var::var_r1, var::var_i1);
+        expect(c.check(constants, e));
+        c.set_equal_to(var::var_r1, 3);
+        expect(c.check(constants, e));
+
+        // The integer is not truncated to compare with a real.
+        e.r1 = 3.5;
+        c.set_equal_to(var::var_i1, var::var_r1);
+        expect(not c.check(constants, e));
+        c.set_less(var::var_i1, var::var_r1);
+        expect(c.check(constants, e));
+
+        // A constant of the machine.
+        e.r1 = 2.0;
+        c.set_equal_to(var::var_r1, var::hsm_constant_0);
+        expect(c.check(constants, e));
+
+        // All the bits of the mantissa are compared.
+        e.r1 = 1.0000001;
+        e.r2 = 1.0;
+        c.set_greater(var::var_r1, var::var_r2);
+        expect(c.check(constants, e));
+        e.r1 = 0.25;
+        e.r2 = 0.25000000001;
+        c.set_less(var::var_r1, var::var_r2);
+        expect(c.check(constants, e));
+
+        // The infinities.
+        e.r2 = -inf;
+        c.set_less_equal(var::var_r2, 3.f);
+        expect(c.check(constants, e));
+        e.r2 = inf;
+        c.set_greater(var::var_r2, 3.f);
+        expect(c.check(constants, e));
+    };
+
+    "hsm_integer_actions_read_their_own_variable"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h = sim.hsms.alloc();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+
+        const auto run = [&](const hsm_t::state_action& action) noexcept {
+            hsm_t::execution e;
+            e.i1                      = 12;
+            e.i2                      = 10;
+            h.states[1u].enter_action = action;
+            expect(!!h.start(e, sim.srcs) >> fatal);
+            return e;
+        };
+
+        hsm_t::state_action a;
+
+        a.set_modulus(var::var_i2, 7);
+        expect(eq(run(a).i2, 3));
+        a.set_bit_and(var::var_i2, 6);
+        expect(eq(run(a).i2, 2));
+        a.set_bit_or(var::var_i2, 1);
+        expect(eq(run(a).i2, 11));
+        a.set_bit_xor(var::var_i2, 1);
+        expect(eq(run(a).i2, 11));
+
+        // As divides: a null divisor does not stop the process.
+        a.set_modulus(var::var_i1, 0);
+        expect(eq(run(a).i1, INT32_MAX));
+        a.set_modulus(var::var_i2, 0);
+        expect(eq(run(a).i2, INT32_MAX));
+    };
+
+    "hsm_nan_delay_arms_nothing"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // The default timer is infinite: infinity * 0 is NaN.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h = sim.hsms.alloc();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!h.set_state(1u, 0u));
+        h.states[1u].enter_action.set_multiplies(var::var_timer, 0.f);
+        h.states[1u].condition.set_timer();
+
+        hsm_t::execution e;
+        expect(!!h.start(e, sim.srcs) >> fatal);
+        expect(irt::time_domain<irt::time>::is_infinity(e.timers[1]));
+    };
+
+    "hsm_output_overflow_in_a_confluent_transition"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // root 0 > (A 1, B 2, C 3): at t = 1, the timer of A sends 3 messages
+        // (if, exit, enter of B) and the bag sends 2 more (if of B, enter of
+        // C) in the same bag: the 4 places of the buffer are not enough.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           h    = sim.hsms.alloc();
+        auto&           hsmw = sim.alloc<irt::hsm_wrapper>();
+        auto&           cst  = sim.alloc<irt::constant>();
+        auto&           out  = sim.alloc<irt::counter>();
+
+        expect(!!h.set_state(0u, hsm_t::invalid_state_id, 1u));
+        for (const irt::u8 i : { 1u, 2u, 3u })
+            expect(!!h.set_state(i, 0u));
+
+        h.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        h.states[1u].condition.set_timer();
+        h.states[1u].if_transition = 2u;
+        h.states[1u].if_action.set_output(var::port_0, 1.f);
+        h.states[1u].exit_action.set_output(var::port_0, 2.f);
+        h.states[2u].enter_action.set_output(var::port_0, 3.f);
+        h.states[2u].condition.set(0b1000u, 0b1000u);
+        h.states[2u].if_transition = 3u;
+        h.states[2u].if_action.set_output(var::port_0, 4.f);
+        h.states[3u].enter_action.set_output(var::port_0, 5.f);
+        h.states[3u].condition.set(0b0001u, 0b0001u);
+
+        get_p(sim, hsmw).set_hsm_wrapper(ordinal(sim.hsms.get_id(h)));
+        get_p(sim, cst).set_constant(3.0, 1.0);
+        expect(!!sim.connect_dynamics(cst, 0, hsmw, 0));
+        expect(!!sim.connect_dynamics(hsmw, 0, out, 0));
+
+        sim.limits.set_bound(0, 10.0);
+        expect(!!sim.srcs.prepare() >> fatal);
+        expect(!!sim.initialize() >> fatal);
+
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+        auto       ret      = irt::error_code{};
+        do {
+            if (auto r = sim.run(); not r) {
+                ret = r.error();
+                break;
+            }
+        } while (not sim.current_time_expired());
+        irt::on_error_callback = callback;
+
+        expect(ret == irt::error_code(
+                        irt::simulation_errc::hsm_output_overflow_error));
+        expect(eq(out.event_number, 0));
+    };
+
+    "hsm_output_buffer_is_emptied_before_a_confluent_transition"_test = [] {
+        using hsm_t = irt::hierarchical_state_machine;
+        using var   = hsm_t::variable;
+
+        // W: root 0 > (A 1, B 2, C 3, D 4). At t = 1, the timer of A sends
+        // 1, 2, 3, 4 (if and exit of A, enter of B, if of the completion of
+        // B). V sends at t = 1 too: its message arrives in the bag of the step
+        // where W sends its 4 messages, and C goes to D, which sends 5 and 6.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           hw  = sim.hsms.alloc();
+        auto&           hv  = sim.hsms.alloc();
+        auto&           w   = sim.alloc<irt::hsm_wrapper>();
+        auto&           v   = sim.alloc<irt::hsm_wrapper>();
+        auto&           out = sim.alloc<irt::counter>();
+
+        expect(!!hw.set_state(0u, hsm_t::invalid_state_id, 1u));
+        for (const irt::u8 i : { 1u, 2u, 3u, 4u })
+            expect(!!hw.set_state(i, 0u));
+
+        hw.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        hw.states[1u].condition.set_timer();
+        hw.states[1u].if_transition = 2u;
+        hw.states[1u].if_action.set_output(var::port_0, 1.f);
+        hw.states[1u].exit_action.set_output(var::port_0, 2.f);
+        hw.states[2u].enter_action.set_output(var::port_0, 3.f);
+        hw.states[2u].if_transition = 3u;
+        hw.states[2u].if_action.set_output(var::port_0, 4.f);
+        hw.states[3u].condition.set(0b1000u, 0b1000u);
+        hw.states[3u].if_transition = 4u;
+        hw.states[3u].if_action.set_output(var::port_0, 5.f);
+        hw.states[4u].enter_action.set_output(var::port_0, 6.f);
+        hw.states[4u].condition.set(0b0001u, 0b0001u);
+
+        expect(!!hv.set_state(0u, hsm_t::invalid_state_id, 1u));
+        expect(!!hv.set_state(1u, 0u));
+        expect(!!hv.set_state(2u, 0u));
+        hv.states[1u].enter_action.set_affect(var::var_timer, 1.f);
+        hv.states[1u].condition.set_timer();
+        hv.states[1u].if_transition = 2u;
+        hv.states[1u].if_action.set_output(var::port_0, 7.f);
+        hv.states[2u].condition.set(0b0001u, 0b0001u);
+
+        get_p(sim, w).set_hsm_wrapper(ordinal(sim.hsms.get_id(hw)));
+        get_p(sim, v).set_hsm_wrapper(ordinal(sim.hsms.get_id(hv)));
+        expect(!!sim.connect_dynamics(v, 0, w, 0));
+        expect(!!sim.connect_dynamics(w, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq((int)w.exec.current_state, 4));
+        expect(eq(out.event_number, 6));
+        expect(eq(out.sum_values, irt::real(21)));
+    };
+
+    "qss_integrator_at_integer_dates"_test = [] {
+        // The derivative changes at the integer dates and, with a quantum of 1
+        // and slopes of 1 or 2, the integrator crosses its levels at the same
+        // dates: the trajectory is checked against the exact integral.
+        static constexpr irt::real slopes[] = { 1, 1, -1, 2, 0, -2, 0 };
+
+        const auto exact = [](const irt::real t) noexcept {
+            irt::real x = 0;
+            for (int k = 0; k != std::ssize(slopes); ++k)
+                x += slopes[k] *
+                     std::clamp(t - static_cast<irt::real>(k + 1), 0.0, 1.0);
+            return x;
+        };
+
+        struct emission {
+            irt::real t;
+            irt::real value;
+
+            bool operator==(const emission&) const = default;
+        };
+
+        const auto run =
+          [&]<typename Integrator>(irt::vector<emission>& emissions) noexcept {
+              irt::simulation sim{ irt::simulation_reserve_definition(),
+                                   irt::external_source_reserve_definition{
+                                     .constant_nb = 1 } };
+              auto&           cst = sim.srcs.constant_sources.alloc();
+              cst.length          = std::size(slopes);
+              std::copy_n(slopes, std::size(slopes), cst.buffer.begin());
+
+              auto& gen   = sim.alloc<irt::generator>();
+              auto& integ = sim.alloc<Integrator>();
+              auto& out   = sim.alloc<irt::counter>();
+              get_p(sim, gen).clear().set_generator_ta(1.0).set_generator_value(
+                irt::source_type::constant,
+                sim.srcs.constant_sources.get_id(cst));
+              get_p(sim, integ).set_integrator(0.0, 1.0);
+              expect(!!sim.connect_dynamics(gen, 0, integ, 0));
+              expect(!!sim.connect_dynamics(integ, 0, out, 0));
+
+              sim.limits.set_bound(0, 7.5);
+              expect(!!sim.srcs.prepare() >> fatal);
+              expect(!!sim.initialize() >> fatal);
+
+              auto events = out.event_number;
+              do {
+                  expect(!!sim.run() >> fatal);
+                  const auto t = sim.current_time();
+                  if (sim.current_time_expired())
+                      break;
+
+                  // QSS2 and QSS3 cross some levels at dates which are not
+                  // dyadic (t = 13/3): their values are rounded.
+                  if (get_model(integ).tl == t)
+                      expect(std::abs(integ.X - exact(t)) < 1e-12)
+                        << "at t =" << t;
+
+                  if (out.event_number != events) {
+                      events = out.event_number;
+                      emissions.emplace_back(t, out.last_value);
+                  }
+              } while (true);
+          };
+
+        irt::vector<emission> qss1, qss2, qss3;
+        run.template          operator()<irt::qss1_integrator>(qss1);
+        run.template          operator()<irt::qss2_integrator>(qss2);
+        run.template          operator()<irt::qss3_integrator>(qss3);
+
+        static constexpr emission expected[] = { { 0, 0 },   { 2, 1 },
+                                                 { 3, 2 },   { 4, 1 },
+                                                 { 4.5, 2 }, { 5, 3 },
+                                                 { 6.5, 2 }, { 7, 1 } };
+        // std::ranges::equal on a local type crashes gcc 11.
+        expect(eq(qss1.ssize(), std::ssize(expected)) >> fatal);
+        for (int i = 0; i != std::ssize(expected); ++i)
+            expect(qss1[i] == expected[i]) << "emission" << i;
+        for (const auto& e : expected)
+            expect(eq(e.value, exact(e.t)));
+    };
+
+    "have_true_message"_test = [] {
+        const irt::message msgs[] = { { 0.0 }, { 2.0 }, { 0.0 } };
+
+        expect(not irt::have_true_message({}));
+        expect(not irt::have_true_message(std::span(msgs).first(1)));
+        expect(irt::have_true_message(msgs));
+    };
+
+    "logical_and_accumulator_do_not_depend_on_the_bag_order"_test = [] {
+        // At t = 1, two constants send a, then b, on the same port: the
+        // transition must not depend on the order of the connections.
+        struct result {
+            irt::real or_value;
+            irt::real invert_value;
+            irt::real accumulated;
+
+            bool operator==(const result&) const = default;
+        };
+
+        const auto run = [](const bool swap) noexcept -> result {
+            irt::simulation sim{ irt::simulation_reserve_definition(),
+                                 irt::external_source_reserve_definition() };
+            auto&           a     = sim.alloc<irt::constant>();
+            auto&           b     = sim.alloc<irt::constant>();
+            auto&           one   = sim.alloc<irt::constant>();
+            auto&           lor   = sim.alloc<irt::logical_or_2>();
+            auto&           inv   = sim.alloc<irt::logical_invert>();
+            auto&           acc   = sim.alloc<irt::accumulator_2>();
+            auto&           c_or  = sim.alloc<irt::counter>();
+            auto&           c_inv = sim.alloc<irt::counter>();
+
+            get_p(sim, a).set_constant(0.0, 1.0);
+            get_p(sim, b).set_constant(5.0, 1.0);
+            get_p(sim, one).set_constant(1.0, 1.0);
+
+            auto& first  = swap ? b : a;
+            auto& second = swap ? a : b;
+            for (auto* src : { &first, &second }) {
+                expect(!!sim.connect_dynamics(*src, 0, lor, 0));
+                expect(!!sim.connect_dynamics(*src, 0, inv, 0));
+                expect(!!sim.connect_dynamics(*src, 0, acc, 2));
+            }
+            expect(!!sim.connect_dynamics(one, 0, acc, 0));
+            expect(!!sim.connect_dynamics(lor, 0, c_or, 0));
+            expect(!!sim.connect_dynamics(inv, 0, c_inv, 0));
+
+            expect(run_until(sim, 10.0) >> fatal);
+
+            return { c_or.last_value, c_inv.last_value, acc.number };
+        };
+
+        const auto direct  = run(false);
+        const auto swapped = run(true);
+        expect(direct == swapped);
+        expect(eq(direct.or_value, irt::real(1)));
+        expect(eq(direct.invert_value, irt::real(0)));
+        expect(eq(direct.accumulated, irt::real(5)));
+    };
+
+    "generator_time_advance_port"_test = [] {
+        // At t = 0.5, the generator (ta = 1) receives 3 on x_t: the next
+        // values leave at 3.5, 4.5, ..., 9.5.
+        irt::simulation sim{ irt::simulation_reserve_definition(),
+                             irt::external_source_reserve_definition() };
+        auto&           cst = sim.alloc<irt::constant>();
+        auto&           gen = sim.alloc<irt::generator>();
+        auto&           out = sim.alloc<irt::counter>();
+
+        get_p(sim, cst).set_constant(3.0, 0.5);
+        get_p(sim, gen).clear().set_generator_ta(1.0);
+        expect(!!sim.connect_dynamics(cst, 0, gen, irt::generator::x_t));
+        expect(!!sim.connect_dynamics(gen, 0, out, 0));
+
+        expect(run_until(sim, 10.0) >> fatal);
+        expect(eq(out.event_number, 7));
+    };
+
+    "bag_order_is_the_total_order_of_ieee_754"_test = [] {
+        const auto inf = std::numeric_limits<irt::real>::infinity();
+        const auto nan = std::numeric_limits<irt::real>::quiet_NaN();
+
+        std::array<irt::message, 8> bag{
+            irt::message{ 2.0 },      irt::message{ nan },
+            irt::message{ +0.0 },     irt::message{ -inf },
+            irt::message{ -0.0 },     irt::message{ -1.0 },
+            irt::message{ 1.0, 3.0 }, irt::message{ 1.0, -3.0 }
+        };
+
+        irt::detail::sort_bag(bag);
+
+        expect(eq(bag[0][0], -inf));
+        expect(eq(bag[1][0], irt::real(-1)));
+        expect(std::signbit(bag[2][0]) and bag[2][0] == 0.0);
+        expect(not std::signbit(bag[3][0]) and bag[3][0] == 0.0);
+        expect(eq(bag[4][1], irt::real(-3)));
+        expect(eq(bag[5][1], irt::real(3)));
+        expect(eq(bag[6][0], irt::real(2)));
+        expect(std::isnan(bag[7][0]));
+    };
+
+    "bag_is_sorted_by_values"_test = [] {
+        // At t = 1, two constants send 5 and 2 to a queue: the first message
+        // to leave is 2, whatever the order of the connections.
+        const auto first_output = [](const bool swap) noexcept -> irt::real {
+            irt::simulation sim{ irt::simulation_reserve_definition(),
+                                 irt::external_source_reserve_definition() };
+            auto&           a   = sim.alloc<irt::constant>();
+            auto&           b   = sim.alloc<irt::constant>();
+            auto&           q   = sim.alloc<irt::queue>();
+            auto&           out = sim.alloc<irt::counter>();
+
+            get_p(sim, a).set_constant(5.0, 1.0);
+            get_p(sim, b).set_constant(2.0, 1.0);
+            expect(!!sim.connect_dynamics(swap ? b : a, 0, q, 0));
+            expect(!!sim.connect_dynamics(swap ? a : b, 0, q, 0));
+            expect(!!sim.connect_dynamics(q, 0, out, 0));
+
+            sim.limits.set_bound(0, 10.0);
+            expect(!!sim.srcs.prepare() >> fatal);
+            expect(!!sim.initialize() >> fatal);
+
+            while (out.event_number == 0 and not sim.current_time_expired())
+                expect(!!sim.run() >> fatal);
+
+            return out.last_value;
+        };
+
+        expect(eq(first_output(false), irt::real(2)));
+        expect(eq(first_output(true), irt::real(2)));
+    };
+
+    "hsm_hierarchy_devs_invalid_machine"_test = [] {
+        hsm_bench b;
+        b.machine.states[1u].sub_id = hsm_bench::hsm_t::invalid_state_id;
+
+        const auto callback = std::exchange(irt::on_error_callback, nullptr);
+        expect(not run_until(b.sim, 1.0));
+        irt::on_error_callback = callback;
+    };
+
+    "queue_sends_one_message_by_event"_test = [] {
+        // Two generators send 10 and 20 at t = 1, 2, ...: the queue receives
+        // two messages at the same date and must send the two values.
+        irt::simulation sim(
+          irt::simulation_reserve_definition(),
+          irt::external_source_reserve_definition{ .constant_nb = 2 });
+
+        const irt::real v10[] = { 10.0 };
+        const irt::real v20[] = { 20.0 };
+        auto&           cst10 = sim.srcs.constant_sources.alloc(v10);
+        auto&           cst20 = sim.srcs.constant_sources.alloc(v20);
+
+        auto& gen1 = sim.alloc<irt::generator>();
+        auto& gen2 = sim.alloc<irt::generator>();
+        auto& q    = sim.alloc<irt::queue>();
+        auto& cnt  = sim.alloc<irt::counter>();
+
+        get_p(sim, gen1).clear().set_generator_ta(1.0).set_generator_value(
+          irt::source_type::constant, sim.srcs.constant_sources.get_id(cst10));
+        get_p(sim, gen2).clear().set_generator_ta(1.0).set_generator_value(
+          irt::source_type::constant, sim.srcs.constant_sources.get_id(cst20));
+        get_p(sim, q).set_queue(2.0);
+
+        expect(!!sim.connect_dynamics(gen1, 0, q, 0));
+        expect(!!sim.connect_dynamics(gen2, 0, q, 0));
+        expect(!!sim.connect_dynamics(q, 0, cnt, 0));
+
+        // The messages of t = 1, 2, 3 leave at t = 3, 4, 5.
+        sim.limits.set_bound(0, 5.5);
+        expect(!!sim.srcs.prepare());
+        expect(!!sim.initialize());
+
+        do {
+            expect(!!sim.run());
+        } while (not sim.current_time_expired());
+
+        expect(eq(cnt.event_number, static_cast<irt::i64>(6)));
+        expect(eq(cnt.sum_values, 90.0));
+    };
+
     "hsm_simulation"_test = [] {
         irt::simulation sim(
           irt::simulation_reserve_definition(),
@@ -1740,10 +3307,10 @@ int main()
         auto& cnt = sim.alloc<irt::counter>();
         auto& gen = sim.alloc<irt::constant>();
 
-        get_p(sim, gen).reals[0] = 1.0;
-        get_p(sim, gen).reals[1] = 5.0;
-        get_p(sim, gen).integers[0] =
-          ordinal(irt::constant::init_type::constant);
+        get_p(sim, gen).reals[0]    = 1.0;
+        get_p(sim, gen).reals[1]    = 5.0;
+        get_p(sim, gen).integers[0] = ordinal(
+          irt::constant::init_type::constant);
 
         expect(sim.hsms.can_alloc());
         expect(sim.models.can_alloc());
@@ -1794,17 +3361,17 @@ int main()
         expect((sim.can_alloc(3)) >> fatal);
         expect((sim.hsms.can_alloc(1)) >> fatal);
 
-        auto& cnt                 = sim.alloc<irt::counter>();
-        auto& gen1                = sim.alloc<irt::constant>();
-        get_p(sim, gen1).reals[0] = 1.0;
-        get_p(sim, gen1).reals[1] = 5.0;
-        get_p(sim, gen1).integers[0] =
-          ordinal(irt::constant::init_type::constant);
-        auto& gen2                = sim.alloc<irt::constant>();
-        get_p(sim, gen2).reals[0] = 1.0;
-        get_p(sim, gen2).reals[1] = 12.0;
-        get_p(sim, gen2).integers[0] =
-          ordinal(irt::constant::init_type::constant);
+        auto& cnt                    = sim.alloc<irt::counter>();
+        auto& gen1                   = sim.alloc<irt::constant>();
+        get_p(sim, gen1).reals[0]    = 1.0;
+        get_p(sim, gen1).reals[1]    = 5.0;
+        get_p(sim, gen1).integers[0] = ordinal(
+          irt::constant::init_type::constant);
+        auto& gen2                   = sim.alloc<irt::constant>();
+        get_p(sim, gen2).reals[0]    = 1.0;
+        get_p(sim, gen2).reals[1]    = 12.0;
+        get_p(sim, gen2).integers[0] = ordinal(
+          irt::constant::init_type::constant);
 
         expect(sim.hsms.can_alloc());
         expect(sim.models.can_alloc());
@@ -1855,17 +3422,17 @@ int main()
         expect((sim.can_alloc(3)) >> fatal);
         expect((sim.hsms.can_alloc(1)) >> fatal);
 
-        auto& cnt                 = sim.alloc<irt::counter>();
-        auto& gen1                = sim.alloc<irt::constant>();
-        get_p(sim, gen1).reals[0] = 1.0;
-        get_p(sim, gen1).reals[1] = 5.0;
-        get_p(sim, gen1).integers[0] =
-          ordinal(irt::constant::init_type::constant);
-        auto& gen2                = sim.alloc<irt::constant>();
-        get_p(sim, gen2).reals[0] = 1.0;
-        get_p(sim, gen2).reals[1] = 12.0;
-        get_p(sim, gen2).integers[0] =
-          ordinal(irt::constant::init_type::constant);
+        auto& cnt                    = sim.alloc<irt::counter>();
+        auto& gen1                   = sim.alloc<irt::constant>();
+        get_p(sim, gen1).reals[0]    = 1.0;
+        get_p(sim, gen1).reals[1]    = 5.0;
+        get_p(sim, gen1).integers[0] = ordinal(
+          irt::constant::init_type::constant);
+        auto& gen2                   = sim.alloc<irt::constant>();
+        get_p(sim, gen2).reals[0]    = 1.0;
+        get_p(sim, gen2).reals[1]    = 12.0;
+        get_p(sim, gen2).integers[0] = ordinal(
+          irt::constant::init_type::constant);
 
         expect(sim.hsms.can_alloc());
         expect(sim.models.can_alloc());
@@ -1973,9 +3540,8 @@ int main()
         using hsm_t = irt::hierarchical_state_machine;
         using var   = hsm_t::variable;
 
-        auto run_variant = [](irt::i32 prefer_fine_flag,
-                              double   coarse_value,
-                              double   fine_value) {
+        auto run_variant = [](irt::i32 prefer_fine_flag, double coarse_value,
+                              double fine_value) {
             hsm_t                h;
             hsm_t::execution     exec;
             irt::external_source srcs;
@@ -2105,11 +3671,12 @@ int main()
         get_p(sim, l_or).integers[0] = false;
         get_p(sim, l_or).integers[1] = false;
 
-        sim.observe(irt::get_model(l_and));
+        expect(sim.observe(irt::get_model(l_and)).has_value());
         auto* obs = sim.observers.try_to_get(irt::get_model(l_and).obs_id);
 
         expect(fatal(obs != nullptr));
-        file_output fo_a(*obs, "boolean_simulation.csv");
+        file_output fo_a(sim, irt::get_model(l_and).obs_id,
+                         "boolean_simulation.csv");
 
         sim.limits.set_bound(0, 10);
         expect(!!sim.srcs.prepare());
@@ -2145,14 +3712,13 @@ int main()
             expect(!!sim.run());
             if (not sim.current_time_expired())
                 expect(
-                  eq(time_fun.value, sim.current_time() * sim.current_time()));
+                  eq(cnt.last_value, sim.current_time() * sim.current_time()));
             c++;
         } while (not sim.current_time_expired());
 
-        const auto value =
-          (irt::real{ 2.0 } * sim.limits.duration() / timestep -
-           irt::real{ 1.0 });
-        expect(eq(c, value));
+        // One step per timestep: the counter receives the value in the step
+        // of its emission.
+        expect(eq(c, sim.limits.duration() / timestep));
     };
 
     "time_func_sin"_test = [] {
@@ -2180,14 +3746,12 @@ int main()
         do {
             expect(!!sim.run() >> fatal);
             if (not sim.current_time_expired())
-                expect(eq(time_fun.value,
+                expect(eq(cnt.last_value,
                           std::sin(irt::two * pi * f0 * sim.current_time())));
             c++;
         } while (not sim.current_time_expired());
 
-        expect(eq(c,
-                  (irt::real{ 2.0 } * sim.limits.duration() / timestep -
-                   irt::real{ 1.0 })));
+        expect(eq(c, sim.limits.duration() / timestep));
     };
 
     "abstract_sin"_test = [] {
@@ -2197,9 +3761,12 @@ int main()
         irt::abstract_sin<3>&     d3  = sim.alloc<irt::abstract_sin<3>>();
         irt::abstract_wsum<3, 3>& sum = sim.alloc<irt::abstract_wsum<3, 3>>();
 
-        sim.connect(d1.y[0], sim.models.get_id(irt::get_model(sum)), 0);
-        sim.connect(d2.y[0], sim.models.get_id(irt::get_model(sum)), 1);
-        sim.connect(d3.y[0], sim.models.get_id(irt::get_model(sum)), 2);
+        expect(sim.connect(d1.y[0], sim.models.get_id(irt::get_model(sum)), 0)
+                 .has_value());
+        expect(sim.connect(d2.y[0], sim.models.get_id(irt::get_model(sum)), 1)
+                 .has_value());
+        expect(sim.connect(d3.y[0], sim.models.get_id(irt::get_model(sum)), 2)
+                 .has_value());
 
         d1.value[0] = std::numbers::pi / 4.0;
         d2.value[0] = std::numbers::pi / 4.0;
@@ -2236,154 +3803,12 @@ int main()
         //   -.176, 1.e-2));
     };
 
-    "external_source"_test = [] {
-        std::error_code ec;
-
-        auto ofs_b = irt::file::open_tmp();
-        auto ofs_t = irt::file::open_tmp();
-        expect(ofs_b.has_value());
-        expect(ofs_t.has_value());
-
-        std::default_random_engine gen(1234);
-        std::poisson_distribution  dist(4.0);
-
-        irt::generate_random_file(ofs_b.value().to_file(),
-                                  gen,
-                                  dist,
-                                  1024,
-                                  irt::random_file_type::binary);
-
-        auto str_b = read_entire_file(ofs_b.value().to_file());
-        expect(str_b.size() ==
-               static_cast<size_t>(1024) *
-                 sizeof(std::poisson_distribution<>::result_type));
-
-        irt::generate_random_file(ofs_t.value().to_file(),
-                                  gen,
-                                  dist,
-                                  1024,
-                                  irt::random_file_type::text);
-
-        auto str_t = read_entire_file(ofs_t.value().to_file());
-        expect(str_t.size() > static_cast<size_t>(1024) * 2);
-    };
-
-    "binary-memory-io"_test = [] {
-#if 0
-        auto f = irt::memory::make(256);
-
-        expect(f.has_value()) << fatal;
-        expect(eq(f->data.size(), 256u));
-        expect(eq(f->data.capacity(), 256u));
-        expect(eq(f->tell(), 0));
-        expect(eq(f->length(), 256));
-
-        irt::u8  a = 0xfe;
-        irt::u16 b = 0xfedc;
-        irt::u32 c = 0xfedcba98;
-        irt::u64 d = 0xfedcba9876543210;
-
-        expect(!!f->write(a));
-        expect(!!f->write(b));
-        expect(!!f->write(c));
-        expect(!!f->write(d));
-
-        expect(eq(f->data.size(), 256u));
-        expect(eq(f->data.capacity(), 256u));
-        expect(eq(f->tell(), 8 + 4 + 2 + 1));
-        expect(eq(f->length(), 256));
-
-        f->rewind();
-
-        expect(f->tell() == 0);
-#endif
-    };
-
-    "random-philox-64"_test = [] {
-        constexpr irt::u64 seed   = 0x1234567890123456;
-        constexpr irt::u64 mdl_id = 0xffffffff00000001;
-        constexpr irt::u64 step   = 0;
-
-        irt::philox_64                            rng{ seed, mdl_id, step };
-        std::uniform_real_distribution<irt::real> dist{ 0.0, 1.0 };
-
-        auto sum = 0.0;
-        for (irt::u32 i = 0; i < 1000; ++i) {
-            const auto v = dist(rng);
-            expect(ge(v, 0.0));
-            expect(lt(v, 1.0));
-
-            sum += v;
-        }
-
-        expect(approx(sum / 1000.0, 0.5, 1.e-1));
-    };
-
-    "random-philox-64-view"_test = [] {
-        std::array<irt::u64, 6> param{
-            0x1234567890123456, // seed
-            0xffffffff00000001, // ordinal(model_id)
-            0u,                 // step
-            0u,                 // index
-            0u,                 // first random number
-            0u,                 // second random number
-        };
-
-        irt::philox_64_view                       rng(param);
-        std::uniform_real_distribution<irt::real> dist{ 0.0, 1.0 };
-
-        auto sum = 0.0;
-        for (irt::u32 i = 0; i < 1000; ++i) {
-            const auto v = dist(rng);
-            expect(ge(v, 0.0));
-            expect(lt(v, 1.0));
-
-            sum += v;
-        }
-
-        expect(approx(sum / 1000.0, 0.5, 1.e-1));
-    };
-
-    "random-philo-64-compare"_test = [] {
-        constexpr irt::u64 seed   = 0x1234567890123456;
-        constexpr irt::u64 mdl_id = 0xffffffff00000001;
-        constexpr irt::u64 step   = 0;
-
-        irt::real sum_1 = 0.0;
-        irt::real sum_2 = 0.0;
-
-        {
-            irt::philox_64                            rng{ seed, mdl_id, step };
-            std::uniform_real_distribution<irt::real> dist{ 0.0, 1.0 };
-
-            for (irt::u32 i = 0; i < 1000; ++i)
-                sum_1 += dist(rng);
-        }
-
-        {
-            std::array<irt::u64, 6> param{
-                seed, mdl_id, step, 0u, 0u, 0u,
-            };
-
-            irt::philox_64_view                       rng(param);
-            std::uniform_real_distribution<irt::real> dist{ 0.0, 1.0 };
-
-            for (irt::u32 i = 0; i < 1000; ++i)
-                sum_2 += dist(rng);
-        }
-
-        expect(eq(sum_1, sum_2));
-    };
-
     "id_data_array"_test = [] {
         enum class my_id : irt::u32;
 
-        using my_data =
-          irt::id_data_array<void,
-                             my_id,
-                             irt::allocator<irt::new_delete_memory_resource>,
-                             int,
-                             double>;
+        using my_data = irt::id_data_array<
+          void, my_id, irt::allocator<irt::new_delete_memory_resource>, int,
+          double>;
 
         my_data m1;
         expect(fatal(m1.grow<2, 1>(5)));
@@ -2472,5 +3897,21 @@ int main()
         expect(eq(op_move_copy_pj.parameters.size(), pj.parameters.size()));
         expect(op_move_copy_pj.parameters.exists(pj_id_1));
         expect(op_move_copy_pj.parameters.exists(pj_id_2));
+    };
+
+    "write-test-simulation-reports-success"_test = [] {
+        irt::simulation sim;
+        expect(fatal(sim.can_alloc(1)));
+        sim.alloc<irt::counter>();
+
+        auto* os = std::tmpfile();
+        expect(fatal(os != nullptr));
+
+        expect(eq(
+          irt::ordinal(irt::write_test_simulation(
+            os, "t", sim, 0.0, 1.0, irt::write_test_simulation_options::none)),
+          irt::ordinal(irt::write_test_simulation_result::success)));
+
+        std::fclose(os);
     };
 }

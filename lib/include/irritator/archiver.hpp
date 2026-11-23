@@ -9,142 +9,112 @@
 #include <irritator/file.hpp>
 #include <irritator/modeling.hpp>
 
+#include <span>
+#include <string_view>
+
 namespace irt {
 
-class json_dearchiver
-{
-private:
-    vector<char> buffer;
-    vector<i32>  stack;
+enum class json_pretty_print : u8 {
+    off,
+    indent_2,
+    /// Like @c indent_2 with the simple arrays on one line.
+    indent_2_one_line_array
+};
 
-    table<u64, u64>                            model_mapping;
-    table<u64, external_source_definition::id> srcs_mapping;
-
-    struct impl;
-
-public:
-    json_dearchiver() noexcept = default;
-
-    status set_buffer(const u32 buffer_size) noexcept;
-
-    //! Load a component structure from a json file.
-    status operator()(const file_access& files,
+/**
+ * Reads the component @c compo_id from a json @c .irt file.
+ *
+ * On error, the component is left @c unreadable if the json is malformed and
+ * @c pending otherwise, for example when it depends on a component not read
+ * yet.
+ *
+ * @param path Only used in the log messages.
+ */
+status load_component(const file_access& files,
                       component_access&  ids,
-                      std::string_view   path,
-                      const component_id compo_id,
-                      component&         compo,
-                      file&              io) noexcept;
+                      component_id       compo_id,
+                      file&              io,
+                      std::string_view   path = {}) noexcept;
 
-    //! Load a project from a project json file.
-    status operator()(project&                pj,
-                      const file_access&      files,
-                      const component_access& ids,
-                      std::string_view        path,
-                      file&                   io) noexcept;
+status load_component(const file_access&    files,
+                      component_access&     ids,
+                      component_id          compo_id,
+                      std::span<const char> json) noexcept;
 
-    //! Load a component structure from a json file.
-    status operator()(const file_access& files,
-                      component_access&  ids,
-                      const component_id compo_id,
-                      component&         compo,
-                      std::span<char>    io) noexcept;
+/**
+ * Reads a project from a json @c .pirt file. The project is cleared first.
+ *
+ * @param path Only used in the log messages.
+ */
+status load_project(project&                pj,
+                    const file_access&      files,
+                    const component_access& ids,
+                    file&                   io,
+                    std::string_view        path = {}) noexcept;
 
-    //! Load a project from a project json file.
-    status operator()(project&                pj,
-                      const file_access&      files,
-                      const component_access& ids,
-                      std::span<char>         io) noexcept;
+status load_project(project&                pj,
+                    const file_access&      files,
+                    const component_access& ids,
+                    std::span<const char>   json) noexcept;
 
-    void destroy() noexcept;
-    void clear() noexcept;
-};
+status save_component(
+  const file_access&      files,
+  const component_access& ids,
+  component_id            compo_id,
+  file&                   io,
+  json_pretty_print       print = json_pretty_print::off) noexcept;
 
-class json_archiver
-{
-private:
-    vector<char> buffer;
+expected<vector<char>> save_component(
+  const file_access&      files,
+  const component_access& ids,
+  component_id            compo_id,
+  json_pretty_print       print = json_pretty_print::off) noexcept;
 
-    table<u64, u64>                            model_mapping;
-    table<u64, external_source_definition::id> srcs_mapping;
-    table<u64, hsm_id>                         sim_hsms_mapping;
+status save_project(const project&          pj,
+                    const file_access&      files,
+                    const component_access& ids,
+                    file&                   io,
+                    json_pretty_print print = json_pretty_print::off) noexcept;
 
-    struct impl;
+expected<vector<char>> save_project(
+  const project&          pj,
+  const file_access&      files,
+  const component_access& ids,
+  json_pretty_print       print = json_pretty_print::off) noexcept;
 
-public:
-    //! Control the json output stream (memory or file) pretty print.
-    enum class print_option : u8 {
-        off,                    //! disable pretty print.
-        indent_2,               //! enable pretty print, use 2 spaces as indent.
-        indent_2_one_line_array //! idem but merge simple array in one line.
-    };
+/**
+ * Writes the journal of the commands applied to the simulation of @c pj
+ * (see @c command_journal) in json. A model with a unique identifier (a
+ * model "configurable" or "observable") is named by its tree node and its
+ * identifier, the others by their identifier in the simulation: a journal is
+ * replayed by a simulation built from the same project.
+ */
+status save_journal(const project&         pj,
+                    const command_journal& journal,
+                    file&                  io,
+                    json_pretty_print print = json_pretty_print::off) noexcept;
 
-    //! Save a component structure into a json file.
-    status operator()(const file_access&      files,
-                      const component_access& ids,
-                      const component_id      compo_id,
-                      file&                   io,
-                      print_option print_options = print_option::off) noexcept;
+expected<vector<char>> save_journal(
+  const project&         pj,
+  const command_journal& journal,
+  json_pretty_print      print = json_pretty_print::off) noexcept;
 
-    //! Save a component structure into a json file.
-    status operator()(const file_access&      files,
-                      const component_access& ids,
-                      const component_id      compo_id,
-                      vector<char>&           out,
-                      print_option print_options = print_option::off) noexcept;
+/**
+ * Reads a journal written by @c save_journal() into @c journal, cleared
+ * first. The names are resolved in @c pj, whose simulation is built (@c
+ * project::simulation_init()): replay it with @c simulation_player::start().
+ *
+ * @return @c project_errc::journal_format_error if the json is not a
+ * journal, @c project_errc::journal_model_error if a name is unknown or if a
+ * constant is not a constant.
+ */
+status load_journal(const project&   pj,
+                    command_journal& journal,
+                    file&            io) noexcept;
 
-    //! Save a project from the current modeling.
-    status operator()(project&                pj,
-                      const file_access&      files,
-                      const component_access& ids,
-                      file&                   io,
-                      print_option print_options = print_option::off) noexcept;
-
-    //! Save a project from the current modeling.
-    status operator()(project&                pj,
-                      const file_access&      files,
-                      const component_access& ids,
-                      vector<char>&           buffer,
-                      print_option print_options = print_option::off) noexcept;
-
-    void destroy() noexcept;
-    void clear() noexcept;
-};
-
-class binary_archiver
-{
-public:
-    enum class error_code : u8 {
-        not_enough_memory = 1,
-        write_error,
-        read_error,
-        format_error,
-        header_error,
-        unknown_model_error,
-        unknown_model_port_error,
-    };
-
-    bool simulation_save(simulation& sim, file& io) noexcept;
-    bool simulation_save(simulation& sim, memory& io) noexcept;
-    bool simulation_load(simulation& sim, file& io) noexcept;
-    bool simulation_load(simulation& sim, memory& io) noexcept;
-
-    void clear_cache() noexcept;
-
-    error_code ec; //!< If main functions returns false, @c ec variable stores
-                   //!< the error code.
-
-private:
-    struct impl; //!< Get access to observation attributes without complex code.
-
-    bool report_error(error_code ec) noexcept;
-    bool report_error(error_code ec) const noexcept;
-
-    table<u32, model_id>              to_models;
-    table<u32, constant_source_id>    to_constant;
-    table<u32, binary_file_source_id> to_binary;
-    table<u32, text_file_source_id>   to_text;
-    table<u32, random_source_id>      to_random;
-};
+status load_journal(const project&        pj,
+                    command_journal&      journal,
+                    std::span<const char> json) noexcept;
 
 } // namespace irt
 
