@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw } from 'lucide-react';
+import type { RunRequest } from '@contracts';
 import { errorText, runSimulation } from '@/lib/api/client';
-import { spatialCells, spatialReading, spatialRequest, spatialTimeline, spatialTrajectories, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
+import { spatialApply, spatialCells, spatialDrafts, spatialReading, spatialRequest, spatialTimeline, spatialTrajectories, type SpatialCell, type SpatialDraft, type SpatialDrafts, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
 import { LogisticTrajectories, logisticSeriesColor } from './logistic-trajectories';
 import styles from './logistic-spatial.module.css';
 
@@ -23,6 +24,26 @@ type Phase =
   | { status: 'error'; message: string };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
 const beginning = { tick: 0, playing: false, started: false };
+const formatParameter = (value: number) => String(value).replace('.', ',');
+const parameterFields = [
+  ['initial', 'Biomasse initiale N₀ (t)'],
+  ['growth', 'Taux de croissance r (mois⁻¹)'],
+  ['capacity', 'Capacité K (t)'],
+] as const;
+
+type Configuration = { request: RunRequest; cells: SpatialCell[] };
+type Validation = { cell: string; message: string; fields?: Partial<Record<keyof SpatialDraft, string>> | undefined };
+
+function nominalConfiguration(): Configuration {
+  const request = spatialRequest();
+  return { request, cells: spatialCells(request) };
+}
+
+function withoutDraft(previous: SpatialDrafts, cell: string): SpatialDrafts {
+  const next = { ...previous };
+  delete next[cell];
+  return next;
+}
 
 function ratioColor(ratio: number | undefined) {
   if (ratio === undefined) return 'unavailable';
@@ -33,9 +54,12 @@ function ratioColor(ratio: number | undefined) {
 }
 
 export function LogisticSpatialExperiment({ active }: { active: boolean }) {
-  const [request] = useState(spatialRequest);
-  const cells = useMemo(() => spatialCells(request), [request]);
+  const [configuration, setConfiguration] = useState(nominalConfiguration);
+  const { request, cells } = configuration;
   const timeline = useMemo(() => spatialTimeline(request), [request]);
+  const [drafts, setDrafts] = useState<SpatialDrafts>({});
+  const [validation, setValidation] = useState<Validation>();
+  const appliedValues = useMemo(() => spatialDrafts(cells), [cells]);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
   const [cursor, setCursor] = useState(beginning);
   const [selected, setSelected] = useState('C02');
@@ -50,7 +74,11 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
   const chartSeries = useMemo(() => Array.from(byId.values()).filter(({ cell }) =>
     cell.id === selected || compared.includes(cell.id)), [byId, selected, compared]);
   const selectedCell = cells.find(cell => cell.id === selected)!;
+  const draft = drafts[selected] ?? appliedValues[selected]!;
+  const selectedValidation = validation?.cell === selected ? validation : undefined;
+  const pending = cells.filter(cell => drafts[cell.id]).map(cell => cell.id);
   const selectedTrajectory = byId.get(selected);
+  const simulated = selectedTrajectory?.cell;
   const selectedReading = selectedTrajectory ? spatialReading(selectedTrajectory, time) : null;
 
   useEffect(() => {
@@ -66,19 +94,52 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
     return () => window.clearInterval(timer);
   }, [active, ready, cursor.playing, lastTick]);
 
-  async function run() {
+  async function run(next: Configuration, appliedCell?: string) {
     if (running.current) return;
     running.current = true;
     setCursor(beginning);
     setPhase({ status: 'running' });
     try {
-      const result = await runSimulation(request);
-      setPhase({ status: 'completed', trajectories: spatialTrajectories(request, result) });
+      const result = await runSimulation(next.request);
+      const trajectories = spatialTrajectories(next.request, result, next.cells);
+      setConfiguration(next);
+      if (appliedCell) setDrafts(previous => withoutDraft(previous, appliedCell));
+      setPhase({ status: 'completed', trajectories });
     } catch (cause) {
       setPhase({ status: 'error', message: errorText(cause) });
     } finally {
       running.current = false;
     }
+  }
+
+  function edit(field: keyof SpatialDraft, value: string) {
+    const base = appliedValues[selected]!;
+    setDrafts(previous => {
+      const next = { ...(previous[selected] ?? base), [field]: value };
+      return parameterFields.every(([key]) => next[key] === base[key])
+        ? withoutDraft(previous, selected) : { ...previous, [selected]: next };
+    });
+    setValidation(previous => previous?.cell === selected ? undefined : previous);
+  }
+
+  function apply() {
+    if (running.current) return;
+    const result = spatialApply(request, { [selected]: draft }, cells);
+    if (!result.ok) {
+      setValidation({ cell: selected, fields: result.errors[selected], message: result.message });
+      return;
+    }
+    setValidation(undefined);
+    void run({ request: result.request, cells: result.cells }, selected);
+  }
+
+  function restore() {
+    if (running.current) return;
+    const nominal = nominalConfiguration();
+    setConfiguration(nominal);
+    setDrafts({});
+    setValidation(undefined);
+    void run(nominal);
   }
 
   function togglePlayback() {
@@ -95,13 +156,21 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
       </div>
       <div className={styles.runActions}>
         <span className={styles.status} data-phase={phase.status} role="status">{statusLabel[phase.status]}</span>
-        <button className="primary" onClick={() => void run()} disabled={phase.status === 'running'}>
+        <button onClick={restore} disabled={phase.status === 'running'}>
+          <RotateCcw size={15} aria-hidden="true" /> Restaurer les paramètres initiaux
+        </button>
+        <button className="primary" onClick={() => void run(configuration)} disabled={phase.status === 'running'}
+          title="Exécuter la configuration appliquée">
           <Play size={16} aria-hidden="true" /> Lancer la simulation
         </button>
       </div>
     </header>
 
     {phase.status === 'error' && <p className={styles.error} role="alert">Simulation impossible · {phase.message}</p>}
+    {pending.length > 0 && <p className={styles.pending} data-pending-cells={pending.join(',')} aria-live="polite">
+      <strong>Modifications non simulées : {pending.join(', ')}.</strong>
+      {ready && <> La grille et les courbes montrent le dernier calcul.</>}
+    </p>}
 
     <section className={styles.timeline} aria-label="Lecture temporelle">
       <div className={styles.playActions}>
@@ -143,6 +212,7 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
             return <button className={styles.tile} key={cell.id} aria-label={cell.id} aria-pressed={selected === cell.id}
               aria-describedby={'logistic-spatial-value-' + cell.id}
               data-cell={cell.id} data-tone={ratioColor(reading?.ratio)} data-biomass={reading?.value}
+              data-pending={drafts[cell.id] ? 'true' : undefined}
               data-observed-time={reading?.time} data-source={reading?.source}
               title={reading ? reading.value + ' t' : undefined} onClick={() => setSelected(cell.id)}>
               <span className={styles.tileTop}><strong>{cell.id}</strong>
@@ -166,11 +236,34 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
           <h2>Cellule {selectedCell.id}</h2>
           {selectedTrajectory?.constant && <span className={styles.equilibriumLabel}>Équilibre dédupliqué</span>}
         </div>
-        <dl className={styles.parameters}>
-          <div><dt>Biomasse initiale N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
-          <div><dt>Taux de croissance r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
-          <div><dt>Capacité K</dt><dd>{biomass.format(selectedCell.capacity)} t</dd></div>
-        </dl>
+        <form className={styles.parameterEditor} aria-label={'Modifier les paramètres de ' + selectedCell.id}
+          onSubmit={event => { event.preventDefault(); apply(); }}>
+          <div className={styles.parameterFields}>
+            {parameterFields.map(([field, label]) => {
+              const inputId = `logistic-${selected}-${field}`;
+              const message = selectedValidation?.fields?.[field];
+              return <div key={field}>
+                <label htmlFor={inputId}>{label}</label>
+                <input id={inputId} type="text" inputMode="decimal" autoComplete="off" spellCheck={false}
+                  value={draft[field]} disabled={phase.status === 'running'}
+                  aria-invalid={message ? true : undefined} aria-describedby={message ? `${inputId}-error` : undefined}
+                  onChange={event => edit(field, event.currentTarget.value)} />
+                {message && <small className={styles.fieldError} id={`${inputId}-error`}>{message}</small>}
+              </div>;
+            })}
+          </div>
+          {selectedValidation && <p className={styles.fieldError} role="alert">{selectedValidation.message}</p>}
+          <button type="submit" className="primary" disabled={phase.status === 'running'}>Appliquer et simuler</button>
+        </form>
+        {simulated && <>
+          <h3 className={styles.simulatedHeading}>Paramètres simulés</h3>
+          <dl className={styles.parameters} aria-label="Paramètres simulés" data-simulated-cell={simulated.id}
+            data-initial={simulated.initial} data-growth={simulated.growth} data-capacity={simulated.capacity}>
+            <div><dt>N₀</dt><dd>{formatParameter(simulated.initial)} t</dd></div>
+            <div><dt>r</dt><dd>{formatParameter(simulated.growth)} mois⁻¹</dd></div>
+            <div><dt>K</dt><dd>{formatParameter(simulated.capacity)} t</dd></div>
+          </dl>
+        </>}
         {selectedTrajectory?.constant && <p className={styles.coverage}>
           Équilibre dédupliqué par le moteur. La valeur observée à {month.format(selectedTrajectory.start)} mois est maintenue jusqu’à {month.format(selectedTrajectory.end)} mois.
         </p>}
@@ -190,7 +283,8 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
               </li>;
             })}
           </ul>
-        </> : <div className={styles.chartMessage}>Lancez la simulation pour consulter les trajectoires.</div>}
+        </> : <div className={styles.chartMessage}>{phase.status === 'running'
+          ? 'Calcul natif en cours.' : 'Lancez la simulation pour consulter les trajectoires.'}</div>}
 
         <fieldset className={styles.compare}>
           <legend>Comparer les trajectoires</legend>

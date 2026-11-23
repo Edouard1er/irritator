@@ -1,4 +1,4 @@
-import { validateRequest, type RunRequest } from '@contracts';
+import { catalog, validateRequest, type RunRequest } from '@contracts';
 import type { HttpResult } from '@/lib/api/client';
 import fixture from '../../../../examples/logistic-nine-cells-v1.json';
 
@@ -29,6 +29,47 @@ export type SpatialReading = SpatialSample & {
   source: 'native' | 'equilibrium';
 };
 
+export type SpatialDraft = { initial: string; growth: string; capacity: string };
+export type SpatialDrafts = Record<string, SpatialDraft>;
+export type SpatialDraftErrors = Record<string, Partial<Record<keyof SpatialDraft, string>>>;
+
+type ApplyResult =
+  | { ok: true; request: RunRequest; cells: SpatialCell[] }
+  | { ok: false; errors: SpatialDraftErrors; message: string };
+
+const atomParameters = {
+  initial: { type: 'qss3_integrator', parameter: 'X', rangeError: 'La biomasse initiale doit être positive ou nulle.' },
+  growth: { type: 'constant', parameter: 'value', rangeError: 'Le taux de croissance doit être strictement positif.' },
+  capacity: { type: 'qss3_wsum_2', parameter: 'coeff-1', rangeError: 'La capacité doit être strictement positive.' },
+};
+
+function parseParameter(raw: string, field: keyof SpatialDraft): { value: number; encoded: number } | { error: string } {
+  const text = raw.trim();
+  if (!text) return { error: 'Saisissez une valeur.' };
+  if (!/^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[+-]?\d+)?$/i.test(text)) {
+    return { error: 'Saisissez un nombre fini.' };
+  }
+
+  const parsed = Number(text.replace(',', '.'));
+  if (!Number.isFinite(parsed)) return { error: 'Saisissez un nombre fini.' };
+  const value = parsed === 0 ? 0 : parsed;
+  if (value === 0 && /[1-9]/.test(text.split(/e/i, 1)[0]!)) {
+    return { error: 'La valeur est trop proche de zéro pour être représentée.' };
+  }
+
+  const { type, parameter, rangeError } = atomParameters[field];
+  if (value < 0 || (field !== 'initial' && value === 0)) return { error: rangeError };
+  const encoded = field === 'capacity' ? -1 / value : value;
+  if (!Number.isFinite(encoded)) return { error: 'Le coefficient −1/K ne peut pas être représenté.' };
+  const bounds = catalog.components.find(component => component.type === type)?.parameters[parameter];
+  if (!bounds || encoded < bounds.minimum || encoded > bounds.maximum) {
+    return { error: field === 'capacity'
+      ? 'Le coefficient −1/K dépasse les limites du catalogue Irritator.'
+      : 'La valeur dépasse les limites du catalogue Irritator.' };
+  }
+  return { value, encoded };
+}
+
 // The runner's grid accumulates the sampling interval in floating point.
 function sameTime(a: number, b: number): boolean {
   return Math.abs(a - b) <= 32 * Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
@@ -57,6 +98,55 @@ export function spatialCells(request: RunRequest): SpatialCell[] {
   });
 }
 
+export function spatialDrafts(cells: readonly SpatialCell[]): SpatialDrafts {
+  return Object.fromEntries(cells.map(({ id, initial, growth, capacity }) => [id, {
+    initial: String(initial), growth: String(growth), capacity: String(capacity),
+  }]));
+}
+
+export function spatialApply(base: RunRequest, drafts: SpatialDrafts, baseCells: readonly SpatialCell[] = spatialCells(base)): ApplyResult {
+  const errors: SpatialDraftErrors = {};
+  const patches = new Map<string, { parameter: string; value: number }>();
+  const cells = baseCells.map(cell => {
+    const draft = drafts[cell.id];
+    if (!draft) return cell;
+
+    const initial = parseParameter(draft.initial, 'initial');
+    const growth = parseParameter(draft.growth, 'growth');
+    const capacity = parseParameter(draft.capacity, 'capacity');
+    if ('error' in initial || 'error' in growth || 'error' in capacity) {
+      errors[cell.id] = {
+        ...('error' in initial ? { initial: initial.error } : {}),
+        ...('error' in growth ? { growth: growth.error } : {}),
+        ...('error' in capacity ? { capacity: capacity.error } : {}),
+      };
+      return cell;
+    }
+
+    patches.set(cell.component, { parameter: 'X', value: initial.encoded });
+    patches.set(`${cell.id}-r`, { parameter: 'value', value: growth.encoded });
+    patches.set(`${cell.id}-sum`, { parameter: 'coeff-1', value: capacity.encoded });
+    return { ...cell, initial: initial.value, growth: growth.value, capacity: capacity.value };
+  });
+
+  if (Object.keys(errors).length) {
+    return { ok: false, errors, message: 'Corrigez les paramètres signalés avant de lancer la simulation.' };
+  }
+
+  const request = structuredClone(base);
+  for (const atom of request.model.components) {
+    const patch = patches.get(atom.id);
+    if (patch) atom.parameters[patch.parameter] = patch.value;
+  }
+  try {
+    validateRequest(request);
+  } catch (error) {
+    const detail = error instanceof Error ? ` ${error.message}` : '';
+    return { ok: false, errors, message: `Le contrat Irritator a rejeté le modèle modifié.${detail}` };
+  }
+  return { ok: true, request, cells };
+}
+
 export function spatialTimeline(request: RunRequest): number[] {
   const { start, end } = request.simulation;
   const interval = request.model.observations[0]?.samplingInterval;
@@ -67,10 +157,10 @@ export function spatialTimeline(request: RunRequest): number[] {
   return [...ticks.filter(time => time < end && !sameTime(time, end)), end];
 }
 
-export function spatialTrajectories(request: RunRequest, result: HttpResult): SpatialTrajectory[] {
+export function spatialTrajectories(request: RunRequest, result: HttpResult, cells: readonly SpatialCell[] = spatialCells(request)): SpatialTrajectory[] {
   const { start, finalTime: end } = result.simulation;
   const byComponent = new Map(result.observations.map(observation => [observation.component, observation.samples]));
-  return spatialCells(request).map(cell => {
+  return cells.map(cell => {
     const samples = byComponent.get(cell.component) ?? [];
     const first = samples[0];
     // At a known equilibrium, the native observer omits repeated identical values.

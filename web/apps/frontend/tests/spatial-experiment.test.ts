@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpResult } from '@/lib/api/client';
 import {
-  spatialCells, spatialChartSamples, spatialReading, spatialRequest, spatialTimeline, spatialTrajectories,
+  spatialApply, spatialCells, spatialChartSamples, spatialDrafts, spatialReading, spatialRequest, spatialTimeline,
+  spatialTrajectories, type SpatialDraft,
 } from '@/lib/simulation/spatial-experiment';
 
 const nativeSamples = [
@@ -85,5 +86,82 @@ describe('Expérience logistique spatiale', () => {
       expect(spatialReading(steady, 20)).toBeNull();
       expect(spatialChartSamples(steady)).toBe(steady.samples);
     }
+  });
+});
+
+describe('Paramètres individuels de l’expérience logistique', () => {
+  it('applique les trois valeurs à la seule cellule choisie sans modifier la requête d’origine', () => {
+    const base = spatialRequest();
+    const cells = spatialCells(base);
+    expect(spatialDrafts(cells).C10).toEqual({ initial: '300', growth: '0.35', capacity: '300' });
+    const applied = spatialApply(base, { C01: { initial: '90,5', growth: ' 2.7e-1 ', capacity: '260,4' } }, cells);
+    if (!applied.ok) throw new Error(applied.message);
+
+    const expected = structuredClone(base);
+    expected.model.components.find(atom => atom.id === 'C01-N')!.parameters.X = 90.5;
+    expected.model.components.find(atom => atom.id === 'C01-r')!.parameters.value = 0.27;
+    expected.model.components.find(atom => atom.id === 'C01-sum')!.parameters['coeff-1'] = -1 / 260.4;
+    expect(applied.request).toEqual(expected);
+    expect(base).toEqual(spatialRequest());
+    expect(applied.cells.find(cell => cell.id === 'C01')).toMatchObject({ initial: 90.5, growth: 0.27, capacity: 260.4 });
+    expect(applied.cells[0]).toBe(cells[0]);
+  });
+
+  it('conserve la capacité saisie malgré la conversion du coefficient puis les modifications d’une autre cellule', () => {
+    const first = spatialApply(spatialRequest(), { C10: { initial: '49', growth: ',35', capacity: '49' } });
+    if (!first.ok) throw new Error(first.message);
+    expect(spatialCells(first.request).find(cell => cell.id === 'C10')!.capacity).toBe(49.00000000000001);
+    const second = spatialApply(first.request, { C01: { initial: '60', growth: '0.2', capacity: '240' } }, first.cells);
+    if (!second.ok) throw new Error(second.message);
+    expect(spatialDrafts(second.cells).C10!.capacity).toBe('49');
+
+    const constant = nativeResult([{ component: 'C10-N', samplingInterval: 0.1, samples: [{ time: 0, value: 49 }] }]);
+    const steady = spatialTrajectories(second.request, constant, second.cells).find(({ cell }) => cell.id === 'C10')!;
+    expect(spatialReading(steady, 20)).toEqual({ time: 0, value: 49, ratio: 1, source: 'equilibrium' });
+
+    const nativeEnd = 49.00000000000007;
+    const drift = nativeResult([{ component: 'C10-N', samplingInterval: 0.1, samples: [{ time: 0, value: 49 }, { time: 20, value: nativeEnd }] }]);
+    const varying = spatialTrajectories(second.request, drift, second.cells).find(({ cell }) => cell.id === 'C10')!;
+    expect(spatialReading(varying, 10)).toBeNull();
+    expect(spatialReading(varying, 20)).toEqual({ time: 20, value: nativeEnd, ratio: nativeEnd / 49, source: 'native' });
+  });
+
+  it.each<[keyof SpatialDraft, string, RegExp]>([
+    ['initial', '  ', /Saisissez une valeur/],
+    ['initial', '-0,1', /positive ou nulle/],
+    ['growth', '0', /strictement positif/],
+    ['growth', '0x10', /nombre fini/],
+    ['growth', '1e309', /nombre fini/],
+    ['growth', 'Infinity', /nombre fini/],
+    ['initial', '1e-999', /trop proche de zéro/],
+    ['initial', '1e13', /limites du catalogue/],
+    ['growth', '1e13', /limites du catalogue/],
+    ['capacity', '0', /strictement positive/],
+    ['capacity', '-50', /strictement positive/],
+    ['capacity', '5e-324', /coefficient −1\/K ne peut pas être représenté/],
+    ['capacity', '1e-13', /coefficient −1\/K dépasse les limites du catalogue/],
+    ['capacity', '2,5.1', /nombre fini/],
+  ])('refuse %s = %s avec le diagnostic du champ', (field, text, message) => {
+    const base = spatialRequest();
+    const draft = { ...spatialDrafts(spatialCells(base)).C01!, [field]: text };
+    const result = spatialApply(base, { C01: draft });
+    expect(result).toMatchObject({ ok: false, errors: { C01: { [field]: expect.stringMatching(message) } } });
+    expect(result).not.toHaveProperty('request');
+  });
+
+  it('respecte les bornes du catalogue sans plafond artificiel de capacité', () => {
+    const base = spatialRequest();
+    const minimum = spatialApply(base, { C01: { initial: '1e12', growth: '1e12', capacity: '1e-12' } });
+    const large = spatialApply(base, { C00: { initial: '-0', growth: '0.35', capacity: String(Number.MAX_VALUE) } });
+    expect(minimum.ok).toBe(true);
+    expect(large.ok).toBe(true);
+    if (large.ok) expect(large.cells[0]).toMatchObject({ initial: 0, capacity: Number.MAX_VALUE });
+  });
+
+  it('soumet la requête reconstruite à la validation du contrat partagé', () => {
+    const base = spatialRequest();
+    base.model.components.push(structuredClone(base.model.components[0]!));
+    const result = spatialApply(base, {});
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining('Le contrat Irritator a rejeté') });
   });
 });

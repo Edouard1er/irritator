@@ -35,7 +35,7 @@
   font-size: 14px;
 }
 
-.runActions { flex-shrink: 0; padding-top: 2px; }
+.runActions { flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; padding-top: 2px; }
 .runActions button, .playActions button { min-height: 42px; }
 
 .status {
@@ -67,6 +67,16 @@
   background: #fff2f2;
   color: #842f39;
   overflow-wrap: anywhere;
+}
+
+.pending {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid #ead5a4;
+  border-radius: 10px;
+  background: #fff7e6;
+  color: #654511;
+  line-height: 1.4;
 }
 
 .timeline {
@@ -135,6 +145,16 @@
 .tile:focus-visible { outline: 3px solid #9e5d18; outline-offset: 2px; }
 .tileTop { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 2px 4px; }
 .tileTop strong { font-size: 13px; }
+.tile[data-pending="true"] .tileTop strong::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  vertical-align: 2px;
+  border-radius: 50%;
+  background: #a76918;
+}
 .tileTop > span { color: #34545b; font-size: 11px; }
 .tileValue { font-size: clamp(15px, 1.55vw, 23px); line-height: 1.22; font-weight: 700; letter-spacing: -0.045em; overflow-wrap: anywhere; }
 .tileValue small { font-size: 12px; letter-spacing: 0; }
@@ -160,6 +180,30 @@
 .legend i, .series i { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 10px; }
 .legend i { background: var(--tile-fill); border: 1px solid var(--tile-border); }
 .equilibriumLabel { font-weight: 600; }
+.parameterEditor {
+  display: grid;
+  gap: 9px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.parameterEditor > button { justify-self: end; min-height: 38px; }
+.parameterFields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.parameterFields > div {
+  display: grid;
+  align-content: start;
+  grid-template-rows: minmax(2.5em, auto) auto auto;
+  gap: 4px;
+  font-size: 12px;
+}
+.parameterFields label { align-self: end; color: var(--muted); line-height: 1.25; }
+.parameterFields input { width: 100%; min-height: 36px; font-size: 14px; }
+.parameterFields input[aria-invalid="true"] { border-color: #a43f46; }
+.fieldError { color: #842f39; font-size: 12px; line-height: 1.4; }
+.simulatedHeading { margin: 10px 0 5px; color: var(--muted); }
 .parameters {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -168,7 +212,7 @@
 }
 .parameters > div { background: #f4f8f7; padding: 8px 10px; border-radius: 6px; }
 .parameters dt { font-size: 11px; line-height: 1.3; color: var(--muted); margin-bottom: 3px; }
-.parameters dd { margin: 0; font-size: 14px; font-weight: 700; }
+.parameters dd { margin: 0; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
 .coverage { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .chart { margin-top: 8px; min-width: 0; }
 .plot { width: 100%; height: clamp(260px, 28vw, 310px); }
@@ -200,6 +244,8 @@
 .compare label:has(input:disabled) { cursor: default; }
 
 @media (max-width: 860px) {
+  .heading { flex-direction: column; gap: 10px; }
+  .runActions { justify-content: flex-start; }
   .panels { grid-template-columns: minmax(0, 1fr); }
   .tileValue { font-size: 22px; }
 }
