@@ -1,5 +1,15 @@
 export const lakeRows = 6;
 export const lakeColumns = 3;
+export const lakeResolutions = [
+  { rows: lakeRows, columns: lakeColumns },
+  { rows: 12, columns: 6 },
+  { rows: 18, columns: 9 },
+  { rows: 24, columns: 12 },
+  { rows: 36, columns: 18 },
+  { rows: 48, columns: 24 },
+] as const;
+export type LakeResolution = typeof lakeResolutions[number];
+export const lakeResolutionId = ({ rows, columns }: { rows: number; columns: number }) => `${rows}x${columns}`;
 
 type Point = readonly [number, number];
 type Ring = readonly Point[];
@@ -12,7 +22,7 @@ export type LakeCell = Bounds & {
   wetFraction: number;
 };
 
-export type LakeMesh = {
+export type LakeMesh = LakeResolution & {
   width: number;
   height: number;
   rings: Ring[];
@@ -21,7 +31,7 @@ export type LakeMesh = {
   discardedWetFraction: number;
 };
 
-export function lakeMeshFromGeoJson(data: unknown): LakeMesh {
+export function lakeMeshFromGeoJson(data: unknown, resolution: LakeResolution = lakeResolutions[0]): LakeMesh {
   const collection = data as { type?: unknown; features?: { geometry?: { type?: unknown; coordinates?: unknown } }[] } | null;
   const geometry = Array.isArray(collection?.features) && collection.features.length === 1
     ? collection.features[0]?.geometry : undefined;
@@ -45,7 +55,7 @@ export function lakeMeshFromGeoJson(data: unknown): LakeMesh {
   const width = (east - west) * longitudeScale / (north - south);
   const projected = rings.map(ring => ring.slice(0, -1).map(([longitude, latitude]): Point =>
     [(longitude - west) * longitudeScale / (north - south), (north - latitude) / (north - south)]));
-  return clipLakeMesh(projected, width, 1);
+  return clipLakeMesh(projected, width, 1, resolution);
 }
 
 // Half-plane clipping preserves the signed area integral, including when a
@@ -83,29 +93,33 @@ function clippedArea(ring: Ring, { x, y, width, height }: Bounds): number {
 }
 
 /** Rings are open in display coordinates, with the exterior first. */
-export function clipLakeMesh(rings: Ring[], width: number, height: number): LakeMesh {
+export function clipLakeMesh(rings: Ring[], width: number, height: number, resolution: LakeResolution = lakeResolutions[0]): LakeMesh {
   const [outer, ...holes] = rings;
   if (!outer || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error('L’emprise du contour HydroLAKES est invalide.');
   }
 
+  const { rows, columns } = resolution;
   const cells: LakeCell[] = [];
   // Unit-square shoelace sums: allow roundoff proportional to the number of
   // input vertices. Positive residuals under this threshold are tracked.
   const fractionTolerance = 64 * Number.EPSILON * rings.reduce((count, ring) => count + ring.length, 0);
   let discardedWetFraction = 0;
-  for (let row = 0; row < lakeRows; row++) {
-    for (let column = 0; column < lakeColumns; column++) {
-      const bounds = { x: column * width / lakeColumns, y: row * height / lakeRows,
-        width: width / lakeColumns, height: height / lakeRows };
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const bounds = { x: column * width / columns, y: row * height / rows,
+        width: width / columns, height: height / rows };
       const fraction = holes.reduce((area, hole) => area - clippedArea(hole, bounds), clippedArea(outer, bounds));
       if (fraction < -fractionTolerance || fraction > 1 + fractionTolerance) {
         throw new Error('La fraction humide calculée est hors limites.');
       }
       if (fraction <= fractionTolerance) discardedWetFraction += Math.max(0, fraction);
-      else cells.push({ ...bounds, id: `C${row}${column}`, row, column, wetFraction: Math.min(1, fraction) });
+      else {
+        const id = rows === lakeRows ? `C${row}${column}` : `C${row}_${column}`;
+        cells.push({ ...bounds, id, row, column, wetFraction: Math.min(1, fraction) });
+      }
     }
   }
   if (!cells.length) throw new Error('Le contour HydroLAKES ne contient aucune cellule humide mesurable.');
-  return { width, height, rings, cells, fractionTolerance, discardedWetFraction };
+  return { ...resolution, width, height, rings, cells, fractionTolerance, discardedWetFraction };
 }

@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
@@ -8,6 +8,7 @@ import type { RunRequest, RunResult } from '@contracts';
 const experiment = 'Expérience logistique spatiale';
 const fixture: RunRequest = JSON.parse(readFileSync(new URL('../../../../examples/logistic-nine-cells-v1.json', import.meta.url), 'utf8'));
 const evidence = process.env.IRRITATOR_LOGISTIC_BROWSER_EVIDENCE;
+const refinementEvidence = process.env.IRRITATOR_LAKE_REFINEMENT_EVIDENCE;
 const formatBiomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
 const isSimulation = (request: { method(): string; url(): string }) =>
   request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/simulations/run';
@@ -16,7 +17,10 @@ async function openExperiment(page: Page) {
   await page.goto('/');
   const levelOne = page.getByRole('button', { name: 'Niveau 1 — Atelier actuel', exact: true });
   await expect(levelOne).toBeVisible();
+  // Stage the editors' startup handshakes on the shared native process pool.
+  await expect(page.getByRole('button', { name: 'Moteur connecté' })).toBeVisible();
   await page.getByRole('button', { name: 'Niveau 2 — Lac de Guiers', exact: true }).click();
+  await expect(page.locator('#level-two .engine-status')).toHaveText('Moteur connecté');
   await page.getByRole('button', { name: experiment, exact: true }).click();
   const panel = page.getByRole('region', { name: experiment, exact: true });
   await expect(panel).toBeVisible();
@@ -455,7 +459,6 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
   await page.setViewportSize({ width: 1440, height: 1240 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const panel = await openExperiment(page);
-  await page.waitForLoadState('networkidle');
   const mode = panel.getByRole('combobox', { name: 'Mode de l’expérience' });
   await mode.selectOption('lake');
   const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
@@ -521,7 +524,7 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
   const details = panel.getByRole('region', { name: 'Paramètres de C11', exact: true });
   await expect(details).toContainText('Fraction humide');
   await expect(details).toContainText('65,066');
-  await expect(details).toContainText('Surface fictive');
+  await expect(details).toContainText('Surface humide');
   await expect(details).toContainText('Biomasse initiale');
   await expect(details).toContainText('0,35 mois⁻¹');
   await expect(details).toContainText('Capacité de charge');
@@ -580,4 +583,144 @@ test('le contour peut être rechargé après une erreur sans affecter les autres
   await panel.getByRole('button', { name: 'Recharger le contour' }).click();
   await expect(panel.getByRole('group', { name: 'Grille humide du lac de Guiers' }).getByRole('button')).toHaveCount(13);
   await expect(panel.getByRole('alert')).toHaveCount(0);
+});
+
+test('les six résolutions utilisent leurs lots natifs et publient la trace complète', async ({ page }) => {
+  test.setTimeout(240000);
+  await page.setViewportSize({ width: 1440, height: 1600 });
+  const panel = await openExperiment(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('lake');
+  const resolution = panel.getByRole('combobox', { name: 'Résolution du lac' });
+  const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
+  const responses: Response[] = [];
+  page.on('response', response => {
+    if (isSimulation(response.request())) responses.push(response);
+  });
+  if (refinementEvidence) await mkdir(refinementEvidence, { recursive: true });
+
+  for (const [size, wetCells, batchCount] of [
+    ['6x3', 13, 1], ['12x6', 35, 2], ['18x9', 65, 4], ['24x12', 101, 6], ['36x18', 184, 11], ['48x24', 296, 17],
+  ] as const) {
+    await resolution.selectOption(size);
+    await expect(grid.getByRole('button')).toHaveCount(wetCells);
+    await expect(panel.getByLabel('Domaine de la grille')).toContainText('300 km²');
+    const offset = responses.length;
+    await panel.getByRole('button', { name: 'Lancer la simulation', exact: true }).click();
+    const outcome = panel.locator('[data-phase="completed"], [data-phase="error"]');
+    await expect(outcome).toBeVisible({ timeout: 60000 });
+    expect(await outcome.getAttribute('data-phase'), (await panel.getByRole('alert').allTextContents()).join('\n')).toBe('completed');
+    const batches = [];
+    for (const response of responses.slice(offset)) {
+      if (response.status() === 503) {
+        expect((await response.json()).error.code).toBe('ENGINE_BUSY');
+        continue;
+      }
+      expect(response.status()).toBe(200);
+      const { runId, ...result } = await response.json() as RunResult & { runId: string };
+      expect(runId).toBeTruthy();
+      batches.push({ result, request: response.request().postDataJSON() as RunRequest });
+    }
+    expect(batches).toHaveLength(batchCount);
+    const observedIds: string[] = [];
+    let total = 0;
+    for (const [index, { request, result }] of batches.entries()) {
+      expect(request.model.id).toBe(`logistic-lake-${size}-proportional-${index + 1}`);
+      expect(request.model.components.length).toBeLessThanOrEqual(128);
+      expect(result.simulation.finalTime).toBe(20);
+      expect(result.simulation.runCalls).toBeGreaterThan(0);
+      for (const { component, samples } of result.observations) {
+        expect(samples).toHaveLength(201);
+        observedIds.push(component.slice(0, -2));
+        total += samples[100]!.value;
+      }
+    }
+    expect(await grid.getByRole('button').evaluateAll(elements => elements.map(element => element.getAttribute('data-cell')))).toEqual(observedIds);
+    await slider(panel).fill('10');
+    await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(total));
+    await expect.poll(() => chart(panel).locator('.js-plotly-plot').evaluate(element =>
+      (element as HTMLElement & { data?: { x: number[] }[] }).data?.[0]?.x.length)).toBe(201);
+    if (refinementEvidence) await panel.screenshot({ path: path.join(refinementEvidence, `grille-${size}.png`), animations: 'disabled' });
+  }
+
+  const downloadPromise = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Télécharger la trace JSON' }).click();
+  const download = await downloadPromise;
+  const trace = JSON.parse(readFileSync(await download.path(), 'utf8'));
+  expect(trace).toMatchObject({ wetCells: 296, plannedBatches: 17, points: 296 * 201, parameters: { areaKm2: 300 } });
+  expect(trace.resultBytes).toBeGreaterThan(3_000_000);
+  expect(trace.batches.every((batch: { runId?: string }) => batch.runId)).toBe(true);
+  expect(trace.aggregateErrors.maxRelative).toBeLessThan(2e-6);
+});
+
+test('les pleins écrans partagent instant, sélection et cadrage avec la grille', async ({ page }) => {
+  const panel = await openExperiment(page);
+  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('lake');
+  await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('18x9');
+  await panel.getByRole('button', { name: 'Lancer la simulation', exact: true }).click();
+  await expect(panel.getByText('Terminé', { exact: true })).toBeVisible();
+  const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
+  const selected = await grid.locator('[aria-pressed="true"]').getAttribute('data-cell');
+  await slider(panel).fill('10');
+  const initialView = await grid.getAttribute('viewBox');
+  const currentFullscreen = () => page.evaluate(() => document.fullscreenElement?.querySelector('button')?.getAttribute('aria-label'));
+  const enter = async (name: string) => {
+    await panel.getByRole('button', { name: `Plein écran · ${name}`, exact: true }).click();
+    await expect.poll(currentFullscreen).toBe(`Quitter le plein écran · ${name}`);
+  };
+  const exit = async (name: string) => {
+    await panel.getByRole('button', { name: `Quitter le plein écran · ${name}`, exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  };
+  await enter('Carte du lac');
+  const fullscreenTime = panel.getByRole('slider', { name: 'Temps en plein écran' });
+  await expect(fullscreenTime).toHaveValue('10');
+  await panel.getByRole('button', { name: 'Zoom avant', exact: true }).click();
+  await expect(grid).toHaveAttribute('data-zoom', '1.5');
+  const zoomedView = await grid.getAttribute('viewBox');
+  const box = (await grid.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 35, box.y + box.height / 2 + 40, { steps: 8 });
+  await page.mouse.up();
+  await expect(grid).not.toHaveAttribute('viewBox', zoomedView!);
+  await expect(grid.locator('[aria-pressed="true"]')).toHaveAttribute('data-cell', selected!);
+  await grid.press('ArrowDown');
+  await panel.getByRole('button', { name: 'Zoom arrière', exact: true }).click();
+  await expect(grid).toHaveAttribute('viewBox', initialView!);
+  await panel.getByRole('button', { name: 'Zoom avant', exact: true }).click();
+  await panel.getByRole('button', { name: 'Réinitialiser le cadrage', exact: true }).click();
+  await expect(grid).toHaveAttribute('viewBox', initialView!);
+  const other = grid.locator('[data-cell][aria-pressed="false"]').first();
+  const cellId = (await other.getAttribute('data-cell'))!;
+  await other.press('Enter');
+  await expect(cell(panel, cellId)).toHaveAttribute('aria-pressed', 'true');
+  await fullscreenTime.fill('12');
+  if (refinementEvidence) await page.screenshot({ path: path.join(refinementEvidence, 'plein-ecran-carte.png'), animations: 'disabled' });
+  await panel.getByRole('button', { name: 'Zoom avant', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await expect(slider(panel)).toHaveValue('12');
+  await expect(grid).toHaveAttribute('data-zoom', '1.5');
+  await panel.getByRole('button', { name: 'Réinitialiser le cadrage', exact: true }).click();
+
+  for (const [name, text] of [
+    ['Biomasse par cellule', 'Résolution du lac'], ['Indicateurs du domaine', 'Capacité totale'],
+    ['Détails de la cellule', `Cellule ${cellId}`], ['Trajectoires', 'Comparer les trajectoires'],
+  ] as const) {
+    await enter(name);
+    await expect(fullscreenTime).toHaveValue('12');
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.textContent)).toContain(text);
+    if (name === 'Trajectoires') {
+      await expect(chart(panel)).toHaveAttribute('data-time', '12');
+      await expect(chart(panel)).toHaveAttribute('data-series', cellId);
+      const plot = chart(panel).locator('.js-plotly-plot');
+      await expect.poll(() => plot.evaluate(element =>
+        (element as HTMLElement & { _fullLayout?: { height: number } })._fullLayout?.height ?? 0)).toBeGreaterThan(500);
+      if (refinementEvidence) await page.screenshot({ path: path.join(refinementEvidence, 'plein-ecran-trajectoires.png'), animations: 'disabled' });
+    }
+    await exit(name);
+    await expect(cell(panel, cellId)).toHaveAttribute('aria-pressed', 'true');
+    await expect(slider(panel)).toHaveValue('12');
+  }
 });

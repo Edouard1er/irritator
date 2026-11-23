@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from 'vitest';
-import { clipLakeMesh, lakeColumns, lakeMeshFromGeoJson, lakeRows } from '../../../examples/logistic-lake';
-import { lakeDomain } from '../../../examples/logistic-grid';
+import { clipLakeMesh, lakeColumns, lakeMeshFromGeoJson, lakeResolutions, lakeRows } from '../../../examples/logistic-lake';
+import { lakeDomain, lakeSurfaceAreaKm2 } from '../../../examples/logistic-grid';
 
 const rectangle = (left: number, top: number, right: number, bottom: number) =>
   [[left, top], [right, top], [right, bottom], [left, bottom]] as const;
@@ -36,15 +36,23 @@ test('conserve un fragment résolu et comptabilise le résidu sous le seuil', ()
   const retained = clipLakeMesh([rectangle(0, 0, 1 + 1e-9, 1)], 3, 6);
   expect(retained.cells.map(cell => cell.id)).toEqual(['C00', 'C01']);
   expect(retained.discardedWetFraction).toBe(0);
-  expect(lakeDomain(mesh.cells).cells[0]!.area).toBe(9);
+  expect(lakeDomain(mesh).cells[0]!.area).toBe(lakeSurfaceAreaKm2);
 });
 
-test('conserve les anneaux HydroLAKES et retrouve la surface plane par deux calculs', () => {
+test.each([
+  [lakeResolutions[0], 13], [lakeResolutions[1], 35], [lakeResolutions[2], 65],
+  [lakeResolutions[3], 101], [lakeResolutions[4], 184], [lakeResolutions[5], 296],
+] as const)
+('conserve les anneaux, les surfaces et les cellules de la grille %j', (resolution, expected) => {
   const data = JSON.parse(readFileSync(resolve('data/geography/lac-de-guiers.hydrolakes.geojson'), 'utf8'));
-  const mesh = lakeMeshFromGeoJson(data);
+  const mesh = lakeMeshFromGeoJson(data, resolution);
   expect(mesh.rings).toHaveLength(14);
   expect(mesh.rings.map(ring => ring.length)).toEqual(data.features[0].geometry.coordinates.map((ring: unknown[]) => ring.length - 1));
-  expect(mesh.discardedWetFraction).toBe(0);
+  expect(mesh.discardedWetFraction).toBeLessThan(1e-12);
+  expect(mesh.cells).toHaveLength(expected);
+  expect(new Set(mesh.cells.map(cell => cell.id)).size).toBe(expected);
+  expect(mesh.cells.some(({ wetFraction }) => wetFraction < 1)).toBe(true);
+  expect(clipLakeMesh(mesh.rings, mesh.width, mesh.height, mesh).cells).toEqual(mesh.cells);
   const sum = mesh.cells.reduce((total, cell) => total + cell.wetFraction, 0);
   // Green's theorem using edge trapezoids on the uncut projected rings.
   const areas = mesh.rings.map(ring => Math.abs(ring.reduce((area, [x, y], index) => {
@@ -52,8 +60,11 @@ test('conserve les anneaux HydroLAKES et retrouve la surface plane par deux calc
     return area + (nx - x) * (ny + y) / 2;
   }, 0)));
   const net = areas.slice(1).reduce((area, hole) => area - hole, areas[0]!);
-  expect(Math.abs(sum * mesh.width * mesh.height / (lakeRows * lakeColumns) - net)).toBeLessThan(1e-12);
+  expect(Math.abs(sum * mesh.width * mesh.height / (mesh.rows * mesh.columns) - net)).toBeLessThan(1e-12);
   expect(mesh.cells.every(({ wetFraction }) => wetFraction > 0 && wetFraction <= 1)).toBe(true);
-  const domain = lakeDomain(mesh.cells);
-  for (const cell of domain.cells) expect(Math.abs(cell.area / 9 - cell.wetFraction / sum)).toBeLessThan(1e-12);
+  const domain = lakeDomain(mesh);
+  for (const cell of domain.cells) expect(Math.abs(cell.area / lakeSurfaceAreaKm2 - cell.wetFraction / sum)).toBeLessThan(1e-12);
+  expect(domain.cells.reduce((total, cell) => total + cell.area, 0)).toBeCloseTo(300, 10);
+  expect(domain.cells.reduce((total, cell) => total + cell.initial, 0)).toBeCloseTo(45_000, 8);
+  expect(domain.cells.reduce((total, cell) => total + cell.capacity, 0)).toBeCloseTo(90_000, 8);
 });

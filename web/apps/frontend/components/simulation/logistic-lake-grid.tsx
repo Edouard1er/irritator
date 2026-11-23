@@ -1,14 +1,16 @@
 'use client';
-import { useId, useMemo, type CSSProperties } from 'react';
-import { lakeColumns, lakeRows, spatialReading, type lakeDomain, type LakeMesh, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
+import { useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { Minus, Plus, RotateCcw } from 'lucide-react';
+import { spatialReading, type LakeDomain, type LakeMesh, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
 import styles from './logistic-spatial.module.css';
 
-type LakeDomainCell = ReturnType<typeof lakeDomain>['cells'][number];
 const tonnes = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+const initialView = { zoom: 1, dx: 0, dy: 0 };
+const zoomLevels = [1, 1.5, 2, 3, 4, 6, 8];
 
 export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, select }: {
   mesh: LakeMesh;
-  cells: readonly LakeDomainCell[];
+  cells: readonly LakeDomain['cells'][number][];
   trajectories: ReadonlyMap<string, SpatialTrajectory>;
   time: number;
   selected: string;
@@ -17,11 +19,73 @@ export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, se
   const clip = useId();
   const outline = useMemo(() => mesh.rings.map(ring =>
     'M' + ring.map(point => point.join(',')).join('L') + 'Z').join(''), [mesh]);
+  const [view, setView] = useState(initialView);
+  const gesture = useRef<{ pointer: number; x: number; y: number; scale: number; view: typeof view; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const width = mesh.width + 0.04;
+  const height = mesh.height + 0.04;
+  const zoomIndex = zoomLevels.indexOf(view.zoom);
+  function constrain({ zoom, dx, dy }: typeof view) {
+    const xLimit = width * (1 - 1 / zoom) / 2;
+    const yLimit = height * (1 - 1 / zoom) / 2;
+    return { zoom, dx: Math.max(-xLimit, Math.min(xLimit, dx)), dy: Math.max(-yLimit, Math.min(yLimit, dy)) };
+  }
+
+  function startDrag(event: PointerEvent<SVGSVGElement>) {
+    suppressClick.current = false;
+    if (view.zoom === 1 || !event.isPrimary || event.button !== 0) return;
+    const scale = event.currentTarget.getScreenCTM()?.a;
+    if (scale) gesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, scale, view, moved: false };
+  }
+
+  function moveDrag(event: PointerEvent<SVGSVGElement>) {
+    const drag = gesture.current;
+    if (!drag || drag.pointer !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.hypot(dx, dy) < 5) return;
+      drag.moved = true;
+      suppressClick.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    setView(constrain({ ...drag.view, dx: drag.view.dx - dx / drag.scale, dy: drag.view.dy - dy / drag.scale }));
+  }
+
+  function endDrag(event: PointerEvent<SVGSVGElement>) {
+    if (gesture.current?.pointer === event.pointerId) gesture.current = null;
+  }
+
+  const arrowDirections: Record<string, readonly [number, number]> = {
+    ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+  };
 
   return <figure className={styles.lakeFigure}>
+    <div className={styles.mapTools} role="group" aria-label="Cadrage de la carte">
+      <button type="button" aria-label="Zoom avant" disabled={zoomIndex === zoomLevels.length - 1}
+        onClick={() => setView(constrain({ ...view, zoom: zoomLevels[zoomIndex + 1]! }))}><Plus size={16} aria-hidden="true" /></button>
+      <button type="button" aria-label="Zoom arrière" disabled={zoomIndex === 0}
+        onClick={() => setView(constrain({ ...view, zoom: zoomLevels[zoomIndex - 1]! }))}><Minus size={16} aria-hidden="true" /></button>
+      <button type="button" aria-label="Réinitialiser le cadrage" disabled={zoomIndex === 0}
+        onClick={() => setView(initialView)}><RotateCcw size={15} aria-hidden="true" /> Réinitialiser</button>
+    </div>
     <svg className={styles.lakeGrid} role="group" aria-label="Grille humide du lac de Guiers"
-      viewBox={`-0.02 -0.02 ${mesh.width + 0.04} ${mesh.height + 0.04}`}
-      data-rows={lakeRows} data-columns={lakeColumns} data-time={time}>
+      tabIndex={0} aria-description="Après avoir zoomé, déplacez la carte par glisser ou avec les flèches."
+      viewBox={`${(mesh.width - width / view.zoom) / 2 + view.dx} ${(mesh.height - height / view.zoom) / 2 + view.dy} ${width / view.zoom} ${height / view.zoom}`}
+      data-rows={mesh.rows} data-columns={mesh.columns} data-time={time} data-zoom={view.zoom}
+      onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
+      onPointerLeave={event => { if (!gesture.current?.moved) endDrag(event); }}
+      onClickCapture={event => {
+        if (suppressClick.current && event.detail > 0) event.stopPropagation();
+        suppressClick.current = false;
+      }}
+      onKeyDown={event => {
+        const direction = arrowDirections[event.key];
+        if (!direction || view.zoom === 1) return;
+        event.preventDefault();
+        setView(current => constrain({ ...current, dx: current.dx + direction[0] * width / current.zoom / 8,
+          dy: current.dy + direction[1] * height / current.zoom / 8 }));
+      }}>
       <defs>
         <clipPath id={clip}>
           <path d={outline} clipRule="evenodd" />
@@ -49,7 +113,7 @@ export function LogisticLakeGrid({ mesh, cells, trajectories, time, selected, se
       </g>
       <path className={styles.lakeOutline} d={outline} fill="none" vectorEffect="non-scaling-stroke" aria-hidden="true" />
     </svg>
-    <figcaption>Lac de Guiers · Contour HydroLAKES · Grille fictive {lakeRows} × {lakeColumns}</figcaption>
+    <figcaption>Lac de Guiers · Contour HydroLAKES · Grille {mesh.rows} × {mesh.columns}</figcaption>
     <div className={styles.lakeScale} aria-label="Rapport biomasse sur capacité">
       <span>50 %</span><span>Biomasse / capacité</span><span>100 %</span>
     </div>

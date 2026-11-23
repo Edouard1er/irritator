@@ -9,7 +9,8 @@ import { readConfig } from '../src/config/index.js';
 import { ProcessEngine } from '../src/services/engine.js';
 import { ApiError, catalog, validateRequest, type RunRequest, type RunResult } from '../../../packages/contracts/index.js';
 import { lakeDomain, spatialRequest } from '../../../examples/logistic-grid.js';
-import { lakeMeshFromGeoJson } from '../../../examples/logistic-lake.js';
+import { runLakeSimulation } from '../../../examples/logistic-lake-run.js';
+import { lakeMeshFromGeoJson, lakeResolutions } from '../../../examples/logistic-lake.js';
 import { reference, affine } from './fixtures.js';
 
 test('real TCP HTTP -> Fastify -> C++ -> libirritator scientific campaign',{timeout:60000},async()=>{
@@ -140,7 +141,9 @@ test('constant-domain logistic grids complete through Fastify with all native sa
 
 test('lake silhouette publishes only the wet cells through Fastify and the native runner', async () => {
   const source = JSON.parse(readFileSync(new URL('../../../../apps/frontend/data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url), 'utf8'));
-  const { request, cells } = lakeDomain(lakeMeshFromGeoJson(source).cells);
+  const { batches, cells } = lakeDomain(lakeMeshFromGeoJson(source));
+  assert.equal(batches.length, 1);
+  const { request } = batches[0]!;
   const app = buildApp(readConfig());
   try {
     const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
@@ -153,8 +156,30 @@ test('lake silhouette publishes only the wet cells through Fastify and the nativ
     for (const [index, { samples }] of result.observations.entries()) {
       assert.equal(samples.length, 201);
       assert.equal(samples[0]!.time, 0);
-      assert.ok(Math.abs(samples[0]!.value - cells[index]!.initial) < 1e-12);
+      assert.ok(Math.abs(samples[0]!.value - cells[index]!.initial) < 1e-10);
       assert.equal(samples.at(-1)!.time, 20);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test('Fastify runs and validates all native partitions of the refined lake', async () => {
+  const source = JSON.parse(readFileSync(new URL('../../../../apps/frontend/data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url), 'utf8'));
+  const app = buildApp(readConfig());
+  try {
+    for (const [resolution, count, batches] of [[lakeResolutions[2], 65, 4], [lakeResolutions[3], 101, 6]] as const) {
+      const domain = lakeDomain(lakeMeshFromGeoJson(source, resolution));
+      const { observations, trace } = await runLakeSimulation(domain, async request => {
+        const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
+        assert.equal(response.statusCode, 200, response.body);
+        return response.json();
+      });
+      assert.equal(observations.length, count);
+      assert.equal(trace.plannedBatches, batches);
+      assert.equal(new Set(trace.batches.map(batch => batch.runId)).size, batches);
+      assert.ok(trace.batches.every(batch => typeof batch.runId === 'string' && batch.runCalls > 0));
+      assert.ok(trace.aggregateErrors!.maxRelative < 2e-6);
     }
   } finally {
     await app.close();

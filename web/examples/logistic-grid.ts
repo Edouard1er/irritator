@@ -1,7 +1,7 @@
-import { ApiError, caps, validateRequest, type RunRequest } from '../packages/contracts/index.js';
+import { ApiError, caps, catalog, requestSchema, validateRequest, type RunRequest } from '../packages/contracts/index.js';
 import single from './logistic-single-v1.json' with { type: 'json' };
 import reference from './logistic-nine-cells-v1.json' with { type: 'json' };
-import type { LakeCell } from './logistic-lake.js';
+import { lakeResolutionId, type LakeMesh } from './logistic-lake.js';
 
 export const spatialDimensions = [2, 3, 4] as const;
 export type SpatialDimension = typeof spatialDimensions[number];
@@ -57,16 +57,47 @@ export function spatialRequest(dimension: SpatialDimension = 3, mode: SpatialMod
   return buildRequest(modelId, cells, fixedCell ? { start: 0, end: constantDomain.horizon } : { ...reference.simulation });
 }
 
-export function lakeDomain(wetCells: readonly LakeCell[]) {
-  checkBudget(wetCells.length, 'du lac');
-  const totalFraction = wetCells.reduce((sum, cell) => sum + cell.wetFraction, 0);
-  const cells = wetCells.map(cell => {
-    const area = constantDomain.area * cell.wetFraction / totalFraction;
-    return { ...cell, area, initial: constantDomain.initialDensity * area, capacity: constantDomain.capacityDensity * area };
+export const lakeSurfaceAreaKm2 = 300;
+export const lakeQuantumFraction = 3e-7;
+export type LakeQuantum = 'absolute' | 'proportional';
+const quantumBounds = catalog.components.find(atom => atom.type === 'qss3_integrator')!.parameters.dQ!;
+
+export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional') {
+  const { initialDensity, capacityDensity, growth, horizon } = constantDomain;
+  const simulation = { start: 0, end: horizon };
+  const samplingInterval = single.model.observations[0]!.samplingInterval;
+  const totalFraction = mesh.cells.reduce((sum, cell) => sum + cell.wetFraction, 0);
+  const cells = mesh.cells.map(cell => {
+    const area = lakeSurfaceAreaKm2 * cell.wetFraction / totalFraction;
+    const capacity = capacityDensity * area;
+    const quantum = strategy === 'absolute' ? constantDomain.quantum
+      : Math.min(quantumBounds.maximum, Math.max(quantumBounds.minimum, capacity * lakeQuantumFraction));
+    return { ...cell, component: `${cell.id}-N`, area, initial: initialDensity * area, capacity, growth, quantum, samplingInterval };
   });
-  const request = buildRequest('logistic-lake-silhouette', cells, { start: 0, end: constantDomain.horizon });
-  return { cells, request };
+  // Same point estimate (including terminal margin) as the flat request contract.
+  const pointsPerCell = single.model.observations.reduce((sum, observation) =>
+    sum + Math.ceil(horizon / observation.samplingInterval) + 2, 0);
+  const batchSize = Math.min(
+    Math.floor(caps.maxComponents / single.model.components.length),
+    Math.floor(caps.maxConnections / single.model.connections.length),
+    Math.floor(requestSchema.properties.model.properties.observations.maxItems / single.model.observations.length),
+    Math.floor(caps.maxPoints / pointsPerCell),
+  );
+  const resolution = lakeResolutionId(mesh);
+  const batches: { request: RunRequest; cells: typeof cells }[] = [];
+  for (let offset = 0; offset < cells.length; offset += batchSize) {
+    const members = cells.slice(offset, offset + batchSize);
+    const id = `logistic-lake-${resolution}-${strategy}-${batches.length + 1}`;
+    batches.push({ request: buildRequest(id, members, simulation), cells: members });
+  }
+  const parameters = { rows: mesh.rows, columns: mesh.columns, areaKm2: lakeSurfaceAreaKm2,
+    initialDensity, capacityDensity, growth, simulation, samplingInterval,
+    quantum: strategy === 'absolute' ? { strategy, tonnes: constantDomain.quantum }
+      : { strategy, capacityFraction: lakeQuantumFraction, minimum: quantumBounds.minimum, maximum: quantumBounds.maximum } };
+  return { cells, batches, parameters };
 }
+
+export type LakeDomain = ReturnType<typeof lakeDomain>;
 
 function checkBudget(count: number, grid: string) {
   if (count * single.model.components.length > caps.maxComponents ||
@@ -75,17 +106,17 @@ function checkBudget(count: number, grid: string) {
   }
 }
 
-type ModelCell = { id: string; initial: number; capacity?: number | undefined };
+type ModelCell = { id: string; initial: number; capacity?: number | undefined; quantum?: number };
 
 function buildRequest(id: string, cells: readonly ModelCell[], simulation: RunRequest['simulation']): RunRequest {
   const template = single.model;
   const model: RunRequest['model'] = { id, components: [], connections: [], observations: [] };
-  for (const { id, initial, capacity } of cells) {
+  for (const { id, initial, capacity, quantum } of cells) {
     for (const atom of template.components) {
       const parameters = { ...atom.parameters } as Record<string, number>;
       if (atom.id === 'N') parameters.X = initial;
       if (capacity !== undefined) {
-        if (atom.id === 'N') parameters.dQ = constantDomain.quantum;
+        if (atom.id === 'N') parameters.dQ = quantum ?? constantDomain.quantum;
         if (atom.id === 'r') parameters.value = constantDomain.growth;
         if (atom.id === 'sum') parameters['coeff-1'] = -1 / capacity;
       }

@@ -4,13 +4,15 @@ import { Pause, Play, RotateCcw } from 'lucide-react';
 import type { RunRequest } from '@contracts';
 import { errorText, runSimulation } from '@/lib/api/client';
 import {
-  constantDomain, constantDomainCell, lakeDomain, lakeMeshFromGeoJson,
+  clipLakeMesh, constantDomain, constantDomainCell, lakeDomain, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
+  LakeRunError, runLakeBatch, runLakeSimulation, samplingTimeline,
   spatialApply, spatialCells, spatialDimensions, spatialDrafts, spatialReading,
-  spatialRequest, spatialResize, spatialTimeline, spatialTotals, spatialTrajectories,
-  type LakeMesh, type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialMode, type SpatialTrajectory,
+  spatialRequest, spatialResize, spatialTotals, spatialTrajectories,
+  type LakeDomain, type LakeMesh, type LakeRunTrace, type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialMode, type SpatialTrajectory,
 } from '@/lib/simulation/spatial-experiment';
 import { LogisticLakeGrid } from './logistic-lake-grid';
 import { LogisticTrajectories, LogisticTrajectoryPlot, logisticSeriesColor } from './logistic-trajectories';
+import { SpatialFullscreen } from './spatial-fullscreen';
 import styles from './logistic-spatial.module.css';
 
 const biomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
@@ -28,7 +30,8 @@ const legend = [
 ] as const;
 
 type Phase =
-  | { status: 'idle' | 'running' }
+  | { status: 'idle' }
+  | { status: 'running'; completedBatches?: number }
   | { status: 'completed'; grids: Map<Grid, SpatialTrajectory[]> }
   | { status: 'error'; message: string };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
@@ -47,14 +50,31 @@ const parameterFields = [
 ] as const;
 
 type Grid = SpatialDimension | 'lake';
-type Configuration = { request: RunRequest; cells: SpatialCell[] } & (
-  { dimension: SpatialDimension } | { dimension: 'lake'; mesh: LakeMesh; wetCells: ReturnType<typeof lakeDomain>['cells'] }
-);
+type SquareConfiguration = { dimension: SpatialDimension; request: RunRequest; cells: SpatialCell[] };
+type LakeConfiguration = { dimension: 'lake'; mesh: LakeMesh; domain: LakeDomain };
+type Configuration = SquareConfiguration | LakeConfiguration;
 type Validation = { cell: string; message: string; fields?: Partial<Record<keyof SpatialDraft, string>> | undefined };
 
-function nominalConfiguration(dimension: SpatialDimension, mode: SpatialMode): Configuration {
+function nominalConfiguration(dimension: SpatialDimension, mode: SpatialMode): SquareConfiguration {
   const request = spatialRequest(dimension, mode);
   return { dimension, request, cells: spatialCells(request) };
+}
+
+function configureLake(mesh: LakeMesh): LakeConfiguration {
+  return { dimension: 'lake', mesh, domain: lakeDomain(mesh) };
+}
+
+function largestLakeCell(domain: LakeDomain) {
+  return domain.cells.reduce((largest, cell) => cell.wetFraction > largest.wetFraction ? cell : largest).id;
+}
+
+function downloadTrace(trace: LakeRunTrace) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(trace, null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `lac-de-guiers-${lakeResolutionId(trace.parameters)}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function withoutDraft(previous: SpatialDrafts, cell: string): SpatialDrafts {
@@ -100,7 +120,6 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
 }
 
 type Visibility = { visible: boolean; active: boolean };
-type LakeConfiguration = Extract<Configuration, { dimension: 'lake' }>;
 
 function LakeExperiment({ visible, active }: Visibility) {
   const [configuration, setConfiguration] = useState<LakeConfiguration>();
@@ -112,11 +131,8 @@ function LakeExperiment({ visible, active }: Visibility) {
       try {
         const response = await fetch('/geography/lac-de-guiers.hydrolakes.geojson', { signal: controller.signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const mesh = lakeMeshFromGeoJson(await response.json());
-        const { request, cells: wetCells } = lakeDomain(mesh.cells);
-        if (!controller.signal.aborted) {
-          setConfiguration({ dimension: 'lake', mesh, wetCells, request, cells: spatialCells(request) });
-        }
+        const data: unknown = await response.json();
+        if (!controller.signal.aborted) setConfiguration(configureLake(lakeMeshFromGeoJson(data)));
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
       }
@@ -138,19 +154,24 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
   const [configuration, setConfiguration] = useState(() => lakeConfiguration ?? nominalConfiguration(3, fixed ? 'constant' : 'independent'));
   const lake = configuration.dimension === 'lake' ? configuration : undefined;
   const editable = mode === 'independent';
-  const { dimension, request, cells } = configuration;
-  const timeline = useMemo(() => spatialTimeline(request), [request]);
+  const { dimension } = configuration;
+  const square = configuration.dimension === 'lake' ? undefined : configuration;
+  const cells: readonly SpatialCell[] = configuration.dimension === 'lake' ? configuration.domain.cells : configuration.cells;
+  const simulation = configuration.dimension === 'lake' ? configuration.domain.parameters.simulation : configuration.request.simulation;
+  const samplingInterval = cells[0]!.samplingInterval;
+  const timeline = useMemo(() => samplingTimeline(simulation, samplingInterval), [simulation, samplingInterval]);
   const [drafts, setDrafts] = useState<SpatialDrafts>({});
   const [validation, setValidation] = useState<Validation>();
   const appliedValues = useMemo(() => spatialDrafts(cells), [cells]);
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
+  const [lakeTraces, setLakeTraces] = useState<Partial<Record<string, LakeRunTrace>>>({});
   const [cursor, setCursor] = useState(beginning);
-  const [selected, setSelected] = useState(() => lakeConfiguration?.wetCells.reduce((largest, cell) =>
-    cell.wetFraction > largest.wetFraction ? cell : largest).id ?? 'C02');
+  const [selected, setSelected] = useState(() => lakeConfiguration ? largestLakeCell(lakeConfiguration.domain) : 'C02');
   const [compared, setCompared] = useState<string[]>([]);
-  const running = useRef(false);
+  const running = useRef<AbortController | null>(null);
+  useEffect(() => () => { running.current?.abort(); }, []);
   const lastTick = timeline.length - 1;
-  const time = timeline[cursor.tick] ?? request.simulation.start;
+  const time = timeline[cursor.tick] ?? simulation.start;
   const ready = phase.status === 'completed';
   const byId = useMemo(() => new Map(phase.status === 'completed'
     ? phase.grids.get(dimension)?.map(trajectory => [trajectory.cell.id, trajectory] as const)
@@ -165,7 +186,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
   const chartSeries = useMemo(() => Array.from(byId.values()).filter(({ cell }) =>
     cell.id === selected || compared.includes(cell.id)), [byId, selected, compared]);
   const selectedCell = cells.find(cell => cell.id === selected)!;
-  const selectedWetCell = lake?.wetCells.find(cell => cell.id === selected);
+  const selectedWetCell = lake?.domain.cells.find(cell => cell.id === selected);
   const draft = drafts[selected] ?? appliedValues[selected]!;
   const selectedValidation = validation?.cell === selected ? validation : undefined;
   const pending = cells.filter(cell => drafts[cell.id]).map(cell => cell.id);
@@ -188,28 +209,49 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
 
   async function run(next: Configuration, appliedCell?: string) {
     if (running.current) return;
-    running.current = true;
+    const controller = new AbortController();
+    running.current = controller;
     setCursor(beginning);
-    setPhase({ status: 'running' });
+    setPhase(next.dimension === 'lake' ? { status: 'running', completedBatches: 0 } : { status: 'running' });
     let runningDimension = next.dimension;
     try {
       const grids = new Map<Grid, SpatialTrajectory[]>();
+      if (next.dimension === 'lake') {
+        const { domain } = next;
+        const { observations, trace } = await runLakeSimulation(domain, request => runLakeBatch(request, controller.signal), {
+          signal: controller.signal,
+          onProgress: completedBatches => {
+            if (running.current === controller) setPhase({ status: 'running', completedBatches });
+          },
+        });
+        if (running.current !== controller || controller.signal.aborted) return;
+        grids.set('lake', domain.cells.map((cell, index) => ({ cell, samples: observations[index]!.samples,
+          constant: false, ...domain.parameters.simulation })));
+        setLakeTraces(previous => ({ ...previous, [lakeResolutionId(next.mesh)]: trace }));
+        setPhase({ status: 'completed', grids });
+        return;
+      }
       // Run one native request at a time against the same API used by the independent mode.
       const configurations = fixed ? spatialDimensions.map(size =>
         size === next.dimension ? next : nominalConfiguration(size, 'constant')) : [next];
       for (const { dimension, request, cells } of configurations) {
         runningDimension = dimension;
         const result = await runSimulation(request);
+        if (controller.signal.aborted) return;
         grids.set(dimension, spatialTrajectories(request, result, cells));
       }
       setConfiguration(next);
       if (appliedCell) setDrafts(previous => withoutDraft(previous, appliedCell));
       setPhase({ status: 'completed', grids });
     } catch (cause) {
+      if (controller.signal.aborted || running.current !== controller) return;
+      if (next.dimension === 'lake' && cause instanceof LakeRunError) {
+        setLakeTraces(previous => ({ ...previous, [lakeResolutionId(next.mesh)]: cause.trace }));
+      }
       setPhase({ status: 'error', message: fixed && runningDimension !== 'lake'
         ? `Grille ${gridLabel(runningDimension)} · ${errorText(cause)}` : errorText(cause) });
     } finally {
-      running.current = false;
+      if (running.current === controller) running.current = null;
     }
   }
 
@@ -224,22 +266,22 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
   }
 
   function apply() {
-    if (dimension === 'lake' || running.current) return;
-    const result = spatialApply(request, { [selected]: draft }, cells);
+    if (!square || running.current) return;
+    const result = spatialApply(square.request, { [selected]: draft }, square.cells);
     if (!result.ok) {
       setValidation({ cell: selected, fields: result.errors[selected], message: result.message });
       return;
     }
     setValidation(undefined);
-    void run({ dimension, request: result.request, cells: result.cells }, selected);
+    void run({ dimension: square.dimension, request: result.request, cells: result.cells }, selected);
   }
 
   function changeDimension(value: string) {
     const nextDimension = spatialDimensions.find(size => String(size) === value);
-    if (!nextDimension || nextDimension === dimension || running.current) return;
+    if (!square || !nextDimension || nextDimension === dimension || running.current) return;
 
     try {
-      const next = fixed ? nominalConfiguration(nextDimension, 'constant') : spatialResize(request, cells, nextDimension);
+      const next = fixed ? nominalConfiguration(nextDimension, 'constant') : spatialResize(square.request, square.cells, nextDimension);
       const activeIds = new Set(next.cells.map(cell => cell.id));
       setConfiguration({ dimension: nextDimension, ...next });
       setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => activeIds.has(id))));
@@ -252,6 +294,28 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
       }
     } catch (cause) {
       setCursor(beginning);
+      setPhase({ status: 'error', message: errorText(cause) });
+    }
+  }
+
+  function cancelLakeRun() {
+    running.current?.abort();
+    running.current = null;
+    setPhase({ status: 'idle' });
+    setCursor(beginning);
+  }
+
+  function changeLakeResolution(value: string) {
+    const resolution = lakeResolutions.find(size => lakeResolutionId(size) === value);
+    if (!lake || !resolution || lakeResolutionId(lake.mesh) === value) return;
+    try {
+      const next = configureLake(clipLakeMesh(lake.mesh.rings, lake.mesh.width, lake.mesh.height, resolution));
+      cancelLakeRun();
+      setConfiguration(next);
+      setSelected(largestLakeCell(next.domain));
+      setCompared([]);
+    } catch (cause) {
+      cancelLakeRun();
       setPhase({ status: 'error', message: errorText(cause) });
     }
   }
@@ -271,11 +335,32 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
       : { tick: value.tick === lastTick ? 0 : value.tick, playing: true, started: true });
   }
 
+  function seek(requested: number) {
+    const tick = Math.round((requested - simulation.start) / samplingInterval);
+    setCursor(value => ({ ...value, tick, playing: false }));
+  }
+
   if (!visible) return null;
+
+  const trace = lake && phase.status !== 'running' ? lakeTraces[lakeResolutionId(lake.mesh)] : undefined;
+  const fullscreenControls = <label className={styles.fullscreenTime}>
+    {selected} · {month.format(time)} mois
+    <input type="range" aria-label="Temps en plein écran" min={simulation.start} max={simulation.end}
+      step={samplingInterval} value={time} disabled={!ready} onChange={event => seek(Number(event.currentTarget.value))} />
+  </label>;
+  const area = lake?.domain.parameters.areaKm2 ?? constantDomain.area;
 
   return <>
     <div className={styles.runActions}>
       <span className={styles.status} data-phase={phase.status} role="status">{statusLabel[phase.status]}</span>
+      {lake && phase.status === 'running' && <>
+        <label className={styles.progress}>
+          <progress value={phase.completedBatches ?? 0} max={lake.domain.batches.length} />
+          <span aria-live="polite">{phase.completedBatches ?? 0} / {lake.domain.batches.length} lots natifs</span>
+        </label>
+        <button type="button" onClick={cancelLakeRun}>Annuler le calcul</button>
+      </>}
+      {trace && <button type="button" onClick={() => downloadTrace(trace)}>Télécharger la trace JSON</button>}
       {editable && <button onClick={restore} disabled={phase.status === 'running'}>
         <RotateCcw size={15} aria-hidden="true" /> Restaurer les paramètres initiaux
       </button>}
@@ -303,46 +388,56 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
       </div>
       <div className={styles.scrubber}>
         <label className="sr-only" htmlFor="logistic-spatial-time">Temps simulé</label>
-        <input id="logistic-spatial-time" type="range" min={request.simulation.start} max={request.simulation.end}
-          step={cells[0]?.samplingInterval} value={time} disabled={!ready}
+        <input id="logistic-spatial-time" type="range" min={simulation.start} max={simulation.end}
+          step={samplingInterval} value={time} disabled={!ready}
           aria-valuetext={month.format(time) + ' mois'}
-          onChange={event => {
-            const requested = Number(event.currentTarget.value);
-            const tick = Math.round((requested - request.simulation.start) / cells[0]!.samplingInterval);
-            setCursor(value => ({ ...value, tick, playing: false }));
-          }} />
+          onChange={event => seek(Number(event.currentTarget.value))} />
         <div className={styles.tickLabels} aria-hidden="true">
-          <span>{request.simulation.start}</span><span>{request.simulation.end} mois</span>
+          <span>{simulation.start}</span><span>{simulation.end} mois</span>
         </div>
       </div>
       <strong className={styles.time} aria-label="Instant consulté" data-time={time}>{month.format(time)} <small>mois</small></strong>
     </section>
 
     <div className={styles.panels} data-mode={mode}>
-      <section className={styles.panel} aria-labelledby="logistic-spatial-grid">
+      <SpatialFullscreen as="section" className={styles.panel} aria-labelledby="logistic-spatial-grid"
+        active={active} label={lake && 'Biomasse par cellule'} controls={fullscreenControls}>
         <div className={styles.panelHeading}>
           <h2 id="logistic-spatial-grid">Biomasse par cellule</h2>
           <span>Tonnes</span>
         </div>
-        {!lake && <label className={styles.dimensions}>
+        {lake ? <label className={styles.dimensions}>
+          Résolution du lac
+          <select value={lakeResolutionId(lake.mesh)} onChange={event => changeLakeResolution(event.currentTarget.value)}>
+            {lakeResolutions.map(size => <option key={lakeResolutionId(size)} value={lakeResolutionId(size)}>
+              {size.rows} × {size.columns}
+            </option>)}
+          </select>
+        </label> : <label className={styles.dimensions}>
           Dimensions de la grille
           <select value={dimension} disabled={phase.status === 'running'} onChange={event => changeDimension(event.currentTarget.value)}>
             {spatialDimensions.map(size => <option key={size} value={size}>{gridLabel(size)}</option>)}
           </select>
         </label>}
-        {(fixed || lake) && <dl className={styles.domainMetrics} aria-label="Domaine de la grille">
-          <div><dt>Surface totale</dt><dd>{biomass.format(constantDomain.area)} km²</dd></div>
+        {(fixed || lake) && <SpatialFullscreen active={active} label={lake && 'Indicateurs du domaine'} controls={fullscreenControls}>
+          <dl className={styles.domainMetrics} aria-label="Domaine de la grille">
+          <div><dt>Surface totale</dt><dd>{biomass.format(area)} km²</dd></div>
           {dimension === 'lake'
             ? <div><dt>Cellules humides</dt><dd>{cells.length}</dd></div>
             : <div><dt>Surface par cellule</dt><dd>{biomass.format(constantDomainCell(dimension).area)} km²</dd></div>}
-          <div><dt>Capacité totale</dt><dd>{biomass.format(constantDomain.area * constantDomain.capacityDensity)} t</dd></div>
+          <div><dt>Capacité totale</dt><dd>{biomass.format(area * constantDomain.capacityDensity)} t</dd></div>
+          {lake && <div><dt>Biomasse initiale totale</dt><dd>{biomass.format(area * constantDomain.initialDensity)} t</dd></div>}
           <div><dt>Biomasse totale</dt><dd data-total-biomass={currentTotal ?? undefined}>
             {currentTotal == null ? (ready ? 'Point absent' : '—') : biomass.format(currentTotal) + ' t'}
           </dd></div>
-        </dl>}
+          </dl>
+        </SpatialFullscreen>}
         {lake ? <>
-          <LogisticLakeGrid mesh={lake.mesh} cells={lake.wetCells} trajectories={byId} time={time} selected={selected} select={setSelected} />
-          <p className={styles.coverage}>Les 9 km² fictifs sont répartis selon la fraction humide des cases dans la projection locale.</p>
+          <SpatialFullscreen active={active} label="Carte du lac" controls={fullscreenControls}>
+            <LogisticLakeGrid key={lakeResolutionId(lake.mesh)} mesh={lake.mesh} cells={lake.domain.cells}
+              trajectories={byId} time={time} selected={selected} select={setSelected} />
+          </SpatialFullscreen>
+          <p className={styles.coverage}>La surface de référence est répartie selon la fraction humide des cases dans la projection locale.</p>
         </> : <>
           <div className={styles.grid} data-dimension={dimension}>
             {cells.map(cell => {
@@ -372,7 +467,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
               : 'Chaque cellule a sa propre capacité K. Ajouter des cellules augmente la capacité totale.'}</p>
           </div>
         </>}
-      </section>
+      </SpatialFullscreen>
 
       {fixed && <section className={styles.panel} aria-labelledby="logistic-aggregate-heading">
         <div className={styles.panelHeading}>
@@ -381,7 +476,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
         </div>
         {ready ? <>
           {active && <LogisticTrajectoryPlot label="Trajectoires de biomasse totale" time={time}
-            start={request.simulation.start} end={request.simulation.end}
+            start={simulation.start} end={simulation.end}
             series={totals.map(series => ({ ...series, current: series.points[cursor.tick]?.value }))} />}
           <ul className={styles.series} aria-label="Biomasses totales à l’instant consulté">
             {totals.map(({ size, name, color, points }) => {
@@ -398,16 +493,18 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
         </div>}
       </section>}
       <section className={styles.panel} aria-label={'Paramètres de ' + selectedCell.id}>
+        <SpatialFullscreen active={active} label={lake && 'Détails de la cellule'} controls={fullscreenControls}>
         <div className={styles.panelHeading}>
           <h2>Cellule {selectedCell.id}</h2>
           {selectedTrajectory?.constant && <span className={styles.equilibriumLabel}>Équilibre dédupliqué</span>}
         </div>
         {selectedWetCell ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
           <div><dt>Fraction humide</dt><dd>{wetPercent.format(selectedWetCell.wetFraction)}</dd></div>
-          <div><dt>Surface fictive</dt><dd>{surface.format(selectedWetCell.area)} km²</dd></div>
+          <div><dt>Surface humide</dt><dd>{surface.format(selectedWetCell.area)} km²</dd></div>
           <div><dt>Biomasse initiale N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
           <div><dt>Taux de croissance r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
           <div><dt>Capacité de charge K</dt><dd>{biomass.format(selectedCell.capacity)} t</dd></div>
+          <div><dt>Biomasse observée</dt><dd>{selectedReading ? `${biomass.format(selectedReading.value)} t` : '—'}</dd></div>
         </dl> : fixed ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
           <div><dt>N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
           <div><dt>r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
@@ -444,9 +541,11 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
           Équilibre dédupliqué par le moteur. La valeur observée à {month.format(selectedTrajectory.start)} mois est maintenue jusqu’à {month.format(selectedTrajectory.end)} mois.
         </p>}
         {selectedTrajectory && !selectedReading && <p className={styles.coverage}>Aucune observation à cet instant.</p>}
+        </SpatialFullscreen>
 
+        <SpatialFullscreen active={active} label={lake && 'Trajectoires'} controls={fullscreenControls}>
         {ready ? <>
-          {active && <LogisticTrajectories series={chartSeries} time={time} start={request.simulation.start} end={request.simulation.end} />}
+          {active && <LogisticTrajectories series={chartSeries} time={time} start={simulation.start} end={simulation.end} />}
           <ul className={styles.series} aria-label="Séries à l’instant consulté">
             {chartSeries.map(trajectory => {
               const reading = spatialReading(trajectory, time);
@@ -473,6 +572,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
             {cell.id}
           </label>)}
         </fieldset>
+        </SpatialFullscreen>
       </section>
     </div>
   </>;

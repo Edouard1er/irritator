@@ -1,0 +1,1351 @@
+{
+  "runnerSha256": "a919dfdfb99b83242e42fb7c023d4afccc94c53b0e0ddc7b308f59d40eef902b",
+  "geojsonSha256": "9ac2101b3e02f8dd890dc9c9365f60e0febe265cceba058beed5835dbbcadbe6",
+  "node": "v26.13.0",
+  "runs": [
+    {
+      "parameters": {
+        "rows": 6,
+        "columns": 3,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:24.672Z",
+      "elapsedMs": 557.7544,
+      "wetCells": 13,
+      "plannedBatches": 1,
+      "batches": [
+        {
+          "modelId": "logistic-lake-6x3-proportional-1",
+          "elapsedMs": 553.5101,
+          "cells": 13,
+          "runCalls": 15377,
+          "points": 2613,
+          "resultBytes": 138619,
+          "errors": {
+            "maxAbsoluteTonnes": 0.018858127157727722,
+            "maxRelative": 9.517939800586306e-7
+          }
+        }
+      ],
+      "points": 2613,
+      "resultBytes": 138619,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.018858127157727722,
+        "maxRelative": 9.517939800586306e-7
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.06918697613582481,
+        "maxRelative": 9.517939793720244e-7
+      },
+      "stdoutBytes": [
+        138708
+      ],
+      "atMonths": [
+        45000.000000000015,
+        87361.86632814309,
+        89918.01054395088
+      ],
+      "minCapacity": 251.02537378423798,
+      "minQuantum": 0.00007530761213527139,
+      "maxQuantum": 0.007359324855438663,
+      "quantumFloorCells": []
+    },
+    {
+      "parameters": {
+        "rows": 6,
+        "columns": 3,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:25.234Z",
+      "elapsedMs": 493.2626,
+      "wetCells": 13,
+      "plannedBatches": 1,
+      "batches": [
+        {
+          "modelId": "logistic-lake-6x3-absolute-1",
+          "elapsedMs": 493.2037999999998,
+          "cells": 13,
+          "runCalls": 7913,
+          "points": 2613,
+          "resultBytes": 138651,
+          "errors": {
+            "maxAbsoluteTonnes": 1.3657597678129605,
+            "maxRelative": 0.0012636610961376479
+          }
+        }
+      ],
+      "points": 2613,
+      "resultBytes": 138651,
+      "localErrors": {
+        "maxAbsoluteTonnes": 1.3657597678129605,
+        "maxRelative": 0.0012636610961376479
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 3.9848845139931655,
+        "maxRelative": 0.00008703011759850962
+      },
+      "stdoutBytes": [
+        138737
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 12,
+        "columns": 6,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:25.743Z",
+      "elapsedMs": 1007.9256,
+      "wetCells": 35,
+      "plannedBatches": 2,
+      "batches": [
+        {
+          "modelId": "logistic-lake-12x6-proportional-1",
+          "elapsedMs": 479.94529999999986,
+          "cells": 18,
+          "runCalls": 21233,
+          "points": 3618,
+          "resultBytes": 191573,
+          "errors": {
+            "maxAbsoluteTonnes": 0.00700616606445692,
+            "maxRelative": 9.517939797786271e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-12x6-proportional-2",
+          "elapsedMs": 527.7466,
+          "cells": 17,
+          "runCalls": 20129,
+          "points": 3417,
+          "resultBytes": 180920,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0031795231634532684,
+            "maxRelative": 9.517939797995986e-7
+          }
+        }
+      ],
+      "points": 7035,
+      "resultBytes": 372493,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.00700616606445692,
+        "maxRelative": 9.517939797995986e-7
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.06918697613582481,
+        "maxRelative": 9.517939793720244e-7
+      },
+      "stdoutBytes": [
+        191692,
+        181033
+      ],
+      "atMonths": [
+        45000.00000000002,
+        87361.86632814325,
+        89918.01054395089
+      ],
+      "minCapacity": 28.875535388530984,
+      "minQuantum": 0.000008662660616559295,
+      "maxQuantum": 0.0027341342880100564,
+      "quantumFloorCells": []
+    },
+    {
+      "parameters": {
+        "rows": 12,
+        "columns": 6,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:26.762Z",
+      "elapsedMs": 978.7970999999998,
+      "wetCells": 35,
+      "plannedBatches": 2,
+      "batches": [
+        {
+          "modelId": "logistic-lake-12x6-absolute-1",
+          "elapsedMs": 505.21200000000044,
+          "cells": 18,
+          "runCalls": 9081,
+          "points": 3618,
+          "resultBytes": 191571,
+          "errors": {
+            "maxAbsoluteTonnes": 0.6896341459196265,
+            "maxRelative": 0.0021833016270845014
+          }
+        },
+        {
+          "modelId": "logistic-lake-12x6-absolute-2",
+          "elapsedMs": 473.4903999999997,
+          "cells": 17,
+          "runCalls": 6225,
+          "points": 3417,
+          "resultBytes": 180964,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31296826050174786,
+            "maxRelative": 0.006144791600299583
+          }
+        }
+      ],
+      "points": 7035,
+      "resultBytes": 372535,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.6896341459196265,
+        "maxRelative": 0.006144791600299583
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 6.810234876487812,
+        "maxRelative": 0.00014873593954678468
+      },
+      "stdoutBytes": [
+        191692,
+        181075
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 18,
+        "columns": 9,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:27.764Z",
+      "elapsedMs": 1902.522,
+      "wetCells": 65,
+      "plannedBatches": 4,
+      "batches": [
+        {
+          "modelId": "logistic-lake-18x9-proportional-1",
+          "elapsedMs": 479.03760000000057,
+          "cells": 18,
+          "runCalls": 21289,
+          "points": 3618,
+          "resultBytes": 192407,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0032203232713072794,
+            "maxRelative": 9.517939799306828e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-proportional-2",
+          "elapsedMs": 481.2451000000001,
+          "cells": 18,
+          "runCalls": 21273,
+          "points": 3618,
+          "resultBytes": 191985,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0029858242651243927,
+            "maxRelative": 9.517939798969146e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-proportional-3",
+          "elapsedMs": 475.20470000000023,
+          "cells": 18,
+          "runCalls": 21209,
+          "points": 3618,
+          "resultBytes": 192229,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0018675150074614066,
+            "maxRelative": 9.517939797830393e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-proportional-4",
+          "elapsedMs": 466.96529999999984,
+          "cells": 11,
+          "runCalls": 13049,
+          "points": 2211,
+          "resultBytes": 117575,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0011511673931181576,
+            "maxRelative": 9.517939799223027e-7
+          }
+        }
+      ],
+      "points": 13065,
+      "resultBytes": 694196,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.0032203232713072794,
+        "maxRelative": 9.517939799306828e-7
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.06918697616492864,
+        "maxRelative": 9.517939797724011e-7
+      },
+      "stdoutBytes": [
+        192524,
+        192104,
+        192346,
+        117651
+      ],
+      "atMonths": [
+        45000.000000000015,
+        87361.86632814331,
+        89918.01054395088
+      ],
+      "minCapacity": 8.13267129503989,
+      "minQuantum": 0.000002439801388511967,
+      "maxQuantum": 0.001256721035369333,
+      "quantumFloorCells": []
+    },
+    {
+      "parameters": {
+        "rows": 18,
+        "columns": 9,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:29.674Z",
+      "elapsedMs": 1642.9159,
+      "wetCells": 65,
+      "plannedBatches": 4,
+      "batches": [
+        {
+          "modelId": "logistic-lake-18x9-absolute-1",
+          "elapsedMs": 401.35159999999996,
+          "cells": 18,
+          "runCalls": 7497,
+          "points": 3618,
+          "resultBytes": 192331,
+          "errors": {
+            "maxAbsoluteTonnes": 0.3552371157147718,
+            "maxRelative": 0.013596567150269124
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-absolute-2",
+          "elapsedMs": 417.2604000000001,
+          "cells": 18,
+          "runCalls": 6585,
+          "points": 3618,
+          "resultBytes": 192034,
+          "errors": {
+            "maxAbsoluteTonnes": 0.3908275663329519,
+            "maxRelative": 0.012023830137910415
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-absolute-3",
+          "elapsedMs": 406.1272000000008,
+          "cells": 18,
+          "runCalls": 5969,
+          "points": 3618,
+          "resultBytes": 192164,
+          "errors": {
+            "maxAbsoluteTonnes": 0.3831947649027825,
+            "maxRelative": 0.007806171955646977
+          }
+        },
+        {
+          "modelId": "logistic-lake-18x9-absolute-4",
+          "elapsedMs": 418.1261000000004,
+          "cells": 11,
+          "runCalls": 3153,
+          "points": 2211,
+          "resultBytes": 117610,
+          "errors": {
+            "maxAbsoluteTonnes": 0.30855073316695325,
+            "maxRelative": 0.002183298052453873
+          }
+        }
+      ],
+      "points": 13065,
+      "resultBytes": 694139,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.3908275663329519,
+        "maxRelative": 0.013596567150269124
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 7.124478414953046,
+        "maxRelative": 0.0001529699784345399
+      },
+      "stdoutBytes": [
+        192451,
+        192153,
+        192281,
+        117684
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 24,
+        "columns": 12,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:33.399Z",
+      "elapsedMs": 2758.5110000000004,
+      "wetCells": 101,
+      "plannedBatches": 6,
+      "batches": [
+        {
+          "modelId": "logistic-lake-24x12-proportional-1",
+          "elapsedMs": 413.6725000000006,
+          "cells": 18,
+          "runCalls": 20129,
+          "points": 3618,
+          "resultBytes": 191790,
+          "errors": {
+            "maxAbsoluteTonnes": 0.001811431839087163,
+            "maxRelative": 9.517939798871174e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-proportional-2",
+          "elapsedMs": 426.9986000000008,
+          "cells": 18,
+          "runCalls": 18841,
+          "points": 3618,
+          "resultBytes": 192484,
+          "errors": {
+            "maxAbsoluteTonnes": 0.001811431839087163,
+            "maxRelative": 9.517939799449032e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-proportional-3",
+          "elapsedMs": 472.67399999999907,
+          "cells": 18,
+          "runCalls": 21281,
+          "points": 3618,
+          "resultBytes": 192653,
+          "errors": {
+            "maxAbsoluteTonnes": 0.001811431839087163,
+            "maxRelative": 9.517939797578899e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-proportional-4",
+          "elapsedMs": 465.1764000000003,
+          "cells": 18,
+          "runCalls": 21241,
+          "points": 3618,
+          "resultBytes": 191705,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0010706361094889871,
+            "maxRelative": 9.517939797976352e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-proportional-5",
+          "elapsedMs": 493.89919999999984,
+          "cells": 18,
+          "runCalls": 21257,
+          "points": 3618,
+          "resultBytes": 190967,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0010132416944088618,
+            "maxRelative": 9.517939799484974e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-proportional-6",
+          "elapsedMs": 485.9253000000008,
+          "cells": 11,
+          "runCalls": 12993,
+          "points": 2211,
+          "resultBytes": 117701,
+          "errors": {
+            "maxAbsoluteTonnes": 0.001272815880838607,
+            "maxRelative": 9.517939798929074e-7
+          }
+        }
+      ],
+      "points": 20301,
+      "resultBytes": 1077300,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.001811431839087163,
+        "maxRelative": 9.517939799484974e-7
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.06918697612127289,
+        "maxRelative": 9.517939791718361e-7
+      },
+      "stdoutBytes": [
+        191908,
+        192602,
+        192772,
+        191821,
+        191083,
+        117779
+      ],
+      "atMonths": [
+        45000.00000000007,
+        87361.86632814328,
+        89918.01054395092
+      ],
+      "minCapacity": 0.026617792464316885,
+      "minQuantum": 7.985337739295065e-9,
+      "maxQuantum": 0.0007069055823952504,
+      "quantumFloorCells": []
+    },
+    {
+      "parameters": {
+        "rows": 24,
+        "columns": 12,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:36.171Z",
+      "elapsedMs": 1490.7551000000003,
+      "wetCells": 101,
+      "plannedBatches": 6,
+      "batches": [
+        {
+          "modelId": "logistic-lake-24x12-absolute-1",
+          "elapsedMs": 489.59729999999945,
+          "cells": 18,
+          "runCalls": 5641,
+          "points": 3618,
+          "resultBytes": 191762,
+          "errors": {
+            "maxAbsoluteTonnes": 0.2853319333045192,
+            "maxRelative": 0.02281595745703091
+          }
+        },
+        {
+          "modelId": "logistic-lake-24x12-absolute-2",
+          "elapsedMs": 477.53520000000026,
+          "cells": 18,
+          "runCalls": 5585,
+          "points": 3618,
+          "resultBytes": 192492,
+          "errors": {
+            "maxAbsoluteTonnes": 0.3354230236549256,
+            "maxRelative": 0.007806009162633963
+          }
+        }
+      ],
+      "points": 7236,
+      "resultBytes": 384254,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.3354230236549256,
+        "maxRelative": 0.02281595745703091
+      },
+      "failure": {
+        "modelId": "logistic-lake-24x12-absolute-3",
+        "elapsedMs": 523.6052,
+        "message": "Série incomplète pour C10_5-N (159/201 points).",
+        "resultBytes": 190317
+      },
+      "stdoutBytes": [
+        191878,
+        192611,
+        190435
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 36,
+        "columns": 18,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:37.721Z",
+      "elapsedMs": 5358.228999999999,
+      "wetCells": 184,
+      "plannedBatches": 11,
+      "batches": [
+        {
+          "modelId": "logistic-lake-36x18-proportional-1",
+          "elapsedMs": 572.6710999999996,
+          "cells": 18,
+          "runCalls": 18921,
+          "points": 3618,
+          "resultBytes": 191336,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939797536642e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-2",
+          "elapsedMs": 538.5097000000005,
+          "cells": 18,
+          "runCalls": 15377,
+          "points": 3618,
+          "resultBytes": 191667,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939796603982e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-3",
+          "elapsedMs": 532.0715,
+          "cells": 18,
+          "runCalls": 14201,
+          "points": 3618,
+          "resultBytes": 191686,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939798604423e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-4",
+          "elapsedMs": 532.4356000000007,
+          "cells": 18,
+          "runCalls": 21257,
+          "points": 3618,
+          "resultBytes": 191633,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939797924823e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-5",
+          "elapsedMs": 462.5368000000017,
+          "cells": 18,
+          "runCalls": 18913,
+          "points": 3618,
+          "resultBytes": 191556,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939797415288e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-6",
+          "elapsedMs": 446.98059999999896,
+          "cells": 18,
+          "runCalls": 21281,
+          "points": 3618,
+          "resultBytes": 191683,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0008050808173720725,
+            "maxRelative": 9.517939798079652e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-7",
+          "elapsedMs": 470.9459999999999,
+          "cells": 18,
+          "runCalls": 21289,
+          "points": 3618,
+          "resultBytes": 191859,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0005805543114547618,
+            "maxRelative": 9.517939800363301e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-8",
+          "elapsedMs": 477.897399999998,
+          "cells": 18,
+          "runCalls": 21305,
+          "points": 3618,
+          "resultBytes": 192218,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0005500670630453897,
+            "maxRelative": 9.517939801739383e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-9",
+          "elapsedMs": 490.3813999999984,
+          "cells": 18,
+          "runCalls": 21201,
+          "points": 3618,
+          "resultBytes": 192030,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0005141290625942929,
+            "maxRelative": 9.517939798056432e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-10",
+          "elapsedMs": 431.4757000000027,
+          "cells": 18,
+          "runCalls": 21145,
+          "points": 3618,
+          "resultBytes": 192065,
+          "errors": {
+            "maxAbsoluteTonnes": 0.000637038330296491,
+            "maxRelative": 9.517939800763571e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-proportional-11",
+          "elapsedMs": 402.1235000000015,
+          "cells": 4,
+          "runCalls": 4769,
+          "points": 804,
+          "resultBytes": 42986,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0002712643732820652,
+            "maxRelative": 9.517939793954673e-7
+          }
+        }
+      ],
+      "points": 36984,
+      "resultBytes": 1960719,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.0008050808173720725,
+        "maxRelative": 9.517939801739383e-7
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.06918697613582481,
+        "maxRelative": 9.517939793720244e-7
+      },
+      "stdoutBytes": [
+        191453,
+        191784,
+        191802,
+        191750,
+        191673,
+        191800,
+        191975,
+        192337,
+        192146,
+        192182,
+        43018
+      ],
+      "atMonths": [
+        45000.000000000015,
+        87361.8663281434,
+        89918.01054395085
+      ],
+      "minCapacity": 0.20022311890192024,
+      "minQuantum": 6.006693567057607e-8,
+      "maxQuantum": 0.00031418025884233326,
+      "quantumFloorCells": []
+    },
+    {
+      "parameters": {
+        "rows": 36,
+        "columns": 18,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:43.094Z",
+      "elapsedMs": 2475.383399999999,
+      "wetCells": 184,
+      "plannedBatches": 11,
+      "batches": [
+        {
+          "modelId": "logistic-lake-36x18-absolute-1",
+          "elapsedMs": 428.7894000000015,
+          "cells": 18,
+          "runCalls": 4625,
+          "points": 3618,
+          "resultBytes": 191460,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31324565134036675,
+            "maxRelative": 0.013596567150269124
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-absolute-2",
+          "elapsedMs": 423.9958000000006,
+          "cells": 18,
+          "runCalls": 3753,
+          "points": 3618,
+          "resultBytes": 191687,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31324565134036675,
+            "maxRelative": 0.00780595544891192
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-absolute-3",
+          "elapsedMs": 429.5544000000009,
+          "cells": 18,
+          "runCalls": 3289,
+          "points": 3618,
+          "resultBytes": 191823,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31324565134036675,
+            "maxRelative": 0.03289584247156062
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-absolute-4",
+          "elapsedMs": 398.0584999999992,
+          "cells": 18,
+          "runCalls": 5329,
+          "points": 3618,
+          "resultBytes": 191652,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31324565134036675,
+            "maxRelative": 0.004642559416190202
+          }
+        },
+        {
+          "modelId": "logistic-lake-36x18-absolute-5",
+          "elapsedMs": 409.53120000000126,
+          "cells": 18,
+          "runCalls": 4625,
+          "points": 3618,
+          "resultBytes": 191609,
+          "errors": {
+            "maxAbsoluteTonnes": 0.31324565134036675,
+            "maxRelative": 0.003316055382597195
+          }
+        }
+      ],
+      "points": 18090,
+      "resultBytes": 958231,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.31324565134036675,
+        "maxRelative": 0.03289584247156062
+      },
+      "failure": {
+        "modelId": "logistic-lake-36x18-absolute-6",
+        "elapsedMs": 385.48739999999816,
+        "message": "Série incomplète pour C17_5-N (196/201 points).",
+        "resultBytes": 191507
+      },
+      "stdoutBytes": [
+        191579,
+        191804,
+        191942,
+        191770,
+        191727,
+        191623
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 48,
+        "columns": 24,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "proportional",
+          "capacityFraction": 3e-7,
+          "minimum": 1e-9,
+          "maximum": 1000000000000
+        }
+      },
+      "startedAt": "2026-11-23T22:02:45.647Z",
+      "elapsedMs": 6990.266100000001,
+      "wetCells": 296,
+      "plannedBatches": 17,
+      "batches": [
+        {
+          "modelId": "logistic-lake-48x24-proportional-1",
+          "elapsedMs": 412.9340999999986,
+          "cells": 18,
+          "runCalls": 16609,
+          "points": 3618,
+          "resultBytes": 191480,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939798867833e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-2",
+          "elapsedMs": 402.39940000000206,
+          "cells": 18,
+          "runCalls": 11873,
+          "points": 3618,
+          "resultBytes": 191356,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939798675726e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-3",
+          "elapsedMs": 427.8945999999996,
+          "cells": 18,
+          "runCalls": 15385,
+          "points": 3618,
+          "resultBytes": 191443,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939798135047e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-4",
+          "elapsedMs": 455.63430000000153,
+          "cells": 18,
+          "runCalls": 9497,
+          "points": 3618,
+          "resultBytes": 191244,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939797210002e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-5",
+          "elapsedMs": 481.6919000000016,
+          "cells": 18,
+          "runCalls": 10673,
+          "points": 3618,
+          "resultBytes": 191358,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939796060426e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-6",
+          "elapsedMs": 592.5027000000009,
+          "cells": 18,
+          "runCalls": 15393,
+          "points": 3618,
+          "resultBytes": 191597,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939796760327e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-7",
+          "elapsedMs": 532.5005000000019,
+          "cells": 18,
+          "runCalls": 18833,
+          "points": 3618,
+          "resultBytes": 191882,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.51793979900962e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-8",
+          "elapsedMs": 474.5794999999998,
+          "cells": 18,
+          "runCalls": 14217,
+          "points": 3618,
+          "resultBytes": 191588,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939799214058e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-9",
+          "elapsedMs": 473.5023000000001,
+          "cells": 18,
+          "runCalls": 18873,
+          "points": 3618,
+          "resultBytes": 192157,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.517939796462771e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-10",
+          "elapsedMs": 423.4868000000024,
+          "cells": 18,
+          "runCalls": 21257,
+          "points": 3618,
+          "resultBytes": 191670,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004528579598854776,
+            "maxRelative": 9.51793979900362e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-11",
+          "elapsedMs": 355.34969999999885,
+          "cells": 18,
+          "runCalls": 21193,
+          "points": 3618,
+          "resultBytes": 192160,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0004165889794762734,
+            "maxRelative": 9.517939797633141e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-12",
+          "elapsedMs": 344.21090000000186,
+          "cells": 18,
+          "runCalls": 21209,
+          "points": 3618,
+          "resultBytes": 192193,
+          "errors": {
+            "maxAbsoluteTonnes": 0.00026900402752971786,
+            "maxRelative": 9.517939799286061e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-13",
+          "elapsedMs": 329.0842999999986,
+          "cells": 18,
+          "runCalls": 21273,
+          "points": 3618,
+          "resultBytes": 192306,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0003721008059187625,
+            "maxRelative": 9.517939798855388e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-14",
+          "elapsedMs": 321.7940000000017,
+          "cells": 18,
+          "runCalls": 20473,
+          "points": 3618,
+          "resultBytes": 193298,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0003000862578801389,
+            "maxRelative": 0.0005779936938967059
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-15",
+          "elapsedMs": 325.6470999999983,
+          "cells": 18,
+          "runCalls": 21289,
+          "points": 3618,
+          "resultBytes": 192180,
+          "errors": {
+            "maxAbsoluteTonnes": 0.00039403433453344405,
+            "maxRelative": 9.517939797829154e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-16",
+          "elapsedMs": 323.96150000000125,
+          "cells": 18,
+          "runCalls": 21241,
+          "points": 3618,
+          "resultBytes": 192109,
+          "errors": {
+            "maxAbsoluteTonnes": 0.0003645813230264139,
+            "maxRelative": 9.517939799080669e-7
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-proportional-17",
+          "elapsedMs": 312.8087000000014,
+          "cells": 8,
+          "runCalls": 9481,
+          "points": 1608,
+          "resultBytes": 85812,
+          "errors": {
+            "maxAbsoluteTonnes": 0.00018706252063793727,
+            "maxRelative": 9.517939796347003e-7
+          }
+        }
+      ],
+      "points": 59496,
+      "resultBytes": 3155833,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.0004528579598854776,
+        "maxRelative": 0.0005779936938967059
+      },
+      "aggregateErrors": {
+        "maxAbsoluteTonnes": 0.0691869769943878,
+        "maxRelative": 9.51793991183136e-7
+      },
+      "stdoutBytes": [
+        191596,
+        191472,
+        191559,
+        191362,
+        191474,
+        191717,
+        191999,
+        191707,
+        192277,
+        191787,
+        192278,
+        192311,
+        192425,
+        193419,
+        192299,
+        192229,
+        85868
+      ],
+      "atMonths": [
+        44999.99999999997,
+        87361.86632814167,
+        89918.01054395094
+      ],
+      "minCapacity": 0.00013128163444188877,
+      "minQuantum": 1e-9,
+      "maxQuantum": 0.00017672639559881257,
+      "quantumFloorCells": [
+        {
+          "id": "C41_5",
+          "capacity": 0.00013128163444188877,
+          "quantum": 1e-9
+        }
+      ]
+    },
+    {
+      "parameters": {
+        "rows": 48,
+        "columns": 24,
+        "areaKm2": 300,
+        "initialDensity": 150,
+        "capacityDensity": 300,
+        "growth": 0.35,
+        "simulation": {
+          "start": 0,
+          "end": 20
+        },
+        "samplingInterval": 0.1,
+        "quantum": {
+          "strategy": "absolute",
+          "tonnes": 0.01
+        }
+      },
+      "startedAt": "2026-11-23T22:02:52.656Z",
+      "elapsedMs": 2928.381500000003,
+      "wetCells": 296,
+      "plannedBatches": 17,
+      "batches": [
+        {
+          "modelId": "logistic-lake-48x24-absolute-1",
+          "elapsedMs": 372.2439999999988,
+          "cells": 18,
+          "runCalls": 3065,
+          "points": 3618,
+          "resultBytes": 191461,
+          "errors": {
+            "maxAbsoluteTonnes": 0.30468254922315907,
+            "maxRelative": 0.00961072313943671
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-2",
+          "elapsedMs": 329.53960000000006,
+          "cells": 18,
+          "runCalls": 2361,
+          "points": 3618,
+          "resultBytes": 191249,
+          "errors": {
+            "maxAbsoluteTonnes": 0.29204402154528,
+            "maxRelative": 0.007806112964789265
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-3",
+          "elapsedMs": 322.5926999999974,
+          "cells": 18,
+          "runCalls": 2849,
+          "points": 3618,
+          "resultBytes": 191330,
+          "errors": {
+            "maxAbsoluteTonnes": 0.25718531857089033,
+            "maxRelative": 0.022815957457031123
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-4",
+          "elapsedMs": 313.7914000000019,
+          "cells": 18,
+          "runCalls": 1825,
+          "points": 3618,
+          "resultBytes": 191098,
+          "errors": {
+            "maxAbsoluteTonnes": 0.23625238537920268,
+            "maxRelative": 0.007805976008195694
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-5",
+          "elapsedMs": 314.1641000000018,
+          "cells": 18,
+          "runCalls": 2153,
+          "points": 3618,
+          "resultBytes": 191179,
+          "errors": {
+            "maxAbsoluteTonnes": 0.22456136123804527,
+            "maxRelative": 0.007806009162633964
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-6",
+          "elapsedMs": 318.8024000000005,
+          "cells": 18,
+          "runCalls": 2777,
+          "points": 3618,
+          "resultBytes": 191549,
+          "errors": {
+            "maxAbsoluteTonnes": 0.22371390819267845,
+            "maxRelative": 0.022731193373897316
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-7",
+          "elapsedMs": 324.96320000000196,
+          "cells": 18,
+          "runCalls": 3449,
+          "points": 3618,
+          "resultBytes": 191850,
+          "errors": {
+            "maxAbsoluteTonnes": 0.2777406235765625,
+            "maxRelative": 0.02771888489687627
+          }
+        },
+        {
+          "modelId": "logistic-lake-48x24-absolute-8",
+          "elapsedMs": 318.53729999999996,
+          "cells": 18,
+          "runCalls": 2745,
+          "points": 3618,
+          "resultBytes": 191424,
+          "errors": {
+            "maxAbsoluteTonnes": 0.26200878692168317,
+            "maxRelative": 0.015749328570799487
+          }
+        }
+      ],
+      "points": 28944,
+      "resultBytes": 1531140,
+      "localErrors": {
+        "maxAbsoluteTonnes": 0.30468254922315907,
+        "maxRelative": 0.02771888489687627
+      },
+      "failure": {
+        "modelId": "logistic-lake-48x24-absolute-9",
+        "elapsedMs": 313.66359999999986,
+        "message": "Série incomplète pour C20_10-N (159/201 points).",
+        "resultBytes": 189865
+      },
+      "stdoutBytes": [
+        191580,
+        191366,
+        191446,
+        191214,
+        191295,
+        191666,
+        191968,
+        191541,
+        189982
+      ]
+    }
+  ]
+}

@@ -1,10 +1,26 @@
 import { catalog, validateRequest, type RunRequest } from '@contracts';
-import type { HttpResult } from '@/lib/api/client';
+import { ClientError, runSimulation, type HttpResult } from '@/lib/api/client';
 import { spatialRequest, type SpatialDimension } from '../../../../examples/logistic-grid';
 
 export { spatialRequest, type SpatialDimension };
-export { constantDomain, constantDomainCell, lakeDomain, spatialDimensions, type SpatialMode } from '../../../../examples/logistic-grid';
-export { lakeMeshFromGeoJson, lakeRows, lakeColumns, type LakeMesh } from '../../../../examples/logistic-lake';
+export { constantDomain, constantDomainCell, lakeDomain, lakeSurfaceAreaKm2, spatialDimensions, type LakeDomain, type SpatialMode } from '../../../../examples/logistic-grid';
+export { clipLakeMesh, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions, type LakeMesh } from '../../../../examples/logistic-lake';
+export { LakeRunError, runLakeSimulation, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
+
+export async function runLakeBatch(request: RunRequest, signal: AbortSignal): Promise<HttpResult> {
+  // ENGINE_BUSY is issued before the native process is started.
+  for (const delay of [200, 400, 800, 1600]) {
+    signal.throwIfAborted();
+    try { return await runSimulation(request, signal); }
+    catch (cause) {
+      if (!(cause instanceof ClientError && cause.code === 'ENGINE_BUSY')) throw cause;
+    }
+    const wait = AbortSignal.any([signal, AbortSignal.timeout(delay)]);
+    if (!wait.aborted) await new Promise<void>(resolve => wait.addEventListener('abort', () => resolve(), { once: true }));
+  }
+  signal.throwIfAborted();
+  return runSimulation(request, signal);
+}
 
 type SpatialSample = HttpResult['observations'][number]['samples'][number];
 
@@ -181,8 +197,10 @@ export function spatialApply(base: RunRequest, drafts: SpatialDrafts, baseCells:
 }
 
 export function spatialTimeline(request: RunRequest): number[] {
-  const { start, end } = request.simulation;
-  const interval = request.model.observations[0]?.samplingInterval;
+  return samplingTimeline(request.simulation, request.model.observations[0]?.samplingInterval);
+}
+
+export function samplingTimeline({ start, end }: RunRequest['simulation'], interval?: number): number[] {
   if (interval === undefined) return [];
 
   const count = Math.ceil((end - start) / interval);
@@ -206,7 +224,16 @@ export function spatialTrajectories(request: RunRequest, result: HttpResult, cel
 export function spatialReading(trajectory: SpatialTrajectory, time: number): SpatialReading | null {
   if (!Number.isFinite(time) || time < trajectory.start || time > trajectory.end) return null;
 
-  const native = trajectory.samples.find(sample => sameTime(sample.time, time));
+  let left = 0;
+  let right = trajectory.samples.length;
+  let native: SpatialSample | undefined;
+  while (left < right) {
+    const index = Math.floor((left + right) / 2);
+    const sample = trajectory.samples[index]!;
+    if (sameTime(sample.time, time)) { native = sample; break; }
+    if (sample.time < time) left = index + 1;
+    else right = index;
+  }
   const sample = native ?? (trajectory.constant ? trajectory.samples[0] : undefined);
   return sample ? { ...sample, ratio: sample.value / trajectory.cell.capacity,
     source: native ? 'native' : 'equilibrium' } : null;

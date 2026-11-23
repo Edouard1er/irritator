@@ -37,9 +37,10 @@ export async function getCatalog(): Promise<Catalog> {
   if (canonicalJson(body) !== canonicalJson(catalog)) throw new ClientError('RUNNER_PROTOCOL_ERROR', 'Le catalogue reçu ne correspond pas au contrat v1 partagé.');
   return body as Catalog;
 }
-export async function runSimulation(request: RunRequest): Promise<HttpResult> {
+export async function runSimulation(request: RunRequest, signal?: AbortSignal): Promise<HttpResult> {
   validateRequest(request);
-  const body = await apiJson('simulations/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+  const body = await apiJson('simulations/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
+    ...(signal ? { signal: AbortSignal.any([signal, AbortSignal.timeout(65000)]) } : {}) });
   try {
     const result = request.schemaVersion === 3 ? parseWrapperResult(body, request) : parseResult(body, request);
     const runId = (body as { runId?: unknown }).runId;

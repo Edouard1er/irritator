@@ -15,7 +15,7 @@ const colors = [
 ] as const;
 
 export function logisticSeriesColor(cell: SpatialCell): string {
-  return colors[cell.row]?.[cell.column] ?? colors[0][0];
+  return colors[cell.row % colors.length]![cell.column % colors[0].length]!;
 }
 
 type PlotPosition = {
@@ -55,7 +55,14 @@ export function LogisticTrajectoryPlot({ label, series, time, start, end }: Plot
 
   useEffect(() => {
     const element = target.current;
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      if (element?.classList.contains('js-plotly-plot')) {
+        void Promise.resolve().then(() => instance.current?.Plots.resize(element)).catch(() => {});
+      }
+    }) : undefined;
+    if (element) observer?.observe(element);
     return () => {
+      observer?.disconnect();
       if (element) instance.current?.purge(element);
       instance.current = null;
     };
