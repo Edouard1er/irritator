@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as Plotly from 'plotly.js';
 import { loadPlotly } from '@/components/charts/trajectory-plot';
-import { spatialChartSamples, spatialReading, type SpatialCell, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
+import { spatialChartSamples, spatialReading, type SpatialCell, type SpatialTotal, type SpatialTrajectory } from '@/lib/simulation/spatial-experiment';
 import styles from './logistic-spatial.module.css';
 
 const colors = [
@@ -16,11 +16,36 @@ export function logisticSeriesColor(cell: SpatialCell): string {
   return colors[cell.row]?.[cell.column] ?? colors[0][0];
 }
 
-export function LogisticTrajectories({ series, time, start, end }: {
-  series: SpatialTrajectory[];
+type PlotPosition = {
   time: number;
   start: number;
   end: number;
+};
+
+type PlotSeries = {
+  name: string;
+  points: readonly SpatialTotal[];
+  current?: number | null;
+  color: string;
+  dash: 'solid' | 'dash' | 'dot';
+  constant?: boolean;
+};
+
+export function LogisticTrajectories({ series, time, start, end }: PlotPosition & { series: SpatialTrajectory[] }) {
+  return <LogisticTrajectoryPlot label="Trajectoires logistiques" time={time} start={start} end={end}
+    series={series.map(trajectory => ({
+      name: trajectory.cell.id,
+      points: spatialChartSamples(trajectory, end),
+      current: spatialReading(trajectory, time)?.value,
+      color: logisticSeriesColor(trajectory.cell),
+      dash: trajectory.constant ? 'dash' : 'solid',
+      constant: trajectory.constant,
+    }))} />;
+}
+
+export function LogisticTrajectoryPlot({ label, series, time, start, end }: PlotPosition & {
+  label: string;
+  series: PlotSeries[];
 }) {
   const target = useRef<HTMLDivElement>(null);
   const instance = useRef<typeof Plotly>(null);
@@ -41,18 +66,15 @@ export function LogisticTrajectories({ series, time, start, end }: {
     void loadPlotly().then(async plot => {
       if (disposed) return;
       instance.current = plot;
-      const traces: Plotly.Data[] = series.flatMap(trajectory => {
-        const { cell, constant } = trajectory;
-        const points = spatialChartSamples(trajectory, end);
-        const current = spatialReading(trajectory, time);
-        const color = logisticSeriesColor(cell);
+      const traces: Plotly.Data[] = series.flatMap(({ name, points, current, color, dash, constant }) => {
+        const hasReading = current !== null && current !== undefined;
         const curve: Plotly.Data = {
           type: 'scatter',
           mode: 'lines',
-          name: cell.id,
+          name,
           x: points.map(p => p.time),
           y: points.map(p => p.value),
-          line: { color, dash: constant ? 'dash' : 'solid', width: 2.5, shape: 'linear' },
+          line: { color, dash, width: 2.5, shape: 'linear' },
           hovertemplate: constant
             ? 'Équilibre maintenu · %{y} t<extra>%{fullData.name}</extra>'
             : '%{y} t à %{x} mois<extra>%{fullData.name}</extra>',
@@ -60,9 +82,9 @@ export function LogisticTrajectories({ series, time, start, end }: {
         const marker: Plotly.Data = {
           type: 'scatter',
           mode: 'markers',
-          name: cell.id,
-          x: current ? [time] : [],
-          y: current ? [current.value] : [],
+          name,
+          x: hasReading ? [time] : [],
+          y: hasReading ? [current] : [],
           marker: { color, size: 9, line: { color: '#ffffff', width: 2 } },
           hoverinfo: 'skip',
         };
@@ -88,8 +110,8 @@ export function LogisticTrajectories({ series, time, start, end }: {
     return () => { disposed = true; };
   }, [series, time, start, end]);
 
-  return <div className={styles.chart} role="img" aria-label="Trajectoires logistiques"
-    data-time={time} data-series={series.map(item => item.cell.id).join(',')}>
+  return <div className={styles.chart} role="img" aria-label={label}
+    data-time={time} data-series={series.map(item => item.name).join(',')}>
     <div className={styles.plot} ref={target} hidden={!!error} />
     {error && <p role="alert" className={styles.chartMessage}>{error}</p>}
   </div>;

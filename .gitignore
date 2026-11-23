@@ -11,6 +11,7 @@ compile_commands.json
 !/reports/logistic-pilot/
 /reports/logistic-pilot/*
 !/reports/logistic-pilot/lot1-grille-variable-rapport.md
+!/reports/logistic-pilot/lot1-domaine-constant-rapport.md
 !/reports/web-integration-test-4.md
 !/reports/frontend-test-5.md
 !/reports/frontend-test-5/

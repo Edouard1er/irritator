@@ -366,3 +366,87 @@ test('le curseur et la lecture restent synchronisés jusqu’à la fin et après
   await expectPlottedSeries(panel, rerun, ['C02'], Number(restoredTime));
   expect(nativeRequests).toBe(2);
 });
+
+test('le domaine constant présente les observations locales et les trois sommes natives', async ({ page }) => {
+  const panel = await openExperiment(page);
+  await page.waitForLoadState('networkidle');
+  const mode = panel.getByRole('combobox', { name: 'Mode de l’expérience' });
+  await expect(mode).toHaveValue('independent');
+  await mode.selectOption('constant');
+  const dimensions = panel.getByRole('combobox', { name: 'Dimensions de la grille' });
+  await expect(dimensions).toHaveValue('3');
+  await expect(panel.getByRole('textbox')).toHaveCount(0);
+
+  const sizes = [2, 3, 4] as const;
+  const responses = sizes.map(size => page.waitForResponse(response => isSimulation(response.request()) &&
+    response.request().postDataJSON().model.id === `logistic-constant-domain-${size}x${size}`));
+  await panel.getByRole('button', { name: 'Simuler les trois grilles', exact: true }).click();
+  const results = await Promise.all(responses.map(async (pending, index) => {
+    const response = await pending;
+    expect(response.status(), await response.text()).toBe(200);
+    const size = sizes[index]!;
+    const request = response.request().postDataJSON() as RunRequest;
+    const { runId, ...result } = await response.json() as RunResult & { runId: string };
+    expect(runId).toBeTruthy();
+    expect(request.model.observations).toHaveLength(size ** 2);
+    expect(request.simulation).toEqual({ start: 0, end: 20 });
+    expect(request.model.components.find(atom => atom.id === 'C00-N')?.parameters)
+      .toEqual({ X: 1350 / size ** 2, dQ: 0.01 });
+    compareNative(result, request);
+    const sums = result.observations[0]!.samples.map((_, tick) =>
+      result.observations.reduce((total, observation) => total + observation.samples[tick]!.value, 0));
+    expect(sums).toHaveLength(201);
+    expect(sums[0]).toBe(1350);
+    return { size, result, sums, name: `${size} × ${size}` };
+  }));
+  await expect(panel.getByRole('status')).toHaveText('Terminé');
+  await expect(slider(panel)).toHaveValue('0');
+  await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', '1350');
+
+  const aggregate = panel.getByLabel('Trajectoires de biomasse totale');
+  const plot = aggregate.locator('.js-plotly-plot');
+  await expect(plot).toBeVisible();
+  await expect(aggregate).toBeInViewport();
+  await expect(aggregate).toHaveAttribute('data-series', '2 × 2,3 × 3,4 × 4');
+  const metrics = panel.getByLabel('Domaine de la grille');
+  await expect(metrics).toContainText('9 km²');
+  await expect(metrics).toContainText(formatBiomass.format(2700) + ' t');
+
+  for (const time of [10, 20]) {
+    const tick = time * 10;
+    await slider(panel).fill(String(time));
+    for (const { size, result, sums } of results) {
+      await dimensions.selectOption(String(size));
+      await expect(slider(panel)).toHaveValue(String(time));
+      await expect(panel.locator('[data-cell]')).toHaveCount(size ** 2);
+      await expect(metrics.getByText(formatBiomass.format(9 / size ** 2) + ' km²', { exact: true })).toBeVisible();
+      for (const { component, samples } of result.observations) {
+        await expect(cell(panel, component.slice(0, -2))).toHaveAttribute('data-biomass', String(samples[tick]!.value));
+      }
+      await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(sums[tick]));
+      await expect(panel.locator(`[data-total-grid="${size}"]`)).toHaveAttribute('data-biomass', String(sums[tick]));
+    }
+    await expect.poll(() => plot.evaluate((element, { grids, current }) => {
+      type Trace = { name: string; mode: string; x: number[]; y: number[]; line?: { dash: string } };
+      const traces = (element as HTMLElement & { data?: Trace[] }).data ?? [];
+      const lines = traces.filter(trace => trace.mode === 'lines');
+      return traces.length === 6 && new Set(lines.map(line => line.line?.dash)).size === 3 && grids.every(({ name, sums }) => {
+        const line = lines.find(trace => trace.name === name);
+        const marker = traces.find(trace => trace.name === name && trace.mode === 'markers');
+        return line?.x.length === sums.length && line.y.length === sums.length &&
+          sums.every((value, tick) => Math.abs(line.x[tick]! - tick / 10) < 1e-9 && line.y[tick] === value) &&
+          marker?.x[0] === current && marker.y[0] === sums[current * 10];
+      });
+    }, { grids: results.map(({ name, sums }) => ({ name, sums })), current: time })).toBe(true);
+  }
+
+  await mode.selectOption('independent');
+  await expect(dimensions).toHaveValue('3');
+  await expect(panel.getByText('Non lancé', { exact: true })).toBeVisible();
+  await expect(aggregate).toHaveCount(0);
+  await mode.selectOption('constant');
+  await expect(dimensions).toHaveValue('4');
+  await expect(slider(panel)).toHaveValue('20');
+  await expect(plot).toBeVisible();
+  await saveFrame(panel, '04-domaine-constant-t20.png');
+});

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { catalog, type RunRequest } from '@contracts';
 import { LogisticSpatialExperiment } from '@/components/simulation/logistic-spatial-experiment';
+import type { HttpResult } from '@/lib/api/client';
 import { spatialRequest } from '@/lib/simulation/spatial-experiment';
 
 vi.mock('@/components/charts/trajectory-plot', () => ({
@@ -61,6 +62,88 @@ async function launch() {
   fireEvent.click(screen.getByRole('button', { name: 'Lancer la simulation' }));
   expect(await screen.findByText('Terminé')).toHaveAttribute('data-phase', 'completed');
 }
+
+it('compare les trois grilles natives au même instant et retrouve les paramètres du mode indépendant', async () => {
+  const fetcher = vi.fn<typeof fetch>(async (_url, options) => {
+    const request = requestBody(options);
+    const body: HttpResult = await completedRun(request).json();
+    for (const [index, observation] of body.observations.entries()) {
+      observation.samples.push({ time: 20, value: observation.samples[0]!.value + index });
+    }
+    return Response.json(body);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const { container } = render(<LogisticSpatialExperiment active />);
+  const mode = screen.getByRole('combobox', { name: 'Mode de l’expérience' });
+  const dimensions = screen.getByRole('combobox', { name: 'Dimensions de la grille' });
+  expect(mode).toHaveDisplayValue('Populations indépendantes');
+  fireEvent.change(dimensions, { target: { value: '2' } });
+  fireEvent.click(cell('C11'));
+  changeField(initialLabel, '420');
+  apply();
+  expect(await screen.findByText('Terminé')).toBeVisible();
+  changeField(growthLabel, '0,42');
+
+  fireEvent.change(mode, { target: { value: 'constant' } });
+  expect(screen.queryByRole('textbox')).toBeNull();
+  expect(screen.getByRole('combobox', { name: 'Dimensions de la grille' })).toHaveValue('3');
+  const metrics = screen.getByLabelText('Domaine de la grille');
+  expect(metrics).toHaveTextContent(/Surface totale9 km²/);
+  expect(metrics).toHaveTextContent(/Surface par cellule1 km²/);
+  expect(metrics).toHaveTextContent(/Capacité totale2\s700 t/);
+  fireEvent.click(screen.getByRole('button', { name: 'Simuler les trois grilles' }));
+  expect(await screen.findByText('Terminé')).toBeVisible();
+  expect(fetcher.mock.calls.slice(1).map(([, options]) => requestBody(options)))
+    .toEqual([spatialRequest(2, 'constant'), spatialRequest(3, 'constant'), spatialRequest(4, 'constant')]);
+  expect(container.querySelector('[data-total-biomass]')).toHaveAttribute('data-total-biomass', '1350');
+
+  fireEvent.change(screen.getByRole('slider'), { target: { value: '20' } });
+  for (const [size, total] of [[2, 1356], [3, 1386], [4, 1470]]) {
+    expect(container.querySelector(`[data-total-grid="${size}"]`)).toHaveAttribute('data-biomass', String(total));
+  }
+  fireEvent.change(screen.getByRole('combobox', { name: 'Dimensions de la grille' }), { target: { value: '4' } });
+  expect(screen.getByRole('slider')).toHaveValue('20');
+  expect(metrics).toHaveTextContent(/Surface par cellule0,5625 km²/);
+  expect(container.querySelector('[data-total-biomass]')).toHaveAttribute('data-total-biomass', '1470');
+  expect(cell('C33')).toHaveAttribute('data-biomass', '99.375');
+
+  fireEvent.change(mode, { target: { value: 'independent' } });
+  expect(screen.getByRole('combobox', { name: 'Dimensions de la grille' })).toHaveValue('2');
+  expect(field(initialLabel)).toHaveValue('420');
+  expect(field(growthLabel)).toHaveValue('0,42');
+  expect(cell('C11')).toHaveAttribute('data-biomass', '420');
+  expect(fetcher).toHaveBeenCalledTimes(4);
+});
+
+it('retire la comparaison si une grille échoue et relance les trois tailles', async () => {
+  let fail = false;
+  const fetcher = vi.fn<typeof fetch>(async (_url, options) => {
+    const request = requestBody(options);
+    if (fail && request.model.id === 'logistic-constant-domain-3x3') {
+      return Response.json({ error: { code: 'ENGINE_UNAVAILABLE', message: 'Indisponible.' } }, { status: 503 });
+    }
+    return completedRun(request);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<LogisticSpatialExperiment active />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Mode de l’expérience' }), { target: { value: 'constant' } });
+  const launchComparison = screen.getByRole('button', { name: 'Simuler les trois grilles' });
+  fireEvent.click(launchComparison);
+  expect(await screen.findByText('Terminé')).toBeVisible();
+
+  fail = true;
+  fireEvent.click(launchComparison);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Grille 3 × 3 · ENGINE_UNAVAILABLE');
+  expect(screen.queryByLabelText('Trajectoires de biomasse totale')).toBeNull();
+  expect(screen.getByRole('slider')).toBeDisabled();
+  expect(fetcher).toHaveBeenCalledTimes(5);
+
+  fail = false;
+  fireEvent.click(launchComparison);
+  expect(await screen.findByText('Terminé')).toBeVisible();
+  expect(screen.getByRole('slider')).toBeEnabled();
+  expect(fetcher).toHaveBeenCalledTimes(8);
+});
 
 it('garde les brouillons séparés et publie les paramètres de la seule cellule appliquée', async () => {
   const fetcher = vi.fn<typeof fetch>(async (_url, options) => completedRun(requestBody(options)));

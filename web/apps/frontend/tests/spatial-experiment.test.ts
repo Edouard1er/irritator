@@ -3,7 +3,7 @@ import type { HttpResult } from '@/lib/api/client';
 import reference from '../../../examples/logistic-nine-cells-v1.json';
 import {
   spatialApply, spatialCells, spatialChartSamples, spatialDrafts, spatialReading, spatialRequest, spatialResize,
-  spatialTimeline, spatialTrajectories, type SpatialDimension, type SpatialDraft,
+  spatialTimeline, spatialTotals, spatialTrajectories, type SpatialDimension, type SpatialDraft,
 } from '@/lib/simulation/spatial-experiment';
 
 const nativeSamples = [
@@ -83,6 +83,24 @@ describe('Expérience logistique spatiale', () => {
     expect(spatialReading(active, 19.8)).toBeNull();
     expect(spatialReading(active, 20)).toBeNull();
     expect(spatialChartSamples(active)).toBe(active.samples);
+  });
+
+  it('additionne uniquement les observations de toutes les cellules au même instant', () => {
+    const request = spatialRequest(2, 'constant');
+    const cells = spatialCells(request);
+    const observations = cells.map(({ component, samplingInterval, initial }, index) => ({
+      component, samplingInterval, samples: [
+        { time: 0, value: initial },
+        { time: 0.30000000000000004, value: 340 + index },
+        ...(index === 0 ? [] : [{ time: 0.4, value: 350 + index }]),
+      ],
+    })).reverse();
+    const trajectories = spatialTrajectories(request, nativeResult(observations));
+    expect(spatialTotals(trajectories, [0, 0.3, 0.4, 20])).toEqual([
+      { time: 0, value: 1350 }, { time: 0.3, value: 1366 },
+      { time: 0.4, value: null }, { time: 20, value: null },
+    ]);
+    expect(spatialTotals([], [0])).toEqual([{ time: 0, value: null }]);
   });
 
   it('prolonge les équilibres confirmés seulement à l’intérieur de l’horizon simulé', () => {

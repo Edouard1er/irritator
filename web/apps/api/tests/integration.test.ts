@@ -111,6 +111,32 @@ test('variable logistic grid rejects tighter model and sampling budgets before n
   }
 });
 
+test('constant-domain logistic grids complete through Fastify with all native samples', async () => {
+  const app = buildApp(readConfig());
+  try {
+    for (const dimension of [2, 3, 4] as const) {
+      const request = spatialRequest(dimension, 'constant');
+      const response = await app.inject({ method: 'POST', url: '/api/v1/simulations/run', payload: request });
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json<RunResult>();
+      assert.equal(result.status, 'completed');
+      assert.equal(result.modelId, request.model.id);
+      assert.equal(result.simulation.finalTime, 20);
+      assert.equal(result.observations.length, dimension ** 2);
+      let initial = 0;
+      for (const { samples } of result.observations) {
+        assert.equal(samples.length, 201);
+        assert.equal(samples[0]!.time, 0);
+        assert.equal(samples.at(-1)!.time, 20);
+        initial += samples[0]!.value;
+      }
+      assert.equal(initial, 1350);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 test('HTTP disconnection releases native process slot',{timeout:15000},async()=>{
   const config={...readConfig(),maxConcurrent:1,timeoutMs:5000};
   let notifyStarted!: () => void;

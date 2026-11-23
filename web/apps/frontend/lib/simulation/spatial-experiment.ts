@@ -3,6 +3,7 @@ import type { HttpResult } from '@/lib/api/client';
 import { spatialRequest, type SpatialDimension } from '../../../../examples/logistic-grid';
 
 export { spatialRequest, type SpatialDimension };
+export { constantDomain, constantDomainCell, spatialDimensions, type SpatialMode } from '../../../../examples/logistic-grid';
 
 type SpatialSample = HttpResult['observations'][number]['samples'][number];
 
@@ -30,6 +31,22 @@ export type SpatialReading = SpatialSample & {
   ratio: number;
   source: 'native' | 'equilibrium';
 };
+
+export type SpatialTotal = { time: number; value: number | null };
+
+export function spatialTotals(trajectories: readonly SpatialTrajectory[], timeline: readonly number[]): SpatialTotal[] {
+  return timeline.map(time => {
+    if (trajectories.length === 0) return { time, value: null };
+
+    let value = 0;
+    for (const trajectory of trajectories) {
+      const reading = spatialReading(trajectory, time);
+      if (!reading) return { time, value: null };
+      value += reading.value;
+    }
+    return { time, value };
+  });
+}
 
 export type SpatialDraft = { initial: string; growth: string; capacity: string };
 export type SpatialDrafts = Record<string, SpatialDraft>;
