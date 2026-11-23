@@ -23,6 +23,11 @@ const wetPercent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumSig
 const surface = new Intl.NumberFormat('fr-FR', { maximumSignificantDigits: 5 });
 const lakeComparisonMonths = [0, 10, 20];
 const lakeGradientNotice = 'Gradient biologique synthétique — non calibré';
+const lakeDistributionOptions = [
+  { kind: 'homogeneous', label: 'Distribution homogène' },
+  { kind: 'gradient', label: 'Gradient nord-sud' },
+  { kind: 'wet-gradient', label: 'Gradient pondéré par surface humide' },
+] as const;
 type LakeInputs = { resolution: string; kind: LakeDistribution['kind']; alpha: number };
 const defaultLakeInputs: LakeInputs = { resolution: lakeResolutionId(lakeResolutions[0]), kind: 'homogeneous', alpha: 0.3 };
 const legend = [
@@ -374,11 +379,10 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
 
   const trace = lake && phase.status !== 'running' && !lakePreparing && !lakeConfigurationError
     ? lakeTraces[lakeConfigurationId(lake.domain.parameters)] : undefined;
-  const gradient = lake?.domain.parameters.distribution;
-  const homogeneousComparison = lakeComparisons[`${lakeInputs.resolution}-homogeneous`];
-  const gradientComparison = lakeComparisons[`${lakeInputs.resolution}-gradient-${lakeInputs.alpha}`];
+  const distribution = lake?.domain.parameters.distribution;
+  const gradient = distribution?.kind === 'homogeneous' ? undefined : distribution;
   const fullscreenControls = <>
-    {gradient?.kind === 'gradient' && <span className={styles.gradientNotice}>{lakeGradientNotice}</span>}
+    {gradient && <span className={styles.gradientNotice}>{lakeGradientNotice}</span>}
     <label className={styles.fullscreenTime}>
       {selected} · {month.format(time)} mois
       <input type="range" aria-label="Temps en plein écran" min={simulation.start} max={simulation.end}
@@ -391,14 +395,14 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
     {lake && <div className={styles.lakeOptions}>
       <label className={styles.dimensions}>
         Distribution biologique
-        <select value={lakeInputs.kind} onChange={event => void changeLakeConfiguration({
-          ...lakeInputs, kind: event.currentTarget.value === 'gradient' ? 'gradient' : 'homogeneous',
-        })}>
-          <option value="homogeneous">Distribution homogène</option>
-          <option value="gradient">Gradient synthétique nord-sud</option>
+        <select value={lakeInputs.kind} onChange={event => {
+          const option = lakeDistributionOptions.find(({ kind }) => kind === event.currentTarget.value);
+          if (option) void changeLakeConfiguration({ ...lakeInputs, kind: option.kind });
+        }}>
+          {lakeDistributionOptions.map(({ kind, label }) => <option key={kind} value={kind}>{label}</option>)}
         </select>
       </label>
-      {lakeInputs.kind === 'gradient' && <>
+      {lakeInputs.kind !== 'homogeneous' && <>
         <label className={styles.gradientIntensity}>
           <span>Intensité du gradient α <strong>{formatParameter(lakeInputs.alpha)}</strong></span>
           <input type="range" min={0} max={lakeMaxAlpha} step={0.01} value={lakeInputs.alpha}
@@ -461,24 +465,27 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
       <strong className={styles.time} aria-label="Instant consulté" data-time={time}>{month.format(time)} <small>mois</small></strong>
     </section>
 
-    {lake && (lakeInputs.kind === 'gradient' || gradientComparison) && <div className={styles.lakeComparison}>
+    {lake && <div className={styles.lakeComparison}>
       <table>
         <caption>Biomasses totales simulées (t) · Grille {lakeInputs.resolution.replace('x', ' × ')}</caption>
         <thead><tr><th scope="col">Distribution</th>
           {lakeComparisonMonths.map(instant => <th key={instant} scope="col">{instant} mois</th>)}
         </tr></thead>
         <tbody>
-          {([
-            ['Distribution homogène', homogeneousComparison],
-            [`Gradient nord-sud · α = ${formatParameter(lakeInputs.alpha)}`, gradientComparison],
-          ] as const).map(([label, points]) => <tr key={label}><th scope="row">{label}</th>
-            {lakeComparisonMonths.map((instant, index) => {
-              const value = points?.[index]?.value;
-              return <td key={instant} data-comparison-biomass={value ?? undefined}>
-                {value == null ? 'À simuler' : biomass.format(value)}
-              </td>;
-            })}
-          </tr>)}
+          {lakeDistributionOptions.map(({ kind, label }) => {
+            const alpha = lakeInputs.alpha;
+            const id = lakeDistributionId(kind === 'homogeneous' ? { kind } : { kind, alpha });
+            const points = lakeComparisons[`${lakeInputs.resolution}-${id}`];
+            return <tr key={kind}>
+              <th scope="row">{label}{kind !== 'homogeneous' && ` · α = ${formatParameter(alpha)}`}</th>
+              {lakeComparisonMonths.map((instant, index) => {
+                const value = points?.[index]?.value;
+                return <td key={instant} data-comparison-biomass={value ?? undefined}>
+                  {value == null ? 'À simuler' : biomass.format(value)}
+                </td>;
+              })}
+            </tr>;
+          })}
         </tbody>
       </table>
     </div>}
@@ -521,7 +528,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
         {lake ? <>
           <SpatialFullscreen active={active} label="Carte du lac" controls={fullscreenControls}>
             <LogisticLakeGrid key={lakeResolutionId(lake.mesh)} mesh={lake.mesh} cells={lake.domain.cells}
-              showLowRatios={gradient?.kind === 'gradient' && gradient.alpha > 0}
+              showLowRatios={gradient !== undefined && gradient.alpha > 0}
               trajectories={byId} time={time} selected={selected} select={setSelected} />
           </SpatialFullscreen>
           <p className={styles.coverage}>La surface de référence est répartie selon la fraction humide des cases dans la projection locale.</p>
@@ -592,7 +599,7 @@ function SpatialExperimentMode({ mode, visible, active, lakeConfiguration }: Vis
           <div><dt>Taux de croissance r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>
           <div><dt>Capacité de charge K</dt><dd>{biomass.format(selectedCell.capacity)} t</dd></div>
           <div><dt>Biomasse observée</dt><dd>{selectedReading ? `${biomass.format(selectedReading.value)} t` : '—'}</dd></div>
-          {gradient?.kind === 'gradient' && <div><dt>Rapport local B/K</dt><dd>{selectedReading ? percent.format(selectedReading.ratio) : '—'}</dd></div>}
+          {gradient && <div><dt>Rapport local B/K</dt><dd>{selectedReading ? percent.format(selectedReading.ratio) : '—'}</dd></div>}
         </dl> : fixed ? <dl className={styles.parameters} aria-label="Paramètres de la cellule">
           <div><dt>N₀</dt><dd>{biomass.format(selectedCell.initial)} t</dd></div>
           <div><dt>r</dt><dd>{biomass.format(selectedCell.growth)} mois⁻¹</dd></div>

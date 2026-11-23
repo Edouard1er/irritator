@@ -7,6 +7,23 @@ import { lakeDomain, lakeSurfaceAreaKm2 } from '../../../examples/logistic-grid'
 const rectangle = (left: number, top: number, right: number, bottom: number) =>
   [[left, top], [right, top], [right, bottom], [left, bottom]] as const;
 
+test.each([
+  { name: 'rectangle', rings: [rectangle(0.2, 0.1, 0.8, 0.5)], area: 0.24, x: 0.5, y: 0.3 },
+  { name: 'triangle', rings: [[[0, 0], [1, 0], [0, 1]]], area: 0.5, x: 1 / 3, y: 1 / 3 },
+  { name: 'contour concave', rings: [[[0, 0], [1, 0], [1, 0.25], [0.25, 0.25], [0.25, 1], [0, 1]]],
+    area: 7 / 16, x: 19 / 56, y: 19 / 56 },
+  { name: 'île intérieure', rings: [rectangle(0, 0, 1, 1), rectangle(0.125, 0.25, 0.375, 0.5)],
+    area: 15 / 16, x: 31 / 60, y: 61 / 120 },
+] as const)('calcule l’aire et le centroïde humides pour $name', ({ rings, area, x, y }) => {
+  for (const input of [[...rings], rings.map(ring => [...ring].reverse())]) {
+    const { cells } = clipLakeMesh(input, 3, 6);
+    expect(cells).toHaveLength(1);
+    expect(cells[0]!.wetFraction).toBeCloseTo(area, 13);
+    expect(cells[0]!.wetCentroid[0]).toBeCloseTo(x, 13);
+    expect(cells[0]!.wetCentroid[1]).toBeCloseTo(y, 13);
+  }
+});
+
 test('soustrait les îles qui traversent une limite et exclut une case couverte par une île', () => {
   const outer = rectangle(0, 0, 3, 6);
   const crossing = rectangle(0.25, 0.25, 1.25, 0.75);
@@ -21,10 +38,23 @@ test('soustrait les îles qui traversent une limite et exclut une case couverte 
 
 test('additionne les deux fragments disjoints d’une case qui coupe un contour concave', () => {
   const mesh = clipLakeMesh([[[0.1, 0.1], [0.3, 0.1], [0.3, 1.2], [0.7, 1.2],
-    [0.7, 0.1], [0.9, 0.1], [0.9, 1.5], [0.1, 1.5]]], 3, 6);
+    [0.7, 0.4], [0.9, 0.4], [0.9, 1.5], [0.1, 1.5]]], 3, 6);
   expect(mesh.cells.map(cell => cell.id)).toEqual(['C00', 'C10']);
-  expect(mesh.cells[0]!.wetFraction).toBeCloseTo(0.36, 13);
+  expect(mesh.cells[0]!.wetFraction).toBeCloseTo(0.3, 13);
+  expect(mesh.cells[0]!.wetCentroid[0]).toBeCloseTo(0.44, 13);
+  expect(mesh.cells[0]!.wetCentroid[1]).toBeCloseTo(0.61, 13);
   expect(mesh.cells[1]!.wetFraction).toBeCloseTo(0.32, 13);
+});
+
+test('pondère la biomasse par les centroïdes des fragments humides retenus', () => {
+  const mesh = clipLakeMesh([[[0, 0], [1, 0], [0, 2]]], 3, 6);
+  const { cells } = lakeDomain(mesh, 'proportional', { kind: 'wet-gradient', alpha: 0.6 });
+  // The lower triangle has area 1/4 and centroid y = 4/3. The upper
+  // trapezoid has area 3/4 and centroid y = 4/9 by subtraction.
+  const weights = [225 * (1 + 0.6 * (0.5 - (4 / 9) / 6)), 75 * (1 + 0.6 * (0.5 - (4 / 3) / 6))];
+  expect(cells.map(cell => cell.area)).toEqual([225, 75]);
+  expect(cells[0]!.initial).toBeCloseTo(45_000 * weights[0]! / (weights[0]! + weights[1]!), 9);
+  expect(cells.reduce((sum, cell) => sum + cell.initial, 0)).toBe(45_000);
 });
 
 test('conserve un fragment résolu et comptabilise le résidu sous le seuil', () => {
@@ -60,7 +90,23 @@ test.each([
     return area + (nx - x) * (ny + y) / 2;
   }, 0)));
   const net = areas.slice(1).reduce((area, hole) => area - hole, areas[0]!);
-  expect(Math.abs(sum * mesh.width * mesh.height / (mesh.rows * mesh.columns) - net)).toBeLessThan(1e-12);
+  const cellArea = mesh.width * mesh.height / (mesh.rows * mesh.columns);
+  expect(Math.abs(sum * cellArea - net)).toBeLessThan(1e-12);
+  // Independently integrate the latitude moment over the uncut contour.
+  const moments = mesh.rings.map(ring => Math.abs(ring.reduce((moment, [x, y], index) => {
+    const [nx, ny] = ring[(index + 1) % ring.length]!;
+    return moment + (nx - x) * (y * y + y * ny + ny * ny) / 6;
+  }, 0)));
+  const northSouthMoment = moments.slice(1).reduce((moment, hole) => moment - hole, moments[0]!);
+  const tiledMoment = mesh.cells.reduce((moment, cell) => moment + cell.wetFraction * cell.wetCentroid[1], 0);
+  expect(Math.abs(tiledMoment * cellArea - northSouthMoment)).toBeLessThan(1e-12);
+  expect(mesh.cells.some(cell => Math.abs(cell.wetCentroid[1] - (cell.y + cell.height / 2)) > 0.01 * cell.height)).toBe(true);
+  for (const { x, y, width, height, wetCentroid: [cx, cy] } of mesh.cells) {
+    expect(cx).toBeGreaterThanOrEqual(x);
+    expect(cx).toBeLessThanOrEqual(x + width);
+    expect(cy).toBeGreaterThanOrEqual(y);
+    expect(cy).toBeLessThanOrEqual(y + height);
+  }
   expect(mesh.cells.every(({ wetFraction }) => wetFraction > 0 && wetFraction <= 1)).toBe(true);
   const domain = lakeDomain(mesh);
   for (const cell of domain.cells) expect(Math.abs(cell.area / lakeSurfaceAreaKm2 - cell.wetFraction / sum)).toBeLessThan(1e-12);

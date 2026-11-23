@@ -11,10 +11,10 @@ export const lakeResolutions = [
 export type LakeResolution = typeof lakeResolutions[number];
 export const lakeResolutionId = ({ rows, columns }: { rows: number; columns: number }) => `${rows}x${columns}`;
 export const lakeMaxAlpha = 0.6;
-export type LakeDistribution = { kind: 'homogeneous' } | { kind: 'gradient'; alpha: number };
+export type LakeDistribution = { kind: 'homogeneous' } | { kind: 'gradient' | 'wet-gradient'; alpha: number };
 
 export function lakeDistributionId(distribution: LakeDistribution): string {
-  return distribution.kind === 'gradient' ? `gradient-${distribution.alpha}` : distribution.kind;
+  return distribution.kind === 'homogeneous' ? distribution.kind : `${distribution.kind}-${distribution.alpha}`;
 }
 
 type Point = readonly [number, number];
@@ -26,6 +26,7 @@ export type LakeCell = Bounds & {
   row: number;
   column: number;
   wetFraction: number;
+  wetCentroid: Point;
 };
 
 export type LakeMesh = LakeResolution & {
@@ -64,8 +65,8 @@ export function lakeMeshFromGeoJson(data: unknown, resolution: LakeResolution = 
   return clipLakeMesh(projected, width, 1, resolution);
 }
 
-// Half-plane clipping preserves the signed area integral, including when a
-// concave ring's clipped pieces are joined by cancelling edges on the boundary.
+// Half-plane clipping preserves area and first moments. When a concave ring
+// splits, overlapping boundary edges between its pieces cancel in the sums.
 function clipRing(ring: Ring, axis: 0 | 1, boundary: number, keepGreater: boolean): Ring {
   const clipped: Point[] = [];
   if (!ring.length) return clipped;
@@ -84,18 +85,26 @@ function clipRing(ring: Ring, axis: 0 | 1, boundary: number, keepGreater: boolea
   return clipped;
 }
 
-function clippedArea(ring: Ring, { x, y, width, height }: Bounds): number {
+function clippedMoments(ring: Ring, { x, y, width, height }: Bounds) {
   let local: Ring = ring.map(([px, py]) => [(px - x) / width, (py - y) / height]);
   local = clipRing(clipRing(local, 0, 0, true), 0, 1, false);
   local = clipRing(clipRing(local, 1, 0, true), 1, 1, false);
-  if (local.length < 3) return 0;
+  if (local.length < 3) return { area: 0, momentX: 0, momentY: 0 };
   let twiceArea = 0;
+  let sixMomentX = 0;
+  let sixMomentY = 0;
   let [px, py] = local.at(-1)!;
   for (const [qx, qy] of local) {
-    twiceArea += px * qy - py * qx;
+    const cross = px * qy - py * qx;
+    twiceArea += cross;
+    sixMomentX += (px + qx) * cross;
+    sixMomentY += (py + qy) * cross;
     [px, py] = [qx, qy];
   }
-  return Math.abs(twiceArea) / 2;
+  if (twiceArea === 0) return { area: 0, momentX: 0, momentY: 0 };
+  const orientation = Math.sign(twiceArea);
+  return { area: Math.abs(twiceArea) / 2,
+    momentX: orientation * sixMomentX / 6, momentY: orientation * sixMomentY / 6 };
 }
 
 /** Rings are open in display coordinates, with the exterior first. */
@@ -115,14 +124,25 @@ export function clipLakeMesh(rings: Ring[], width: number, height: number, resol
     for (let column = 0; column < columns; column++) {
       const bounds = { x: column * width / columns, y: row * height / rows,
         width: width / columns, height: height / rows };
-      const fraction = holes.reduce((area, hole) => area - clippedArea(hole, bounds), clippedArea(outer, bounds));
+      const wet = clippedMoments(outer, bounds);
+      for (const hole of holes) {
+        const dry = clippedMoments(hole, bounds);
+        wet.area -= dry.area;
+        wet.momentX -= dry.momentX;
+        wet.momentY -= dry.momentY;
+      }
+      const fraction = wet.area;
       if (fraction < -fractionTolerance || fraction > 1 + fractionTolerance) {
         throw new Error('La fraction humide calculée est hors limites.');
       }
       if (fraction <= fractionTolerance) discardedWetFraction += Math.max(0, fraction);
       else {
         const id = rows === lakeRows ? `C${row}${column}` : `C${row}_${column}`;
-        cells.push({ ...bounds, id, row, column, wetFraction: Math.min(1, fraction) });
+        // Moments use cell-local coordinates. Bound roundoff at cell edges.
+        const localX = Math.min(1, Math.max(0, wet.momentX / fraction));
+        const localY = Math.min(1, Math.max(0, wet.momentY / fraction));
+        cells.push({ ...bounds, id, row, column, wetFraction: Math.min(1, fraction),
+          wetCentroid: [bounds.x + bounds.width * localX, bounds.y + bounds.height * localY] });
       }
     }
   }

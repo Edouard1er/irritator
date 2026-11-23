@@ -859,3 +859,64 @@ test('le gradient nord-sud relance les six maillages et compare les observations
   expect(trace.aggregateErrors.maxAbsoluteTonnes).toBeLessThan(1);
   expect(errors).toEqual([]);
 });
+
+test('le gradient pondéré compare les trois distributions et conserve la lecture et la trace natives', async ({ page }) => {
+  const panel = await openExperiment(page);
+  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('lake');
+  const distribution = panel.getByRole('combobox', { name: 'Distribution biologique' });
+  const intensity = panel.getByRole('slider', { name: 'Intensité du gradient α' });
+  const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
+  const comparison = panel.getByRole('table', { name: /Biomasses totales simulées/ });
+  const homogeneous = await executeRequest(page, panel);
+  await distribution.selectOption('gradient');
+  await intensity.fill('0.6');
+  const row = await executeRequest(page, panel);
+  await distribution.selectOption({ label: 'Gradient pondéré par surface humide' });
+  await expect(intensity).toHaveValue('0.6');
+  const weighted = await executeRequest(page, panel);
+  expect(weighted.request.model.id).toBe('logistic-lake-6x3-proportional-wg0p6-1');
+  expect(weighted.result.observations).toHaveLength(13);
+  expect(weighted.result.observations.every(series => series.samples.length === 201)).toBe(true);
+  const initialValues = (request: RunRequest) => request.model.components
+    .filter(atom => atom.type === 'qss3_integrator').map(atom => atom.parameters.X!);
+  expect(initialValues(weighted.request)).not.toEqual(initialValues(row.request));
+  expect(initialValues(weighted.request).reduce((sum, value) => sum + value, 0)).toBe(45_000);
+  for (const [label, run] of [
+    [/Distribution homogène/, homogeneous], [/Gradient nord-sud · α = 0,6/, row],
+    [/Gradient pondéré par surface humide · α = 0,6/, weighted],
+  ] as const) {
+    const cells = comparison.getByRole('row', { name: label }).getByRole('cell');
+    for (const [index, tick] of [0, 100, 200].entries()) {
+      const total = run.result.observations.reduce((sum, series) => sum + series.samples[tick]!.value, 0);
+      await expect(cells.nth(index)).toHaveAttribute('data-comparison-biomass', String(total));
+    }
+  }
+
+  await slider(panel).fill('10');
+  await panel.getByRole('button', { name: 'Plein écran · Carte du lac', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.textContent)).toContain('Gradient biologique synthétique — non calibré');
+  const fullscreenTime = panel.getByRole('slider', { name: 'Temps en plein écran' });
+  await expect(fullscreenTime).toHaveValue('10');
+  await panel.getByRole('button', { name: 'Zoom avant', exact: true }).click();
+  await expect(grid).toHaveAttribute('data-zoom', '1.5');
+  await fullscreenTime.fill('12');
+  await expect(grid).toHaveAttribute('data-time', '12');
+  await panel.getByRole('button', { name: 'Quitter le plein écran · Carte du lac', exact: true }).click();
+  await expect(slider(panel)).toHaveValue('12');
+
+  const downloading = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Télécharger la trace JSON' }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('lac-de-guiers-6x3-wet-gradient-0.6.json');
+  expect(JSON.parse(readFileSync(await download.path(), 'utf8'))).toMatchObject({
+    parameters: { rows: 6, columns: 3, distribution: { kind: 'wet-gradient', alpha: 0.6 } },
+    points: 13 * 201, plannedBatches: 1, batches: [{ modelId: weighted.request.model.id }],
+  });
+
+  await intensity.fill('0');
+  const zero = await executeRequest(page, panel);
+  expect(zero).toEqual(homogeneous);
+  await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('12x6');
+  await expect(comparison).toHaveAccessibleName(/12 × 6/);
+  await expect(comparison.getByText('À simuler', { exact: true })).toHaveCount(9);
+});

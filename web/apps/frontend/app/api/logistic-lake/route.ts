@@ -11,13 +11,13 @@ export async function GET(request: Request) {
   const kind = query.get('distribution');
   const rawAlpha = query.get('alpha');
   const alpha = Number(rawAlpha);
-  if (!resolution || (kind !== 'homogeneous' && kind !== 'gradient') ||
-    (kind === 'gradient' && (!rawAlpha?.trim() || !Number.isFinite(alpha) || alpha < 0 || alpha > lakeMaxAlpha))) {
+  if (!resolution || (kind !== 'homogeneous' && kind !== 'gradient' && kind !== 'wet-gradient') ||
+    (kind !== 'homogeneous' && (!rawAlpha?.trim() || !Number.isFinite(alpha) || alpha < 0 || alpha > lakeMaxAlpha))) {
     return Response.json({ message: 'Résolution, distribution ou intensité du gradient invalide.' }, { status: 400 });
   }
 
   const source = await readFile(resolve('data/geography/lac-de-guiers.hydrolakes.geojson'), 'utf8');
   const mesh = lakeMeshFromGeoJson(JSON.parse(source), resolution);
-  const domain = lakeDomain(mesh, 'proportional', kind === 'gradient' ? { kind, alpha } : { kind });
+  const domain = lakeDomain(mesh, 'proportional', kind === 'homogeneous' ? { kind } : { kind, alpha });
   return Response.json({ mesh, domain, reference: lakeReference(domain) } satisfies LakePlan);
 }

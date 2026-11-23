@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { caps, parseResult } from '../../dist/packages/contracts/index.js';
 import { lakeDomain } from '../../dist/examples/logistic-grid.js';
 import { lakeMeshFromGeoJson, lakeResolutions } from '../../dist/examples/logistic-lake.js';
-import { runLakeSimulation } from '../../dist/examples/logistic-lake-analysis.js';
+import { lakeReference, runLakeSimulation } from '../../dist/examples/logistic-lake-analysis.js';
 import { LakeRunError } from '../../dist/examples/logistic-lake-run.js';
 
 const geojson = readFileSync(new URL('../../apps/frontend/data/geography/lac-de-guiers.hydrolakes.geojson', import.meta.url));
@@ -327,5 +327,116 @@ test('P1.10 — Gradient conservatif et reproductible sur les six grilles', asyn
     t.diagnostic(JSON.stringify({ grid, meshComparison: '48x24', maxMeshDifference,
       timeOfMax: meshDifferences.findIndex(value => Math.abs(value) === maxMeshDifference) / 10,
       atMonths: [meshDifferences[0], meshDifferences[100], meshDifferences[200]] }));
+  }
+});
+
+function trajectoryDifference(series, reference, interval) {
+  const differences = series.map((value, tick) => value - reference[tick]);
+  const maxAbsolute = Math.max(...differences.map(Math.abs));
+  const tick = differences.findIndex(value => Math.abs(value) === maxAbsolute);
+  return { maxAbsolute, timeOfMax: Number((tick * interval).toFixed(1)),
+    atMonths: [differences[0], differences[100], differences[200]] };
+}
+
+test('P1.11 — Sépare les écarts analytiques de maillage et les erreurs QSS3', async t => {
+  const casesByResolution = lakeResolutions.map(resolution => {
+    const mesh = lakeMeshFromGeoJson(source, resolution);
+    const homogeneous = lakeDomain(mesh);
+    const baseline = lakeReference(homogeneous);
+    const zero = lakeDomain(mesh, 'proportional', { kind: 'wet-gradient', alpha: 0 });
+    assert.deepEqual(zero.batches, homogeneous.batches);
+    assert.deepEqual(lakeReference(zero), baseline);
+    const cases = [0.3, 0.6].map(alpha => {
+      const scenarios = ['gradient', 'wet-gradient'].map(kind => {
+        const domain = lakeDomain(mesh, 'proportional', { kind, alpha });
+        const reference = lakeReference(domain);
+        const sums = {
+          area: domain.cells.reduce((sum, cell) => sum + cell.area, 0),
+          initial: domain.cells.reduce((sum, cell) => sum + cell.initial, 0),
+          capacity: domain.cells.reduce((sum, cell) => sum + cell.capacity, 0),
+        };
+        assert.ok(Math.abs(sums.area - 300) < 1e-10);
+        assert.ok(Math.abs(sums.initial - 45_000) < 1e-8);
+        assert.ok(Math.abs(sums.capacity - 90_000) < 1e-8);
+        if (kind === 'wet-gradient') assert.equal(sums.initial, 45_000);
+        for (const [index, cell] of domain.cells.entries()) {
+          assert.ok(cell.initial > 0 && cell.initial < cell.capacity);
+          assert.equal(cell.area, homogeneous.cells[index].area);
+          assert.equal(cell.growth, 0.35);
+          assert.equal(cell.capacity, 300 * cell.area);
+          assert.equal(cell.quantum, homogeneous.cells[index].quantum);
+        }
+        // At fixed r, the logistic flow is strictly concave in the initial
+        // B/K for t > 0. The capacities are the weights in Jensen's inequality.
+        assert.ok(new Set(domain.cells.map(cell => cell.initial / cell.capacity)).size > 1);
+        assert.ok(Math.abs(reference.total[0] - baseline.total[0]) < 1e-8);
+        assert.ok(reference.total.slice(1).every((value, tick) => value < baseline.total[tick + 1]));
+        return { domain, reference, sums };
+      });
+      return { alpha, scenarios };
+    });
+    return { resolution, homogeneous, zero, cases };
+  });
+  const finest = casesByResolution.at(-1);
+  const analytical = casesByResolution.flatMap(({ resolution, cases }) => cases.map(({ alpha, scenarios }, intensity) => {
+    const [row, wet] = scenarios;
+    const [fineRow, fineWet] = finest.cases[intensity].scenarios;
+    const interval = wet.domain.parameters.samplingInterval;
+    return { grid: `${resolution.rows}x${resolution.columns}`, alpha,
+      rowVsFinest: trajectoryDifference(row.reference.total, fineRow.reference.total, interval),
+      wetVsFinest: trajectoryDifference(wet.reference.total, fineWet.reference.total, interval),
+      rowVsWet: trajectoryDifference(row.reference.total, wet.reference.total, interval) };
+  }));
+
+  const native = [];
+  for (const { resolution, homogeneous, zero, cases } of casesByResolution) {
+    const grid = `${resolution.rows}x${resolution.columns}`;
+    if (resolution === lakeResolutions[0]) {
+      const historical = await runLakeSimulation(homogeneous, async request => runNative(request));
+      const disabled = await runLakeSimulation(zero, async request => runNative(request));
+      assert.deepEqual(disabled.observations, historical.observations);
+      assert.deepEqual(disabled.trace.localErrors, historical.trace.localErrors);
+      assert.deepEqual(disabled.trace.aggregateErrors, historical.trace.aggregateErrors);
+    }
+    for (const { alpha, scenarios } of cases) {
+      for (const { domain, reference, sums } of scenarios) {
+        const { distribution, samplingInterval } = domain.parameters;
+        const localRelativeTolerance = distribution.kind === 'wet-gradient' ? 1.2e-3 : 7e-4;
+        const { observations, trace } = await runLakeSimulation(domain, async request => runNative(request));
+        assert.equal(trace.points, domain.cells.length * 201);
+        const totals = Array(201).fill(0);
+        let maxRelativeAboveFloor = 0;
+        for (const [index, observation] of observations.entries()) {
+          const { initial, capacity, growth, quantum } = domain.cells[index];
+          for (const [tick, { value }] of observation.samples.entries()) {
+            const expected = exact(tick * samplingInterval, initial, capacity, growth);
+            assert.equal(reference.local[index][tick], expected);
+            const floorAllowance = quantum === 1e-9 ? 1e-7 : 0;
+            const error = Math.abs(value - expected);
+            assert.ok(value > 0);
+            assert.ok(error <= localRelativeTolerance * expected + floorAllowance,
+              `${grid} ${distribution.kind} α=${alpha} ${observation.component} t=${tick * samplingInterval}: ${error} t`);
+            if (!floorAllowance) maxRelativeAboveFloor = Math.max(maxRelativeAboveFloor, error / expected);
+            totals[tick] += value;
+          }
+        }
+        assert.ok(trace.aggregateErrors.maxRelative < 3e-5,
+          `${grid} ${distribution.kind} α=${alpha}: ${JSON.stringify(trace.aggregateErrors)}`);
+        native.push({ grid, alpha, distribution: distribution.kind, sums, wetCells: trace.wetCells,
+          batches: trace.plannedBatches, points: trace.points,
+          maxRunCalls: Math.max(...trace.batches.map(batch => batch.runCalls)),
+          localErrors: trace.localErrors, maxRelativeAboveFloor, aggregateErrors: trace.aggregateErrors,
+          analyticalAtMonths: [reference.total[0], reference.total[100], reference.total[200]],
+          nativeAtMonths: [totals[0], totals[100], totals[200]] });
+      }
+    }
+  }
+  for (const comparison of analytical) t.diagnostic(JSON.stringify(comparison));
+  for (const result of native) t.diagnostic(JSON.stringify(result));
+  if (process.env.IRRITATOR_LAKE_CONVERGENCE_EVIDENCE) {
+    const sha256 = data => createHash('sha256').update(data).digest('hex');
+    const evidence = { runnerSha256: sha256(readFileSync(process.env.IRRITATOR_RUNNER)),
+      geojsonSha256: sha256(geojson), analytical, native };
+    writeFileSync(process.env.IRRITATOR_LAKE_CONVERGENCE_EVIDENCE, JSON.stringify(evidence, null, 2) + '\n');
   }
 });

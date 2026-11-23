@@ -68,18 +68,28 @@ export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional
   const simulation = { start: 0, end: horizon };
   const samplingInterval = single.model.observations[0]!.samplingInterval;
   const initialTonnes = initialDensity * lakeSurfaceAreaKm2;
-  const alpha = distribution.kind === 'gradient' ? distribution.alpha : 0;
+  const alpha = distribution.kind === 'homogeneous' ? 0 : distribution.alpha;
   if (!Number.isFinite(alpha) || alpha < 0 || alpha > lakeMaxAlpha) {
     throw new RangeError('L’intensité du gradient doit être comprise entre 0 et 0,6.');
   }
   const totalFraction = mesh.cells.reduce((sum, cell) => sum + cell.wetFraction, 0);
   const areas = mesh.cells.map(cell => lakeSurfaceAreaKm2 * cell.wetFraction / totalFraction);
-  const weights = alpha === 0 ? undefined : mesh.cells.map(({ row }, index) =>
-    areas[index]! * (1 + alpha * (0.5 - (row + 0.5) / mesh.rows)));
+  const weights = alpha === 0 ? undefined : mesh.cells.map(({ row, wetCentroid }, index) => {
+    const y = distribution.kind === 'wet-gradient' ? wetCentroid[1] / mesh.height : (row + 0.5) / mesh.rows;
+    return areas[index]! * (1 + alpha * (0.5 - y));
+  });
   const totalWeight = weights?.reduce((sum, weight) => sum + weight, 0);
+  const initials = weights?.map(weight => initialTonnes * weight / totalWeight!);
+  if (initials && distribution.kind === 'wet-gradient') {
+    const last = initials.length - 1;
+    const subtotal = initials.slice(0, last).reduce((sum, initial) => sum + initial, 0);
+    const remainder = initialTonnes - subtotal;
+    // Absorb rounding in the last cell, keeping its biomass if too small to resolve the remainder.
+    if (remainder > 0) initials[last] = remainder;
+  }
   const cells = mesh.cells.map((cell, index) => {
     const area = areas[index]!;
-    const initial = weights ? initialTonnes * weights[index]! / totalWeight! : initialDensity * area;
+    const initial = initials?.[index] ?? initialDensity * area;
     const capacity = capacityDensity * area;
     const quantum = strategy === 'absolute' ? constantDomain.quantum
       : Math.min(quantumBounds.maximum, Math.max(quantumBounds.minimum, capacity * lakeQuantumFraction));
@@ -95,7 +105,8 @@ export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional
     Math.floor(caps.maxPoints / pointsPerCell),
   );
   const resolution = lakeResolutionId(mesh);
-  const distributionSuffix = alpha === 0 ? '' : `-g${String(alpha).replace('.', 'p')}`;
+  const gradientPrefix = distribution.kind === 'wet-gradient' ? 'wg' : 'g';
+  const distributionSuffix = alpha === 0 ? '' : `-${gradientPrefix}${String(alpha).replace('.', 'p')}`;
   const batches: { request: RunRequest; cells: typeof cells }[] = [];
   for (let offset = 0; offset < cells.length; offset += batchSize) {
     const members = cells.slice(offset, offset + batchSize);

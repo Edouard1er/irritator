@@ -108,6 +108,10 @@ it.each([
   'resolution=6x3&distribution=gradient&alpha=0.61',
   'resolution=6x3&distribution=gradient&alpha=-0.01',
   'resolution=6x3&distribution=gradient&alpha=NaN',
+  'resolution=6x3&distribution=wet-gradient',
+  'resolution=6x3&distribution=wet-gradient&alpha=0.61',
+  'resolution=6x3&distribution=wet-gradient&alpha=-0.01',
+  'resolution=6x3&distribution=wet-gradient&alpha=NaN',
 ])('rejette la configuration %s', async query => {
   expect((await lakePlan(new Request(`http://localhost/api/logistic-lake?${query}`))).status).toBe(400);
 });
@@ -158,4 +162,24 @@ it('prépare le gradient côté serveur, annule le lot en cours et compare uniqu
   expect(plans.at(-1)).toContain('distribution=gradient&alpha=0.6');
   expect(runs.at(-1)!.model.id).toContain('-g0p6-');
   expect(screen.getByRole('button', { name: 'Télécharger la trace JSON' })).toBeVisible();
+
+  fireEvent.change(distribution, { target: { value: 'wet-gradient' } });
+  const wetComparison = screen.getByRole('row', { name: /Gradient pondéré par surface humide/ });
+  expect(wetComparison).toHaveTextContent('α = 0,6');
+  expect(wetComparison.querySelectorAll('[data-comparison-biomass]')).toHaveLength(0);
+  await waitFor(() => expect(launch).toBeEnabled());
+  fireEvent.click(launch);
+  await screen.findByText('Terminé');
+  expect(plans.at(-1)).toContain('distribution=wet-gradient&alpha=0.6');
+  expect(runs.at(-1)!.model.id).toContain('-wg0p6-');
+  expect(wetComparison.querySelectorAll('[data-comparison-biomass]')).toHaveLength(3);
+  expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(9);
+
+  fireEvent.change(screen.getByRole('slider', { name: 'Intensité du gradient α' }), { target: { value: '0.3' } });
+  await waitFor(() => expect(launch).toBeEnabled());
+  expect(wetComparison).toHaveTextContent('α = 0,3');
+  expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(3);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Résolution du lac' }), { target: { value: '12x6' } });
+  await waitFor(() => expect(launch).toBeEnabled());
+  expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(0);
 });
