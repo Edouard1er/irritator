@@ -1,13 +1,15 @@
 import {
   formatSmall, lakeExchangeDirection, lakeExchangePath, lakeFraming, lakeLegend, lakeMapColor, lakeMapInk, lakeMapReading, lakeMonth, lakeOutline,
-  lakeSignedTonnes, lakeSyntheticNotice, lakeTotalTonnes, type LakeCell, type LakeDataset, type LakeDisplay, type LakeExchangeOverlay, type LakeView,
+  lakeSignedTonnes, lakeSyntheticNotice, lakeTotalTonnes, lakeWetFrontierPath,
+  type LakeCell, type LakeDataset, type LakeDisplay, type LakeExchangeOverlay, type LakeView,
 } from './lake-exploration';
 import { lakeDistributionProfile, type LakeMesh } from './spatial-experiment';
 
 export type LakeViewSnapshot = {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
-  maps: readonly { title: string; dataset: LakeDataset; exchanges?: readonly LakeExchangeOverlay[] }[];
+  maps: readonly { title: string; dataset: LakeDataset; exchanges?: readonly LakeExchangeOverlay[];
+    frontiers?: readonly LakeExchangeOverlay[] }[];
   reference?: LakeDataset;
   display: LakeDisplay;
   limits: readonly [number, number, number];
@@ -25,7 +27,7 @@ const escapeXml = (text: string) => text.replace(/[<>&"']/g, char => ({
 
 export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, adaptive, tick, time, view, selected, highlights }: LakeViewSnapshot) {
   const width = maps.length === 2 ? 1360 : 900;
-  const extraFlowHeight = 21 * Math.max(0, ...maps.map(map => (map.exchanges?.length ?? 0) - 1));
+  const extraFlowHeight = 21 * Math.max(0, ...maps.map(map => (map.frontiers?.length ?? map.exchanges?.length ?? 0) - 1));
   const height = 940 + extraFlowHeight;
   const cardWidth = (width - 64 - 20 * (maps.length - 1)) / maps.length;
   const outline = lakeOutline(mesh);
@@ -34,7 +36,9 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
   const { noData, grid, outline: shore } = lakeMapInk;
   const line = 'vector-effect="non-scaling-stroke"';
   const comparison = maps.length === 2 ? maps[1]!.dataset.totals[tick]! - maps[0]!.dataset.totals[tick]! : undefined;
-  const panels = maps.map(({ title, dataset, exchanges = [] }, index) => {
+  const fullRun = maps.find(map => map.dataset.trace.fullNetwork)?.dataset.trace;
+  const fullNetwork = fullRun?.fullNetwork;
+  const panels = maps.map(({ title, dataset, exchanges = [], frontiers }, index) => {
     const { distribution } = dataset.trace.parameters;
     const profile = lakeDistributionProfile(distribution);
     const total = dataset.totals[tick]!;
@@ -62,6 +66,9 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     <g clip-path="url(#lake-shore)">${regions}</g>
     ${markers}
     <path d="${outline}" fill="none" stroke="${shore}" ${line}/>
+    ${frontiers ? `<g clip-path="url(#lake-shore)">${frontiers.map(({ a, b, frontier }) =>
+      `<path data-wet-frontier="${escapeXml(a + ' ' + b)}" d="${lakeWetFrontierPath(frontier)}" fill="none"
+      stroke="#274c58" stroke-width="2.5" ${line}/>`).join('')}</g>` : ''}
     ${exchanges.map(exchange => {
       const path = lakeExchangePath(exchange, markerRadius);
       return `<g clip-path="url(#lake-shore)" data-exchange-pair="${escapeXml(exchange.a + ' ' + exchange.b)}">
@@ -71,9 +78,9 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     </g>`;
     }).join('')}
   </svg>
-  ${exchanges.map((exchange, row) => {
+  ${(frontiers ?? exchanges).map((exchange, row) => {
     if (exchange.flux === undefined) return '';
-    const direction = dataset.trace.network && !exchange.flux
+    const direction = (dataset.trace.network || dataset.trace.fullNetwork) && !exchange.flux
       ? `${exchange.a} ↔ ${exchange.b}` : lakeExchangeDirection(exchange)!;
     return `<text x="20" y="${611 + row * 21}" font-size="15" data-flow="${exchange.flux}">
     ${escapeXml(direction)} · ${formatSmall(Math.abs(exchange.flux))} t/mois · reconstitué</text>`;
@@ -89,9 +96,13 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     }).join('') : '';
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"
-  role="img" aria-labelledby="lake-title lake-desc" data-time="${time}" data-rows="${mesh.rows}" data-columns="${mesh.columns}">
+  role="img" aria-labelledby="lake-title lake-desc" data-time="${time}" data-rows="${mesh.rows}" data-columns="${mesh.columns}"${fullNetwork
+    ? ` data-mode="${fullNetwork.mode}" data-mu="${fullNetwork.mu}"` : ''}>
 <title id="lake-title">Lac de Guiers · Simulation logistique spatiale</title>
 <desc id="lake-desc">${lakeSyntheticNotice}</desc>
+${fullNetwork && fullRun ? `<metadata>${escapeXml(JSON.stringify({
+  ...fullNetwork, distribution: fullRun.parameters.distribution, modelId: fullRun.batches[0]?.modelId,
+}))}</metadata>` : ''}
 <defs>
   <clipPath id="lake-shore"><path d="${outline}" clip-rule="evenodd"/></clipPath>
   <linearGradient id="lake-legend">${legend.colors.map((color, index) =>

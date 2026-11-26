@@ -7,11 +7,13 @@ export { constantDomain, constantDomainCell, lakeSurfaceAreaKm2, spatialDimensio
 export { clipLakeMesh, lakeDefaultGradientProfile, lakeDistributionId, lakeDistributionProfile, lakeGradientProfiles, lakeMaxAlpha,
   lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
   type LakeDistribution, type LakeGradientProfile, type LakeMesh } from '../../../../examples/logistic-lake';
-export { LakeRunError, runLakeBatches, type LakePlan, type LakeExchangePlan, type LakeNetworkPlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
+export { LakeRunError, runLakeBatches, type LakePlan, type LakeExchangePlan, type LakeFullNetworkPlan, type LakeNetworkPlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
 export { lakeExchangeIntensities, lakeExchangeResolutions, lakeExchangeFlux, type LakeExchange, type LakeExchangeInputs,
   type LakeExchangeIntensity } from '../../../../examples/logistic-lake-exchange';
 export { lakeWetFrontier, type WetFrontier } from '../../../../examples/lake-wet-frontier';
 export { lakeNetworkConnected, lakeNetworkSize, type LakeNetworkInputs } from '../../../../examples/logistic-lake-network';
+export { lakeFullNetworkResolution, lakeFullTopology } from '../../../../examples/lake-full-topology';
+export type { LakeFullNetworkInputs } from '../../../../examples/logistic-lake-full-network';
 
 export async function runLakeBatch(request: RunRequest, signal: AbortSignal): Promise<HttpResult> {
   // ENGINE_BUSY is issued before the native process is started.

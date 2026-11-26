@@ -32,6 +32,10 @@ compile_commands.json
 !/reports/logistic-pilot/lot2-1-couplage-deux-cellules-captures/
 !/reports/logistic-pilot/lot2-2-reseau-local-rapport.md
 !/reports/logistic-pilot/lot2-2-reseau-local-captures/
+!/reports/logistic-pilot/lot2-3-reseau-complet-6x3-rapport.md
+!/reports/logistic-pilot/lot2-3-reseau-complet-6x3-captures/
+!/reports/logistic-pilot/lot2-3-reseau-complet-6x3-rapport.md
+!/reports/logistic-pilot/lot2-3-reseau-complet-6x3-captures/
 !/reports/web-integration-test-4.md
 !/reports/frontend-test-5.md
 !/reports/frontend-test-5/

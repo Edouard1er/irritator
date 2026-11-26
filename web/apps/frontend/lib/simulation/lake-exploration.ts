@@ -1,5 +1,6 @@
 import { lakeDefaultGradientProfile, lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeGradientProfile, type LakeMesh,
-  lakeExchangeFlux, type LakeExchangeInputs, type LakeExchangePlan, type LakeNetworkInputs, type LakeNetworkPlan, type LakePlan,
+  lakeExchangeFlux, type LakeExchangeInputs, type LakeExchangePlan, type LakeFullNetworkInputs, type LakeFullNetworkPlan,
+  type LakeNetworkInputs, type LakeNetworkPlan, type LakePlan,
   type LakeRunTrace, type SpatialTrajectory, type WetFrontier,
   type runLakeBatches } from './spatial-experiment';
 
@@ -86,6 +87,12 @@ export const lakeFraming = (mesh: LakeMesh, { zoom, dx, dy }: LakeView) => {
 
 export type LakeExchangeOverlay = { a: string; b: string; frontier: WetFrontier; flux?: number };
 
+export function lakeWetFrontierPath({ axis, boundary, segments }: WetFrontier) {
+  return segments.map(({ start, end }) => axis === 0
+    ? `M${boundary},${start}L${boundary},${end}`
+    : `M${start},${boundary}L${end},${boundary}`).join('');
+}
+
 export function lakeExchangePath({ frontier, flux }: LakeExchangeOverlay, radius: number) {
   const { axis, boundary, segments, direction } = frontier;
   const segment = segments.reduce((longest, next) => next.end - next.start > longest.end - longest.start ? next : longest);
@@ -154,13 +161,16 @@ export function retainLakeDataset(
 export function configureLake(inputs: LakeInputs, signal: AbortSignal): Promise<LakePlan>;
 export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeExchangeInputs): Promise<LakeExchangePlan>;
 export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeNetworkInputs): Promise<LakeNetworkPlan>;
+export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeFullNetworkInputs): Promise<LakeFullNetworkPlan>;
 export async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal,
-  exchange?: LakeExchangeInputs | LakeNetworkInputs) {
+  exchange?: LakeExchangeInputs | LakeNetworkInputs | LakeFullNetworkInputs) {
   const query = new URLSearchParams({ resolution, distribution: kind, alpha: String(alpha) });
   if (kind !== 'homogeneous') query.set('profile', profile ?? lakeDefaultGradientProfile);
   if (exchange) {
     query.set('mu', String(exchange.mu));
-    if ('cells' in exchange) {
+    if ('mode' in exchange) {
+      query.set('mode', exchange.mode);
+    } else if ('cells' in exchange) {
       query.set('cells', exchange.cells.join(','));
       for (const edge of exchange.edges) query.append('edge', edge.join(','));
     } else {
@@ -195,6 +205,17 @@ export function lakeReading(dataset: LakeDataset | undefined, id: string, tick: 
   const sample = dataset?.trajectories.get(id)?.samples[tick];
   if (!cell || !sample) return undefined;
   return { ...sample, ratio: sample.value / cell.capacity, density: sample.value / cell.area };
+}
+
+export function lakeDensityDispersion(dataset: LakeDataset, tick: number) {
+  const area = [...dataset.cells.values()].reduce((sum, cell) => sum + cell.area, 0);
+  const mean = dataset.totals[tick]! / area;
+  let dispersion = 0;
+  for (const cell of dataset.cells.values()) {
+    const reading = lakeReading(dataset, cell.id, tick)!;
+    dispersion += cell.area * (reading.density - mean) ** 2;
+  }
+  return dispersion;
 }
 
 export function lakeMapValue(display: LakeDisplay, reading?: LakeReading, reference?: LakeReading) {

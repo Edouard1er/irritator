@@ -4,8 +4,10 @@ import { lakeDomain } from '../../../../../examples/logistic-grid';
 import { lakeReference } from '../../../../../examples/logistic-lake-analysis';
 import { lakeExchangeDomain, lakeExchangeIntensities, lakeExchangeResolutions } from '../../../../../examples/logistic-lake-exchange';
 import { lakeNetworkDomain, type LakeNetworkInputs } from '../../../../../examples/logistic-lake-network';
+import { lakeFullNetworkDomain } from '../../../../../examples/logistic-lake-full-network';
+import { lakeFullNetworkResolution } from '../../../../../examples/lake-full-topology';
 import { lakeGradientProfiles, lakeMaxAlpha, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions } from '../../../../../examples/logistic-lake';
-import type { LakeExchangePlan, LakeNetworkPlan, LakePlan } from '../../../../../examples/logistic-lake-run';
+import type { LakeExchangePlan, LakeFullNetworkPlan, LakeNetworkPlan, LakePlan } from '../../../../../examples/logistic-lake-run';
 
 export async function GET(request: Request) {
   const query = new URL(request.url).searchParams;
@@ -21,7 +23,9 @@ export async function GET(request: Request) {
   const networkEdges = query.getAll('edge');
   const networked = networkCells !== null || networkEdges.length > 0;
   const rawMu = query.get('mu');
-  const paired = a !== null || b !== null || (!networked && rawMu !== null);
+  const mode = query.get('mode');
+  const full = mode === 'full-network';
+  const paired = a !== null || b !== null || (!full && !networked && rawMu !== null);
   const mu = lakeExchangeIntensities.find(value => String(value) === rawMu);
   if (!resolution || (kind !== 'homogeneous' && kind !== 'gradient' && kind !== 'wet-gradient') ||
     (rawProfile !== null && (!profile || kind === 'homogeneous')) ||
@@ -34,12 +38,18 @@ export async function GET(request: Request) {
   if (networked && (paired || !networkCells || mu === undefined || !lakeExchangeResolutions.some(size => size === resolution))) {
     return Response.json({ message: 'Réseau, résolution ou intensité d’échange invalide.' }, { status: 400 });
   }
+  if (mode !== null && (!full || paired || networked || mu === undefined || lakeResolutionId(resolution) !== lakeFullNetworkResolution)) {
+    return Response.json({ message: 'Le réseau complet sélectionne toutes les frontières humides de la grille 6 × 3.' }, { status: 400 });
+  }
 
   const source = await readFile(resolve('data/geography/lac-de-guiers.hydrolakes.geojson'), 'utf8');
   const mesh = lakeMeshFromGeoJson(JSON.parse(source), resolution);
   const domain = lakeDomain(mesh, 'proportional', kind === 'homogeneous' ? { kind }
     : { kind, alpha, ...(profile ? { profile } : {}) });
   try {
+    if (full && mu !== undefined) {
+      return Response.json({ mesh, domain: lakeFullNetworkDomain(mesh, domain, { mode, mu }) } satisfies LakeFullNetworkPlan);
+    }
     if (a && b && mu !== undefined) {
       return Response.json({ mesh, domain: lakeExchangeDomain(mesh, domain, { a, b, mu }) } satisfies LakeExchangePlan);
     }

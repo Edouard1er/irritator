@@ -2,7 +2,7 @@
 import { memo, useId, useLayoutEffect, useMemo, useRef, type PointerEvent } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import type { LakeMesh } from '@/lib/simulation/spatial-experiment';
-import { initialLakeView, lakeExchangeDirection, lakeExchangePath, lakeFraming, lakeMapColor, lakeMapReading, lakeOutline,
+import { initialLakeView, lakeExchangeDirection, lakeExchangePath, lakeFraming, lakeMapColor, lakeMapReading, lakeOutline, lakeWetFrontierPath,
   type LakeCell, type LakeDataset, type LakeDisplay, type LakeExchangeOverlay, type LakeView } from '@/lib/simulation/lake-exploration';
 import styles from './logistic-spatial.module.css';
 
@@ -40,7 +40,7 @@ function numericAttribute(element: SVGRectElement, attribute: string, value?: nu
 
 export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   mesh, cells, dataset, reference, display, limits, tick, time, selected, select, inspect, view, setView, label, highlights,
-  exchanges, neighbors, exchangeCells,
+  exchanges, frontiers, neighbors, exchangeCells,
 }: {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
@@ -58,6 +58,7 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   label: string;
   highlights: ReadonlyMap<string, string>;
   exchanges?: readonly LakeExchangeOverlay[] | undefined;
+  frontiers?: readonly LakeExchangeOverlay[] | undefined;
   neighbors?: ReadonlySet<string> | undefined;
   exchangeCells?: readonly string[] | undefined;
 }) {
@@ -178,6 +179,10 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
           r={radius} stroke={highlights.get(cell.id)} vectorEffect="non-scaling-stroke" />;
       })}
       <path className={styles.lakeOutline} d={outline} fill="none" vectorEffect="non-scaling-stroke" aria-hidden="true" />
+      {frontiers && <g clipPath={`url(#${clip})`} pointerEvents="none" aria-hidden="true">
+        {frontiers.map(({ a, b, frontier }) => <path key={a + ' ' + b} d={lakeWetFrontierPath(frontier)}
+          data-wet-frontier={a + ' ' + b} fill="none" stroke="#274c58" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />)}
+      </g>}
       {exchanges?.map(exchange => {
         const exchangePath = lakeExchangePath(exchange, markerRadius);
         return <g key={exchange.a + ' ' + exchange.b} clipPath={`url(#${clip})`} pointerEvents="none" aria-hidden="true"

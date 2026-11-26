@@ -2,6 +2,7 @@ import { parseResult, type RunRequest, type RunResult } from '../packages/contra
 import type { LakeDomain } from './logistic-grid.js';
 import type { LakeExchange } from './logistic-lake-exchange.js';
 import type { LakeNetwork } from './logistic-lake-network.js';
+import type { LakeFullNetwork } from './logistic-lake-full-network.js';
 import type { LakeMesh } from './logistic-lake.js';
 
 type BatchTrace = {
@@ -11,6 +12,7 @@ type BatchTrace = {
   cells: number;
   runCalls: number;
   points: number;
+  deduplicatedPoints?: number;
   resultBytes: number;
   errors?: NumericalErrors;
 };
@@ -22,6 +24,7 @@ export type LakeRunTrace = {
   parameters: LakeDomain['parameters'];
   exchange?: LakeExchange;
   network?: LakeNetwork;
+  fullNetwork?: LakeFullNetwork;
   startedAt: string;
   elapsedMs: number;
   wetCells: number;
@@ -38,6 +41,7 @@ export type LakeReference = { local: number[][]; total: number[] };
 export type LakePlan = { mesh: LakeMesh; domain: LakeDomain; reference: LakeReference };
 export type LakeExchangePlan = { mesh: LakeMesh; domain: LakeDomain & { exchange: LakeExchange } };
 export type LakeNetworkPlan = { mesh: LakeMesh; domain: LakeDomain & { network: LakeNetwork } };
+export type LakeFullNetworkPlan = { mesh: LakeMesh; domain: LakeDomain & { fullNetwork: LakeFullNetwork } };
 
 export class LakeRunError extends Error {
   constructor(public trace: LakeRunTrace, cause: unknown) {
@@ -51,7 +55,31 @@ function recordError(errors: NumericalErrors, observed: number, expected: number
   errors.maxRelative = Math.max(errors.maxRelative, absolute / expected);
 }
 
-export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExchange; network?: LakeNetwork }, reference: LakeReference | undefined,
+function restoreLakeSamples(samples: RunResult['observations'][number]['samples'], start: number, end: number,
+  interval: number, ticks: number, component: string) {
+  const restored: typeof samples = [];
+  let index = 0;
+  for (let tick = 0; tick < ticks; tick++) {
+    const time = tick === ticks - 1 ? end : start + tick * interval;
+    const tolerance = 32 * Number.EPSILON * Math.max(1, Math.abs(time));
+    const next = samples[index];
+    if (next && Math.abs(next.time - time) <= tolerance) {
+      restored.push(next);
+      index++;
+    } else {
+      const previous = restored.at(-1);
+      if (!previous || (next && next.time < time)) {
+        throw new Error(`Date inattendue pour ${component} à l’indice ${tick}.`);
+      }
+      // The native resampler omits consecutive samples with exactly the same value.
+      restored.push({ time, value: previous.value });
+    }
+  }
+  if (index !== samples.length) throw new Error(`Date inattendue pour ${component} après le dernier instant.`);
+  return restored;
+}
+
+export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExchange; network?: LakeNetwork; fullNetwork?: LakeFullNetwork }, reference: LakeReference | undefined,
   execute: (request: RunRequest) => Promise<unknown>, options: {
   signal?: AbortSignal;
   onProgress?: (completed: number) => void;
@@ -70,6 +98,7 @@ export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExcha
     plannedBatches: batches.length, batches: [], points: 0, resultBytes: 0,
     ...(domain.exchange && { exchange: domain.exchange }),
     ...(domain.network && { network: domain.network }),
+    ...(domain.fullNetwork && { fullNetwork: domain.fullNetwork }),
   };
   const localErrors = emptyErrors();
 
@@ -84,14 +113,18 @@ export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExcha
       const result = parseResult(raw, request);
       const runId = (raw as { runId?: unknown }).runId;
       const errors = emptyErrors();
-      for (const [index, observation] of result.observations.entries()) {
+      const points = result.observations.reduce((sum, { samples }) => sum + samples.length, 0);
+      const deduplicatedPoints = domain.fullNetwork ? result.observations.length * ticks - points : 0;
+      const published = result.observations.map((observation, index) => {
         const cell = members[index];
         const cellIndex = cellIndices.get(observation.component);
         if (!cell || observation.component !== cell.component || observations.has(cell.component) || cellIndex === undefined) {
           throw new Error(`Observation inattendue ou en double pour ${observation.component}.`);
         }
         const analytical = reference?.local[cellIndex];
-        const { samples } = observation;
+        const samples = deduplicatedPoints && observation.samples.length < ticks
+          ? restoreLakeSamples(observation.samples, start, end, parameters.samplingInterval, ticks, observation.component)
+          : observation.samples;
         if (samples.length !== ticks) throw new Error(`Série incomplète pour ${observation.component} (${samples.length}/${ticks} points).`);
         if (Math.abs(samples[0]!.value - cell.initial) > 32 * Number.EPSILON * cell.initial) {
           throw new Error(`Biomasse initiale inattendue pour ${observation.component}.`);
@@ -107,11 +140,11 @@ export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExcha
             totals[tick] = totals[tick]! + value;
           }
         }
-      }
-      const points = result.observations.length * ticks;
+        return samples === observation.samples ? observation : { ...observation, samples };
+      });
       trace.batches.push({ modelId: result.modelId, ...(typeof runId === 'string' ? { runId } : {}),
         elapsedMs: performance.now() - batchStarted, cells: members.length, runCalls: result.simulation.runCalls,
-        points, resultBytes, ...(reference && { errors }) });
+        points, ...(deduplicatedPoints > 0 && { deduplicatedPoints }), resultBytes, ...(reference && { errors }) });
       trace.points += points;
       trace.resultBytes += resultBytes;
       if (reference) {
@@ -119,7 +152,7 @@ export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExcha
         localErrors.maxRelative = Math.max(localErrors.maxRelative, errors.maxRelative);
         trace.localErrors = localErrors;
       }
-      for (const observation of result.observations) observations.set(observation.component, observation);
+      for (const observation of published) observations.set(observation.component, observation);
     } catch (cause) {
       signal?.throwIfAborted();
       trace.elapsedMs = performance.now() - started;
