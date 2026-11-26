@@ -1,6 +1,7 @@
 import { parseResult, type RunRequest, type RunResult } from '../packages/contracts/index.js';
 import type { LakeDomain } from './logistic-grid.js';
 import type { LakeExchange } from './logistic-lake-exchange.js';
+import type { LakeNetwork } from './logistic-lake-network.js';
 import type { LakeMesh } from './logistic-lake.js';
 
 type BatchTrace = {
@@ -20,6 +21,7 @@ const emptyErrors = (): NumericalErrors => ({ maxAbsoluteTonnes: 0, maxRelative:
 export type LakeRunTrace = {
   parameters: LakeDomain['parameters'];
   exchange?: LakeExchange;
+  network?: LakeNetwork;
   startedAt: string;
   elapsedMs: number;
   wetCells: number;
@@ -35,6 +37,7 @@ export type LakeRunTrace = {
 export type LakeReference = { local: number[][]; total: number[] };
 export type LakePlan = { mesh: LakeMesh; domain: LakeDomain; reference: LakeReference };
 export type LakeExchangePlan = { mesh: LakeMesh; domain: LakeDomain & { exchange: LakeExchange } };
+export type LakeNetworkPlan = { mesh: LakeMesh; domain: LakeDomain & { network: LakeNetwork } };
 
 export class LakeRunError extends Error {
   constructor(public trace: LakeRunTrace, cause: unknown) {
@@ -48,7 +51,7 @@ function recordError(errors: NumericalErrors, observed: number, expected: number
   errors.maxRelative = Math.max(errors.maxRelative, absolute / expected);
 }
 
-export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExchange }, reference: LakeReference | undefined,
+export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExchange; network?: LakeNetwork }, reference: LakeReference | undefined,
   execute: (request: RunRequest) => Promise<unknown>, options: {
   signal?: AbortSignal;
   onProgress?: (completed: number) => void;
@@ -66,6 +69,7 @@ export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExcha
     parameters, startedAt: new Date().toISOString(), elapsedMs: 0, wetCells: cells.length,
     plannedBatches: batches.length, batches: [], points: 0, resultBytes: 0,
     ...(domain.exchange && { exchange: domain.exchange }),
+    ...(domain.network && { network: domain.network }),
   };
   const localErrors = emptyErrors();
 

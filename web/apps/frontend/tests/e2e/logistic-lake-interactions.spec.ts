@@ -1,34 +1,11 @@
-import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
+import { expect, test, type Locator, type Response } from '@playwright/test';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RunRequest, RunResult } from '@contracts';
 import { lakeDisplays, lakeMapColor } from '../../lib/simulation/lake-exploration';
-import { chart, isSimulation, openExperiment, slider } from './logistic-workshop';
+import { chart, clickWetCell, isSimulation, openInteractions, slider } from './logistic-workshop';
 
 const evidence = process.env.IRRITATOR_LAKE_EXCHANGE_EVIDENCE;
-
-async function openInteractions(page: Page) {
-  const panel = await openExperiment(page);
-  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('interactions');
-  return panel.getByRole('region', { name: 'Interactions spatiales' });
-}
-
-async function clickWetCell(page: Page, region: Locator) {
-  await region.scrollIntoViewIfNeeded();
-  const hit = await region.evaluate(node => {
-    const cell = node as unknown as SVGRectElement;
-    const box = cell.getBBox();
-    const transform = cell.getScreenCTM()!;
-    const fractions = [0.5, 0.33, 0.66, 0.2, 0.8, 0.1, 0.9];
-    for (const x of fractions) for (const y of fractions) {
-      const point = new DOMPoint(box.x + x * box.width, box.y + y * box.height).matrixTransform(transform);
-      if (document.elementFromPoint(point.x, point.y) === cell) return { x: point.x, y: point.y };
-    }
-    return null;
-  });
-  expect(hit, 'Point cliquable dans la portion humide de la cellule').not.toBeNull();
-  await page.mouse.click(hit!.x, hit!.y);
-}
 
 test('compare deux exécutions natives, vérifie les couleurs et capture les mois 0, 5, 10 et 20', async ({ page }) => {
   test.setTimeout(120_000);

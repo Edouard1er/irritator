@@ -73,8 +73,10 @@ export function LakeExport({ snapshot, resolution }: { snapshot?: LakeViewSnapsh
       const scenarios = snapshot.maps.map(({ dataset }) => lakeDistributionId(dataset.trace.parameters.distribution));
       const suffix = scenarios.length === 2 ? `-comparaison-${scenarios.join('-')}` : scenarios[0] === 'homogeneous' ? '' : `-${scenarios[0]}`;
       const exchange = snapshot.maps.find(map => map.dataset.trace.exchange)?.dataset.trace.exchange;
-      const pair = exchange ? `-echange-${exchange.a}-${exchange.b}-mu-${exchange.mu}` : '';
-      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${suffix}${pair}`;
+      const network = snapshot.maps.find(map => map.dataset.trace.network)?.dataset.trace.network;
+      const coupling = network ? `-reseau-${network.cells.join('-')}-mu-${network.mu}`
+        : exchange ? `-echange-${exchange.a}-${exchange.b}-mu-${exchange.mu}` : '';
+      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${suffix}${coupling}`;
       downloadLakeFile(file, `${name}.${format}`);
     } catch {
       setFailure('Impossible d’exporter l’image. Réessayez au format SVG.');

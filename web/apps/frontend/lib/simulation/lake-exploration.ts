@@ -1,5 +1,6 @@
 import { lakeDefaultGradientProfile, lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeGradientProfile, type LakeMesh,
-  type LakeExchangeInputs, type LakeExchangePlan, type LakePlan, type LakeRunTrace, type SpatialTrajectory, type WetFrontier,
+  lakeExchangeFlux, type LakeExchangeInputs, type LakeExchangePlan, type LakeNetworkInputs, type LakeNetworkPlan, type LakePlan,
+  type LakeRunTrace, type SpatialTrajectory, type WetFrontier,
   type runLakeBatches } from './spatial-experiment';
 
 export type LakeInputs = { resolution: string; kind: LakeDistribution['kind']; alpha: number; profile?: LakeGradientProfile };
@@ -103,6 +104,23 @@ export function lakeExchangeDirection({ a, b, flux }: LakeExchangeOverlay) {
   return flux === undefined ? undefined : flux > 0 ? `${a} → ${b}` : flux < 0 ? `${b} → ${a}` : 'Flux nul';
 }
 
+export function lakeExchangeReading(edge: LakeExchangeOverlay, dataset: LakeDataset | undefined, mu: number, tick: number): LakeExchangeOverlay {
+  const a = lakeReading(dataset, edge.a, tick);
+  const b = lakeReading(dataset, edge.b, tick);
+  if (!dataset || !a || !b) return edge;
+  return { ...edge, flux: lakeExchangeFlux(mu, dataset.cells.get(edge.a)!.area, dataset.cells.get(edge.b)!.area, a.density, b.density) };
+}
+
+export function lakeNetworkNetFlows(edges: readonly LakeExchangeOverlay[]) {
+  const net = new Map<string, number>();
+  for (const { a, b, flux } of edges) {
+    if (flux === undefined) continue;
+    net.set(a, (net.get(a) ?? 0) - flux);
+    net.set(b, (net.get(b) ?? 0) + flux);
+  }
+  return net;
+}
+
 export const lakeMapInk = { noData: '#edf3f3', grid: '#477a74', outline: '#3b6665' };
 
 export function lakeLegend(display: LakeDisplay, limits: readonly [number, number, number], adaptive: boolean, available: boolean) {
@@ -135,13 +153,20 @@ export function retainLakeDataset(
 
 export function configureLake(inputs: LakeInputs, signal: AbortSignal): Promise<LakePlan>;
 export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeExchangeInputs): Promise<LakeExchangePlan>;
-export async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal, exchange?: LakeExchangeInputs) {
+export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeNetworkInputs): Promise<LakeNetworkPlan>;
+export async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal,
+  exchange?: LakeExchangeInputs | LakeNetworkInputs) {
   const query = new URLSearchParams({ resolution, distribution: kind, alpha: String(alpha) });
   if (kind !== 'homogeneous') query.set('profile', profile ?? lakeDefaultGradientProfile);
   if (exchange) {
-    query.set('a', exchange.a);
-    query.set('b', exchange.b);
     query.set('mu', String(exchange.mu));
+    if ('cells' in exchange) {
+      query.set('cells', exchange.cells.join(','));
+      for (const edge of exchange.edges) query.append('edge', edge.join(','));
+    } else {
+      query.set('a', exchange.a);
+      query.set('b', exchange.b);
+    }
   }
   const response = await fetch(`/api/logistic-lake?${query}`, { signal });
   if (!response.ok) {

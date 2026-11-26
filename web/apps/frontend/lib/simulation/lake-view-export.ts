@@ -7,7 +7,7 @@ import { lakeDistributionProfile, type LakeMesh } from './spatial-experiment';
 export type LakeViewSnapshot = {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
-  maps: readonly { title: string; dataset: LakeDataset; exchange?: LakeExchangeOverlay }[];
+  maps: readonly { title: string; dataset: LakeDataset; exchanges?: readonly LakeExchangeOverlay[] }[];
   reference?: LakeDataset;
   display: LakeDisplay;
   limits: readonly [number, number, number];
@@ -25,7 +25,8 @@ const escapeXml = (text: string) => text.replace(/[<>&"']/g, char => ({
 
 export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, adaptive, tick, time, view, selected, highlights }: LakeViewSnapshot) {
   const width = maps.length === 2 ? 1360 : 900;
-  const height = 940;
+  const extraFlowHeight = 21 * Math.max(0, ...maps.map(map => (map.exchanges?.length ?? 0) - 1));
+  const height = 940 + extraFlowHeight;
   const cardWidth = (width - 64 - 20 * (maps.length - 1)) / maps.length;
   const outline = lakeOutline(mesh);
   const { viewBox, markerRadius } = lakeFraming(mesh, view);
@@ -33,7 +34,7 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
   const { noData, grid, outline: shore } = lakeMapInk;
   const line = 'vector-effect="non-scaling-stroke"';
   const comparison = maps.length === 2 ? maps[1]!.dataset.totals[tick]! - maps[0]!.dataset.totals[tick]! : undefined;
-  const panels = maps.map(({ title, dataset, exchange }, index) => {
+  const panels = maps.map(({ title, dataset, exchanges = [] }, index) => {
     const { distribution } = dataset.trace.parameters;
     const profile = lakeDistributionProfile(distribution);
     const total = dataset.totals[tick]!;
@@ -50,11 +51,9 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     const markers = cells.filter(cell => highlights.has(cell.id)).map(cell =>
       `<circle cx="${cell.wetCentroid[0]}" cy="${cell.wetCentroid[1]}" r="${markerRadius * (cell.id === selected ? 1 : 0.7)}"`
       + ` fill="none" stroke="${escapeXml(highlights.get(cell.id)!)}" stroke-width="${cell.id === selected ? 3 : 2}" ${line}/>`).join('');
-    const exchangePath = exchange && lakeExchangePath(exchange, markerRadius);
-    const direction = exchange && lakeExchangeDirection(exchange);
     return `<g transform="translate(${32 + index * (cardWidth + 20)} 112)" data-map-total="${total}"
   data-distribution="${distribution.kind}" data-profile="${profile}" data-alpha="${distribution.kind === 'homogeneous' ? 0 : distribution.alpha}">
-  <rect width="${cardWidth}" height="622" rx="14" fill="#fff" stroke="#d4e2df"/>
+  <rect width="${cardWidth}" height="${622 + extraFlowHeight}" rx="14" fill="#fff" stroke="#d4e2df"/>
   <text x="20" y="34" font-size="24" font-weight="700">${escapeXml(title)}</text>
   <text x="20" y="62" font-size="18">Biomasse totale · ${lakeTotalTonnes(total)}</text>
   <text x="20" y="85" font-size="16">Évolution depuis le début · ${lakeSignedTonnes(gain)}</text>
@@ -63,14 +62,22 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     <g clip-path="url(#lake-shore)">${regions}</g>
     ${markers}
     <path d="${outline}" fill="none" stroke="${shore}" ${line}/>
-    ${exchange ? `<g clip-path="url(#lake-shore)" data-exchange-pair="${escapeXml(exchange.a + ' ' + exchange.b)}">
-      <path d="${exchangePath}" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" ${line}/>
-      <path d="${exchangePath}" stroke="#183343" stroke-width="3" stroke-linecap="round" fill="none" ${line}
+    ${exchanges.map(exchange => {
+      const path = lakeExchangePath(exchange, markerRadius);
+      return `<g clip-path="url(#lake-shore)" data-exchange-pair="${escapeXml(exchange.a + ' ' + exchange.b)}">
+      <path d="${path}" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" ${line}/>
+      <path d="${path}" stroke="#183343" stroke-width="3" stroke-linecap="round" fill="none" ${line}
         ${exchange.flux ? '' : 'stroke-dasharray="3 3"'}/>
-    </g>` : ''}
+    </g>`;
+    }).join('')}
   </svg>
-  ${direction && exchange?.flux !== undefined ? `<text x="20" y="611" font-size="15" data-flow="${exchange.flux}">
-    ${escapeXml(direction)} · ${formatSmall(Math.abs(exchange.flux))} t/mois · reconstitué</text>` : ''}
+  ${exchanges.map((exchange, row) => {
+    if (exchange.flux === undefined) return '';
+    const direction = dataset.trace.network && !exchange.flux
+      ? `${exchange.a} ↔ ${exchange.b}` : lakeExchangeDirection(exchange)!;
+    return `<text x="20" y="${611 + row * 21}" font-size="15" data-flow="${exchange.flux}">
+    ${escapeXml(direction)} · ${formatSmall(Math.abs(exchange.flux))} t/mois · reconstitué</text>`;
+  }).join('')}
 </g>`;
   });
   const scaleWidth = 420;
@@ -96,7 +103,7 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
   <text x="32" y="82" font-size="19">${lakeSyntheticNotice}</text>
   ${comparison === undefined ? '' : `<text x="${width - 32}" y="82" text-anchor="end" font-size="16" data-map-total-difference="${comparison}">Écart de biomasse totale (droite − gauche) · ${lakeSignedTonnes(comparison)}</text>`}
   ${panels.join('\n')}
-  <g transform="translate(32 771)" data-scale-unit="${legend.unit}" data-scale-min="${limits[0]}" data-scale-max="${limits[2]}">
+  <g transform="translate(32 ${771 + extraFlowHeight})" data-scale-unit="${legend.unit}" data-scale-min="${limits[0]}" data-scale-max="${limits[2]}">
     <text font-size="20" font-weight="700">${legend.label} (${legend.unit})</text>
     ${scale}
     <text y="70" font-size="15">${legend.explanation}</text>
@@ -104,7 +111,7 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     <rect y="102" width="12" height="12" fill="${noData}" stroke="${grid}"/>
     <text x="20" y="113" font-size="15">Valeur simulée indisponible</text>
   </g>
-  <text x="32" y="918" font-size="17" font-weight="700">Mois simulé ${lakeMonth.format(time)} · Grille ${mesh.rows} × ${mesh.columns} · Contour HydroLAKES</text>
+  <text x="32" y="${height - 22}" font-size="17" font-weight="700">Mois simulé ${lakeMonth.format(time)} · Grille ${mesh.rows} × ${mesh.columns} · Contour HydroLAKES</text>
 </g>
 </svg>`;
 }

@@ -20,3 +20,26 @@ export async function openExperiment(page: Page) {
 
 export const slider = (panel: Locator) => panel.getByRole('slider', { name: 'Temps simulé', exact: true });
 export const chart = (panel: Locator) => panel.getByLabel('Trajectoires logistiques', { exact: true });
+
+export async function openInteractions(page: Page) {
+  const panel = await openExperiment(page);
+  await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('interactions');
+  return panel.getByRole('region', { name: 'Interactions spatiales' });
+}
+
+export async function clickWetCell(page: Page, region: Locator) {
+  await region.scrollIntoViewIfNeeded();
+  const hit = await region.evaluate(node => {
+    const cell = node as unknown as SVGRectElement;
+    const box = cell.getBBox();
+    const transform = cell.getScreenCTM()!;
+    const fractions = [0.5, 0.33, 0.66, 0.2, 0.8, 0.1, 0.9];
+    for (const x of fractions) for (const y of fractions) {
+      const point = new DOMPoint(box.x + x * box.width, box.y + y * box.height).matrixTransform(transform);
+      if (document.elementFromPoint(point.x, point.y) === cell) return { x: point.x, y: point.y };
+    }
+    return null;
+  });
+  expect(hit, 'Point cliquable dans la portion humide de la cellule').not.toBeNull();
+  await page.mouse.click(hit!.x, hit!.y);
+}

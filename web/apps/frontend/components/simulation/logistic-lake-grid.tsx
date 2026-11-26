@@ -40,7 +40,7 @@ function numericAttribute(element: SVGRectElement, attribute: string, value?: nu
 
 export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   mesh, cells, dataset, reference, display, limits, tick, time, selected, select, inspect, view, setView, label, highlights,
-  exchange, neighbors, pairCells,
+  exchanges, neighbors, exchangeCells,
 }: {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
@@ -57,9 +57,9 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   setView: React.Dispatch<React.SetStateAction<LakeView>>;
   label: string;
   highlights: ReadonlyMap<string, string>;
-  exchange?: LakeExchangeOverlay | undefined;
+  exchanges?: readonly LakeExchangeOverlay[] | undefined;
   neighbors?: ReadonlySet<string> | undefined;
-  pairCells?: readonly string[] | undefined;
+  exchangeCells?: readonly string[] | undefined;
 }) {
   const clip = useId();
   const regions = useRef<SVGGElement>(null);
@@ -71,7 +71,6 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   const zoomIndex = zoomLevels.indexOf(view.zoom);
   const markedCells = useMemo(() => cells.filter(cell => highlights.has(cell.id)), [cells, highlights]);
   const { viewBox, markerRadius } = lakeFraming(mesh, view);
-  const exchangePath = exchange && lakeExchangePath(exchange, markerRadius);
 
   useLayoutEffect(() => {
     if (!regions.current) return;
@@ -171,7 +170,7 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
         <LakeRegions cells={cells} selected={selected} select={select} inspect={inspect} neighbors={neighbors} />
       </g>
       {markedCells.map(cell => {
-        const paired = pairCells?.includes(cell.id);
+        const paired = exchangeCells?.includes(cell.id);
         const radius = markerRadius * (paired ? 1.65 : cell.id === selected ? 1 : 0.7);
         return <circle key={cell.id} className={styles.lakeMarker} aria-hidden="true"
           data-map-selection={cell.id} data-selected={cell.id === selected || undefined} data-pair-marker={paired || undefined}
@@ -179,12 +178,15 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
           r={radius} stroke={highlights.get(cell.id)} vectorEffect="non-scaling-stroke" />;
       })}
       <path className={styles.lakeOutline} d={outline} fill="none" vectorEffect="non-scaling-stroke" aria-hidden="true" />
-      {exchange && <g clipPath={`url(#${clip})`} pointerEvents="none" aria-hidden="true"
+      {exchanges?.map(exchange => {
+        const exchangePath = lakeExchangePath(exchange, markerRadius);
+        return <g key={exchange.a + ' ' + exchange.b} clipPath={`url(#${clip})`} pointerEvents="none" aria-hidden="true"
         data-exchange-pair={`${exchange.a} ${exchange.b}`} data-flow-direction={lakeExchangeDirection(exchange)} data-flow={exchange.flux}>
         <path d={exchangePath} fill="none" stroke="white" strokeWidth={6} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         <path d={exchangePath} fill="none" stroke="#183343" strokeWidth={3} strokeLinecap="round"
           strokeDasharray={exchange.flux ? undefined : '3 3'} vectorEffect="non-scaling-stroke" />
-      </g>}
+        </g>;
+      })}
     </svg>
     <figcaption>Lac de Guiers · Contour HydroLAKES · Grille {mesh.rows} × {mesh.columns}</figcaption>
   </figure>;

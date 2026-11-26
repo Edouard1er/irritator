@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
 import { errorText } from '@/lib/api/client';
 import {
-  lakeExchangeFlux, lakeExchangeIntensities, lakeExchangeResolutions, lakeResolutionId, lakeWetFrontier,
+  lakeExchangeIntensities, lakeExchangeResolutions, lakeNetworkConnected, lakeNetworkSize, lakeResolutionId, lakeWetFrontier,
   runLakeBatch, runLakeBatches, samplingTimeline, type LakeExchangeIntensity, type LakePlan,
 } from '@/lib/simulation/spatial-experiment';
 import {
   configureLake, formatSmall, initialLakeView, lakeAlpha, lakeComparisonColors, lakeDataset, lakeDisplays,
-  lakeExchangeDirection, lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakePrimaryColor,
+  lakeExchangeDirection, lakeExchangeReading, lakeMonth, lakeNetworkNetFlows, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakePrimaryColor,
   lakeReading, lakeScenarioLabel, lakeSignedTonnes, lakeSyntheticNotice, lakeTonnes, type LakeCell, type LakeDataset,
   type LakeExchangeOverlay, type LakeInputs,
 } from '@/lib/simulation/lake-exploration';
@@ -21,8 +21,10 @@ import styles from './logistic-spatial.module.css';
 
 const initialInputs: LakeInputs = { resolution: '6x3', kind: 'homogeneous', alpha: 0.6, profile: 'sigmoid-v2' };
 const pairColor = '#481c70';
+const networkColors = [lakePrimaryColor, pairColor, '#923b25', '#304e9b', '#14624b', '#87465c'];
 const baselineTitle = 'A · Sans échange';
 const limits = lakeDisplays.ratio.limits;
+const edgeKey = ({ a, b }: LakeExchangeOverlay) => `${a} ${b}`;
 
 export function LogisticLakeInteractions({ visible, active }: { visible: boolean; active: boolean }) {
   const [inputs, setInputs] = useState(initialInputs);
@@ -30,12 +32,18 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   const [plan, setPlan] = useState<LakePlan>();
   const [reload, setReload] = useState(0);
   const [planError, setPlanError] = useState('');
-  const [exchangeEnabled, setExchangeEnabled] = useState(false);
+  const [mode, setMode] = useState<'none' | 'pair' | 'network'>('none');
+  const exchangeEnabled = mode !== 'none';
+  const networkMode = mode === 'network';
   const [mu, setMu] = useState<LakeExchangeIntensity>(0.5);
   const [a, setA] = useState('');
   const [b, setB] = useState('');
   const [picking, setPicking] = useState<'a' | 'b'>();
   const [pairError, setPairError] = useState('');
+  const [networkCells, setNetworkCells] = useState<readonly string[]>([]);
+  const [excludedEdges, setExcludedEdges] = useState<ReadonlySet<string>>(() => new Set());
+  const [pickingNetwork, setPickingNetwork] = useState(true);
+  const [networkError, setNetworkError] = useState('');
   const [selected, setSelected] = useState('');
   const [extras, setExtras] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [view, setView] = useState(initialLakeView);
@@ -62,15 +70,44 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
     }
     return candidates;
   }, [a, plan]);
-  const frontier = exchangeEnabled ? neighbors.get(b) : undefined;
-  const fixed = useMemo(() => exchangeEnabled ? [a, b].filter(Boolean) : [selected].filter(Boolean),
-    [a, b, selected, exchangeEnabled]);
+  const frontier = mode === 'pair' ? neighbors.get(b) : undefined;
+  const { edges: availableEdges, candidates } = useMemo(() => {
+    const edges: LakeExchangeOverlay[] = [];
+    const candidates = new Set<string>();
+    if (plan && networkMode) {
+      const members = plan.domain.cells.filter(cell => networkCells.includes(cell.id));
+      const occupied = new Set(networkCells);
+      for (const cell of plan.domain.cells) {
+        for (const origin of members) {
+          if (occupied.has(cell.id) && origin.id >= cell.id) continue;
+          const frontier = lakeWetFrontier(plan.mesh, origin, cell);
+          if (!frontier) continue;
+          if (occupied.has(cell.id)) edges.push({ a: origin.id, b: cell.id, frontier });
+          else candidates.add(cell.id);
+        }
+        if (!members.length) candidates.add(cell.id);
+      }
+    }
+    return { edges, candidates };
+  }, [networkCells, networkMode, plan]);
+  const edges = useMemo(() => availableEdges.filter(edge => !excludedEdges.has(edgeKey(edge))), [availableEdges, excludedEdges]);
+  const connectionChoices = useMemo(() => availableEdges.map(edge => {
+    const key = edgeKey(edge);
+    const checked = !excludedEdges.has(key);
+    return { edge, key, checked, required: checked && !lakeNetworkConnected(networkCells, edges.filter(candidate => candidate !== edge)) };
+  }), [availableEdges, edges, excludedEdges, networkCells]);
+  const canExtendNetwork = networkCells.length < lakeNetworkSize.max && candidates.size > 0;
+  const ready = mode === 'none' || (networkMode ? networkCells.length >= lakeNetworkSize.min : !!frontier);
+  const fixed = useMemo(() => networkMode ? networkCells : exchangeEnabled ? [a, b].filter(Boolean) : [selected].filter(Boolean),
+    [a, b, selected, exchangeEnabled, networkCells, networkMode]);
   const colors = useMemo(() => {
-    const marks = new Map(fixed.map((id, index) => [id, index === 0 ? lakePrimaryColor : pairColor]));
+    const marks = new Map(fixed.map((id, index) => [id, networkMode ? networkColors[index]! : index === 0 ? lakePrimaryColor : pairColor]));
     for (const [id, color] of extras) if (!marks.has(id)) marks.set(id, color);
     return marks;
-  }, [extras, fixed]);
-  const neighborIds = useMemo(() => picking === 'b' ? new Set(neighbors.keys()) : undefined, [neighbors, picking]);
+  }, [extras, fixed, networkMode]);
+  const neighborIds = useMemo(() => networkMode ? pickingNetwork && canExtendNetwork && networkCells.length ? candidates : undefined
+    : picking === 'b' ? new Set(neighbors.keys()) : undefined,
+  [candidates, canExtendNetwork, neighbors, networkCells.length, networkMode, pickingNetwork, picking]);
   const curves = useMemo<LakeCurve[]>(() => {
     if (!results) return [];
     return [...colors].flatMap(([id, color]) => {
@@ -129,7 +166,11 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
     setA('');
     setB('');
     setPairError('');
-    setPicking(exchangeEnabled ? 'a' : undefined);
+    setPicking(mode === 'pair' ? 'a' : undefined);
+    setNetworkCells([]);
+    setExcludedEdges(new Set());
+    setPickingNetwork(true);
+    setNetworkError('');
     setExtras(new Map());
     setView(initialLakeView);
   }
@@ -169,7 +210,45 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   function selectOnMap(id: string) {
     if (!running.current && picking === 'a') chooseA(id);
     else if (!running.current && picking === 'b') chooseB(id);
+    else if (!running.current && networkMode && pickingNetwork && networkCells.length < lakeNetworkSize.max && !networkCells.includes(id)) {
+      addNetworkCell(id);
+    }
     else inspect(id);
+  }
+
+  function addNetworkCell(id: string) {
+    if (!id || !canExtendNetwork) return;
+    if (!candidates.has(id)) {
+      setNetworkError(`${id} ne partage pas de frontière humide de longueur positive avec le réseau.`);
+      return;
+    }
+    resetResults();
+    setNetworkError('');
+    setNetworkCells([...networkCells, id]);
+    setPickingNetwork(true);
+    removeCell(id);
+    inspect(id);
+  }
+
+  function undoNetworkCell() {
+    const remaining = networkCells.slice(0, -1);
+    const remainingEdges = availableEdges.filter(({ a, b }) => remaining.includes(a) && remaining.includes(b));
+    const retainedEdges = remainingEdges.filter(edge => !excludedEdges.has(edgeKey(edge)));
+    resetResults();
+    setNetworkError('');
+    setNetworkCells(remaining);
+    setExcludedEdges(lakeNetworkConnected(remaining, retainedEdges)
+      ? new Set(remainingEdges.map(edgeKey).filter(key => excludedEdges.has(key))) : new Set());
+    setPickingNetwork(true);
+    if (remaining.length) inspect(remaining.at(-1)!);
+  }
+
+  function toggleNetworkEdge(key: string, enabled: boolean) {
+    const excluded = new Set(excludedEdges);
+    if (enabled) excluded.delete(key);
+    else excluded.add(key);
+    resetResults();
+    setExcludedEdges(excluded);
   }
 
   function removeCell(id: string) {
@@ -185,7 +264,7 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   }
 
   async function run() {
-    if (!plan || running.current || (exchangeEnabled && !frontier)) return;
+    if (!plan || running.current || !ready) return;
     resetResults();
     const controller = new AbortController();
     const { signal } = controller;
@@ -193,7 +272,9 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
     setProgress({ done: 0 });
     try {
       const baseline = inputs.kind === 'homogeneous' ? plan : await configureLake(inputs, signal);
-      const coupled = exchangeEnabled ? await configureLake(inputs, signal, { a, b, mu }) : undefined;
+      const coupled = networkMode ? await configureLake(inputs, signal, {
+        cells: networkCells, edges: edges.map(({ a, b }) => [a, b] as const), mu,
+      }) : exchangeEnabled ? await configureLake(inputs, signal, { a, b, mu }) : undefined;
       signal.throwIfAborted();
       const count = baseline.domain.batches.length + (coupled?.domain.batches.length ?? 0);
       const execute: Parameters<typeof runLakeBatches>[2] = request => runLakeBatch(request, signal);
@@ -209,6 +290,7 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
         baseline: lakeDataset(baseline.domain, independent),
         ...(coupled && exchanged && { exchanged: lakeDataset(coupled.domain, exchanged) }),
       });
+      if (networkMode) setPickingNetwork(false);
       setTick(0);
     } catch (cause) {
       if (!signal.aborted) setFailure(errorText(cause));
@@ -223,16 +305,13 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   if (!visible) return null;
   const baseline = results?.baseline;
   const exchanged = results?.exchanged;
-  const parameters = exchanged?.trace.exchange;
-  const readingA = lakeReading(exchanged, a, tick);
-  const readingB = lakeReading(exchanged, b, tick);
-  const exchange: LakeExchangeOverlay | undefined = frontier ? { a, b, frontier } : undefined;
-  if (exchange && parameters && readingA && readingB) {
-    exchange.flux = lakeExchangeFlux(parameters.mu, exchanged!.cells.get(a)!.area, exchanged!.cells.get(b)!.area,
-      readingA.density, readingB.density);
-  }
+  const network = exchanged?.trace.network;
+  const exchanges = (networkMode ? network?.edges ?? edges : frontier ? [{ a, b, frontier }] : [])
+    .map(edge => lakeExchangeReading(edge, exchanged, network?.mu ?? exchanged?.trace.exchange?.mu ?? mu, tick));
+  const exchange = networkMode ? undefined : exchanges[0];
   const direction = exchange && lakeExchangeDirection(exchange);
-  const exchangeTitle = `B · Échange (μ = ${lakeAlpha(mu)} mois⁻¹)`;
+  const netFlows = networkMode ? lakeNetworkNetFlows(exchanges) : undefined;
+  const exchangeTitle = `B · ${networkMode ? 'Réseau local' : 'Échange'} (μ = ${lakeAlpha(mu)} mois⁻¹)`;
   const timeControls = (label: string) => <div className={styles.exchangeTime}>
     <label>Mois simulé <strong data-exchange-time={time}>{lakeMonth.format(time)}</strong>
       <input type="range" aria-label={label} value={time} min={simulation?.start ?? 0} max={simulation?.end ?? 20}
@@ -263,15 +342,15 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   const commonMap = plan && {
     mesh: plan.mesh, cells: plan.domain.cells, reference: undefined, display: 'ratio' as const, limits, tick, time,
     selected, select: selectOnMap, view, setView, highlights: colors, workshop: false, initialKnown: !!baseline, neighbors: neighborIds,
-    pairCells: exchangeEnabled ? fixed : undefined,
+    exchangeCells: exchangeEnabled ? fixed : undefined,
   };
   const snapshot: LakeViewSnapshot | undefined = plan && baseline ? {
     mesh: plan.mesh, cells: plan.domain.cells, display: 'ratio', limits, adaptive: false, tick, time, view, selected, highlights: colors,
     maps: [{ title: baselineTitle, dataset: baseline },
-      ...(exchanged && exchange ? [{ title: exchangeTitle, dataset: exchanged, exchange }] : [])],
+      ...(exchanged ? [{ title: exchangeTitle, dataset: exchanged, exchanges }] : [])],
   } : undefined;
 
-  return <section className={styles.lakeExperience} aria-label="Interactions spatiales">
+  return <section className={styles.lakeExperience} data-network={networkMode || undefined} aria-label="Interactions spatiales">
     <p className={styles.lakeNotice}>{lakeSyntheticNotice}</p>
     <fieldset className={styles.exchangeSettings} disabled={!!progress}>
       <legend>Paramètres communs</legend>
@@ -289,16 +368,20 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
       </div>
       <div className={styles.lakeOptions}>
         <label className={styles.dimensions}>Échange de biomasse
-          <select value={exchangeEnabled ? 'pair' : 'none'} onChange={event => {
-            const enabled = event.currentTarget.value === 'pair';
+          <select value={mode} onChange={event => {
+            const next = event.currentTarget.value;
+            if (next !== 'none' && next !== 'pair' && next !== 'network') return;
             resetResults();
-            setExchangeEnabled(enabled);
-            setPicking(enabled && !a ? 'a' : enabled && !b ? 'b' : undefined);
+            setMode(next);
+            setPicking(next === 'pair' ? !a ? 'a' : !b ? 'b' : undefined : undefined);
+            setPickingNetwork(true);
             setPairError('');
+            setNetworkError('');
             setExtras(new Map());
           }}>
             <option value="none">Sans échange</option>
             <option value="pair">Échange entre deux cellules voisines</option>
+            <option value="network">Réseau local de cellules connectées</option>
           </select>
         </label>
         {exchangeEnabled && <label className={styles.dimensions}>Intensité d’échange μ (mois⁻¹)
@@ -310,8 +393,8 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
           </select>
         </label>}
       </div>
-      {exchangeEnabled && <>
-        <p className={styles.coverage}>μ est une intensité expérimentale d’échange, sans calibration physique.</p>
+      {exchangeEnabled && <p className={styles.coverage}>μ est une intensité expérimentale d’échange, sans calibration physique.</p>}
+      {mode === 'pair' && <>
         <div className={styles.exchangePair}>
           <label className={styles.dimensions}>Cellule A
             <select value={a} disabled={!plan} onChange={event => chooseA(event.currentTarget.value)}>
@@ -335,13 +418,40 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
         </p>
         {pairError && <p role="alert" className={styles.error}>{pairError}</p>}
       </>}
+      {networkMode && <>
+        <div className={styles.exchangePair}>
+          <label className={styles.dimensions}>Ajouter une cellule au réseau
+            <select value="" disabled={!canExtendNetwork} onChange={event => addNetworkCell(event.currentTarget.value)}>
+              <option value="">Choisir</option>
+              {[...candidates].map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </label>
+          <button type="button" disabled={!canExtendNetwork} aria-pressed={pickingNetwork}
+            onClick={() => { setPickingNetwork(!pickingNetwork); setNetworkError(''); }}>Ajouter sur la carte</button>
+          <button type="button" disabled={!networkCells.length} onClick={undoNetworkCell}>Retirer la dernière cellule</button>
+        </div>
+        <p className={styles.coverage} aria-live="polite">
+          {networkCells.length ? `${networkCells.length} / ${lakeNetworkSize.max} cellules · ${networkCells.join(' · ')}`
+            : 'Choisissez une première cellule humide.'}
+          {networkCells.length > 0 && networkCells.length < lakeNetworkSize.min && (canExtendNetwork
+            ? ' Ajoutez des voisines humides pour relier trois cellules.' : ' Aucune voisine humide disponible.')}
+        </p>
+        {!!connectionChoices.length && <div className={styles.networkConnections} role="group" aria-label="Connexions du réseau">
+          {connectionChoices.map(({ edge, key, checked, required }) => <label key={key}>
+            <input type="checkbox" checked={checked} disabled={required} onChange={event => toggleNetworkEdge(key, event.currentTarget.checked)} />
+            {edge.a} ↔ {edge.b}
+          </label>)}
+          <small>Les connexions nécessaires à la continuité du réseau restent cochées.</small>
+        </div>}
+        {networkError && <p role="alert" className={styles.error}>{networkError}</p>}
+      </>}
     </fieldset>
     <div className={styles.runActions}>
       <span className={styles.status} role="status" data-phase={results ? 'completed' : progress ? 'running' : failure ? 'error' : 'idle'}>
         {results ? 'Terminé' : progress ? 'En cours' : failure ? 'Erreur' : 'Non lancé'}
       </span>
       {progress && <RunProgress progress={progress} cancel={resetResults} />}
-      <button type="button" className="primary" disabled={!plan || !!progress || (exchangeEnabled && !frontier)}
+      <button type="button" className="primary" disabled={!plan || !!progress || !ready}
         onClick={() => void run()}><Play size={16} aria-hidden="true" /> {exchangeEnabled ? 'Simuler les deux scénarios' : 'Simuler sans échange'}</button>
     </div>
     {planError && <p role="alert" className={styles.error}>Chargement du contour impossible · {planError} <button type="button"
@@ -362,18 +472,26 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
           <strong>{direction} · {formatSmall(Math.abs(exchange.flux))} t/mois</strong>
           <small>Flux reconstitué à partir des biomasses natives observées.</small>
         </p>}
+        {networkMode && exchanged && <div className={styles.networkFlows} aria-label="Flux des connexions du réseau" role="group">
+          <ul>{exchanges.map(edge => <li key={edgeKey(edge)}
+            data-network-edge={edgeKey(edge)} data-exchange-flux={edge.flux} data-exchange-direction={lakeExchangeDirection(edge)}>
+            <strong>{edge.flux ? lakeExchangeDirection(edge) : `${edge.a} ↔ ${edge.b}`}</strong>
+            {' · '}{formatSmall(Math.abs(edge.flux!))} t/mois
+          </li>)}</ul>
+          <small>Flux reconstitués à partir des biomasses natives observées.</small>
+        </div>}
         <div className={styles.lakeMaps} data-comparison={exchangeEnabled || undefined}>
           <LakeMapPane {...commonMap} title={baselineTitle} label="Carte sans échange" dataset={baseline} />
-          {exchangeEnabled && <LakeMapPane {...commonMap} title={exchangeTitle} label="Carte avec échange" dataset={exchanged} exchange={exchange} />}
+          {exchangeEnabled && <LakeMapPane {...commonMap} title={exchangeTitle} label="Carte avec échange" dataset={exchanged} exchanges={exchanges} />}
         </div>
-        {baseline && exchanged && <PairReadings baseline={baseline} exchanged={exchanged}
-          cells={[baseline.cells.get(a)!, baseline.cells.get(b)!]} tick={tick} />}
+        {baseline && exchanged && <ExchangeReadings baseline={baseline} exchanged={exchanged}
+          cells={fixed.map(id => baseline.cells.get(id)!)} tick={tick} netFlows={netFlows} />}
       </SpatialFullscreen>
       {baseline && <section className={styles.panel} aria-label="Résultats par cellule">
         <SpatialFullscreen active={active} label="Trajectoires des scénarios" controls={fullscreenControls}>
           <LakeTrajectoryPicker cells={plan.domain.cells} selected={selected} colors={colors} fixed={exchangeEnabled ? fixed : undefined}
             select={inspect} add={addCell} remove={removeCell} />
-          {exchanged && <p className={styles.coverage}>Paire sélectionnée · tirets pour A, trait plein pour B. Autres cellules · trajectoire commune.</p>}
+          {exchanged && <p className={styles.coverage}>{networkMode ? 'Cellules du réseau' : 'Paire sélectionnée'} · tirets pour A, trait plein pour B. Autres cellules · trajectoire commune.</p>}
           {active && simulation && <LakeTrajectoryChart curves={curves} tick={tick} time={time} start={simulation.start} end={simulation.end} />}
         </SpatialFullscreen>
       </section>}
@@ -381,22 +499,25 @@ export function LogisticLakeInteractions({ visible, active }: { visible: boolean
   </section>;
 }
 
-function PairReadings({ baseline, exchanged, cells, tick }: {
-  baseline: LakeDataset; exchanged: LakeDataset; cells: readonly LakeCell[]; tick: number;
+function ExchangeReadings({ baseline, exchanged, cells, tick, netFlows }: {
+  baseline: LakeDataset; exchanged: LakeDataset; cells: readonly LakeCell[]; tick: number; netFlows: ReadonlyMap<string, number> | undefined;
 }) {
   return <div className={styles.lakeComparison}>
     <table>
-      <caption>Biomasse et densité de la paire sélectionnée</caption>
+      <caption>{netFlows ? 'Biomasse, densité et flux net du réseau' : 'Biomasse et densité de la paire sélectionnée'}</caption>
       <thead><tr>
         <th scope="col">Cellule et scénario</th><th scope="col">Biomasse</th><th scope="col">Densité</th>
         <th scope="col">Gain depuis le mois 0</th><th scope="col">Écart à A</th>
+        {netFlows && <th scope="col">Flux net (t/mois)</th>}
       </tr></thead>
       <tbody>{cells.flatMap(cell => {
         const control = lakeReading(baseline, cell.id, tick)!.value;
         return ([['A', baseline], ['B', exchanged]] as const).map(([scenario, dataset]) => {
           const reading = lakeReading(dataset, cell.id, tick)!;
           const gain = reading.value - lakeReading(dataset, cell.id, 0)!.value;
-          return <tr key={cell.id + scenario} data-pair-cell={cell.id} data-pair-scenario={scenario}>
+          const net = netFlows && (scenario === 'A' ? 0 : netFlows.get(cell.id)!);
+          return <tr key={cell.id + scenario} data-pair-cell={netFlows ? undefined : cell.id} data-pair-scenario={netFlows ? undefined : scenario}
+            data-network-cell={netFlows ? cell.id : undefined} data-network-scenario={netFlows ? scenario : undefined}>
             <th scope="row">{cell.id} · {scenario}</th>
             <td data-pair-biomass={reading.value}>{lakeTonnes(reading.value)}</td>
             <td data-pair-density={reading.density}>{formatSmall(reading.density)} t/km²</td>
@@ -404,6 +525,7 @@ function PairReadings({ baseline, exchanged, cells, tick }: {
             <td data-pair-delta={scenario === 'B' ? reading.value - control : undefined}>
               {scenario === 'B' ? lakeSignedTonnes(reading.value - control) : '—'}
             </td>
+            {net !== undefined && <td data-network-net-flux={net}>{net > 0 ? '+' : ''}{formatSmall(net)}</td>}
           </tr>;
         });
       })}</tbody>
