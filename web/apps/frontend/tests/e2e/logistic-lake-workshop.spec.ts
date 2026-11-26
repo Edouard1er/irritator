@@ -2,6 +2,7 @@ import { expect, test, type Download, type Response } from '@playwright/test';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { RunRequest, RunResult } from '@contracts';
+import { lakeNumber } from '../../lib/simulation/lake-exploration';
 import { chart, isSimulation, openExperiment, slider } from './logistic-workshop';
 
 const evidence = process.env.IRRITATOR_LAKE_WORKSHOP_EVIDENCE;
@@ -67,7 +68,7 @@ test('présente les simulations natives et exporte le mois et les cartes affich�
   await slider(panel).fill('10');
   const id = (await left.locator('[data-cell]').first().getAttribute('data-cell'))!;
   await left.locator(`[data-cell="${id}"]`).press('Enter');
-  await expect(chart(panel)).toHaveAttribute('data-series', `${id},Biomasse totale`);
+  await expect(chart(panel)).toHaveAttribute('data-series', id);
   await expect(chart(panel).locator('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', '10');
   const singleDownload = page.waitForEvent('download');
   await exportButton.click();
@@ -165,33 +166,129 @@ test('présente les simulations natives et exporte le mois et les cartes affich�
   expect(responses).toHaveLength(12);
 });
 
-test('recherche et compare trois cellules parmi les 296 de la grille fine', async ({ page }) => {
+test('trace les observations natives de la cellule principale et de dix cellules supplémentaires', async ({ page }) => {
+  test.setTimeout(120000);
   const panel = await openExperiment(page);
+  const responses: Response[] = [];
+  let requests = 0;
+  page.on('request', request => { if (isSimulation(request)) requests++; });
+  page.on('response', response => { if (isSimulation(response.request()) && response.ok()) responses.push(response); });
   await panel.getByRole('combobox', { name: 'Mode de l’expérience' }).selectOption('lake');
   await panel.getByRole('button', { name: 'Mode atelier' }).click();
-  await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('48x24');
+  await panel.getByRole('button', { name: 'Gradient pondéré par surface humide · 0,6', exact: true }).click();
+  await expect(panel.getByRole('combobox', { name: 'Résolution du lac' })).toHaveValue('18x9');
   const grid = panel.getByRole('group', { name: primaryName, exact: true });
-  const cells = grid.locator('[data-cell]');
-  await expect(cells).toHaveCount(296);
+  await expect(grid.locator('[data-cell][data-biomass]')).toHaveCount(65);
+  expect(requests).toBe(4);
+  const native = (await Promise.all(responses.map(async response => (await response.json() as RunResult).observations))).flat();
   const picker = panel.getByRole('group', { name: 'Comparer les trajectoires' });
   const search = picker.getByRole('searchbox', { name: 'Rechercher une cellule par identifiant' });
+  const add = (id: string) => picker.getByRole('button', { name: `Comparer ${id}`, exact: true });
+  const main = 'C7_3';
+  const additional = ['C2_5', 'C7_2', 'C1_6', 'C0_6', 'C8_1', 'C14_0', 'C12_1', 'C9_1', 'C16_6', 'C16_8'];
+  const plot = chart(panel);
+  const curves = plot.locator('[data-lake-curve]');
+  const legend = panel.getByRole('list', { name: 'Séries à l’instant consulté' });
+  const biomassAxis = plot.locator('[data-lake-axis="biomass"]');
+  await search.fill(main);
+  await search.press('Enter');
+  await expect(plot).toHaveAttribute('data-series', main);
+  await expect(curves).toHaveCount(1);
+  await expect(plot.locator('[data-lake-axis]:not([data-lake-axis="time"])')).toHaveCount(1);
+  await expect(biomassAxis).toContainText('Biomasse des cellules (t)');
+  await expect(plot.locator('[data-lake-axis="time"]')).toContainText('Temps simulé (mois)');
+  const upperTick = biomassAxis.locator('g text').last();
+  const soloLimit = await upperTick.textContent();
+
+  for (const id of additional) {
+    await search.fill(id.toLowerCase());
+    await add(id).click();
+    if (id === additional[0]) {
+      await expect(upperTick).not.toHaveText(soloLimit!);
+      await search.fill(id);
+      await expect(add(id)).toBeDisabled();
+    }
+  }
+  const ids = [main, ...additional];
+  await expect(picker.getByText('10 / 10 cellules supplémentaires', { exact: true })).toBeVisible();
+  await expect(plot).toHaveAttribute('data-series', ids.join(','));
+  await expect(curves).toHaveCount(11);
+  await expect(legend.getByRole('listitem')).toHaveCount(11);
+  await expect(legend).not.toContainText('Biomasse totale');
+  await expect(legend.locator(`[data-series-cell="${main}"]`)).toHaveAttribute('data-selected', 'true');
+  await expect(curves.last()).toHaveAttribute('data-lake-curve', main);
+  await expect(curves.last().locator('polyline')).toHaveAttribute('stroke-width', '3.5');
+  await slider(panel).fill('10');
+  await expect(grid).toHaveAttribute('data-time', '10');
+  await expect(plot.locator('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', '10');
+  const colors = new Set<string>();
+  for (const id of ids) {
+    const { samples } = native.find(observation => observation.component === `${id}-N`)!;
+    expect(samples).toHaveLength(201);
+    const line = plot.locator(`[data-lake-curve="${id}"] polyline`);
+    await expect(line).toHaveAttribute('points', samples.map(({ time, value }) => `${time},${value}`).join(' '));
+    const marker = plot.locator(`[data-lake-mark="${id}"]`);
+    await expect(marker).toHaveAttribute('data-biomass', String(samples[100]!.value));
+    const color = (await line.getAttribute('stroke'))!;
+    colors.add(color);
+    await expect(marker).toHaveAttribute('fill', color);
+    await expect(grid.locator(`[data-map-selection="${id}"]`)).toHaveAttribute('stroke', color);
+    const cssColor = await line.evaluate(element => getComputedStyle(element).stroke);
+    await expect(legend.locator(`[data-series-cell="${id}"] i`)).toHaveCSS('background-color', cssColor);
+    await expect(picker.locator(`[data-picker-cell="${id}"]`)).toHaveCSS('color', cssColor);
+  }
+  expect(colors.size).toBe(11);
+
+  await panel.getByRole('button', { name: 'Plein écran · Trajectoires', exact: true }).click();
+  const fullscreen = page.locator(':fullscreen');
+  await expect(fullscreen.locator('[data-lake-curve]')).toHaveCount(11);
+  await expect(legend).toBeInViewport({ ratio: 1 });
+  if (evidence) {
+    await mkdir(evidence, { recursive: true });
+    await fullscreen.screenshot({ path: path.join(evidence, '18x9-trajectoires-11-cellules.png'), animations: 'disabled' });
+  }
+  const hoverArea = plot.locator('svg rect');
+  const bounds = (await hoverArea.boundingBox())!;
+  await hoverArea.hover({ position: { x: bounds.width / 2, y: 12 } });
+  const tooltip = plot.locator('[data-lake-tooltip]');
+  await expect(tooltip.getByText('10,0 mois', { exact: true })).toBeVisible();
+  await expect(tooltip.locator('> div')).toHaveCount(11);
+  for (const id of ids) {
+    const value = native.find(observation => observation.component === `${id}-N`)!.samples[100]!.value;
+    await expect(tooltip.locator('> div').filter({ has: page.getByText(id, { exact: true }) })).toContainText(`${lakeNumber.format(value)} t`);
+  }
+  await expect(tooltip).not.toContainText('Biomasse totale');
+  await fullscreen.getByRole('button', { name: 'Quitter le plein écran · Trajectoires', exact: true }).click();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(legend).toBeVisible();
+  expect(await legend.evaluate(element => new Set([...element.children].map(row => row.getBoundingClientRect().top)).size))
+    .toBeGreaterThan(1);
+  await hoverArea.hover();
+  await expect(tooltip).toBeInViewport({ ratio: 1 });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
+  const replacement = 'C10_3';
+  const removed = additional[1]!;
+  await search.fill(replacement);
+  await expect(add(replacement)).toBeDisabled();
+  await picker.getByRole('button', { name: `Retirer ${removed} de la comparaison` }).click();
+  await expect(grid.locator(`[data-map-selection="${removed}"]`)).toHaveCount(0);
+  await expect(add(replacement)).toBeEnabled();
+  await add(replacement).click();
+  await expect(curves).toHaveCount(11);
+  const promoted = additional[0]!;
+  await search.fill(promoted);
+  await search.press('Enter');
+  await expect(grid.locator(`[data-cell="${promoted}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(plot).toHaveAttribute('data-series', [promoted, ...additional.slice(2), replacement].join(','));
+  await expect(curves).toHaveCount(10);
+  await expect(picker.getByText('9 / 10 cellules supplémentaires', { exact: true })).toBeVisible();
+  expect(requests).toBe(4);
+
+  await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('48x24');
+  await expect(grid.locator('[data-cell]')).toHaveCount(296);
   await search.fill('c');
   await expect(picker.getByRole('listitem')).toHaveCount(8);
   await expect(picker.getByText(/296 résultats/)).toBeVisible();
-  const ids = await cells.evaluateAll(elements => elements.filter(cell => cell.getAttribute('aria-pressed') === 'false')
-    .slice(-4).map(cell => cell.getAttribute('data-cell')!));
-  const [one, two, three, four] = ids as [string, string, string, string];
-  for (const id of [one, two, three]) {
-    await search.fill(id.toLowerCase());
-    await picker.getByRole('button', { name: `Comparer ${id}`, exact: true }).click();
-    await expect(grid.locator(`[data-map-selection="${id}"]`)).toBeAttached();
-  }
-  await search.fill(four);
-  await expect(picker.getByRole('button', { name: `Comparer ${four}`, exact: true })).toBeDisabled();
-  await picker.getByRole('button', { name: `Retirer ${two} de la comparaison` }).click();
-  await expect(grid.locator(`[data-map-selection="${two}"]`)).toHaveCount(0);
-  await expect(picker.getByRole('button', { name: `Comparer ${four}`, exact: true })).toBeEnabled();
-  await search.press('Enter');
-  await expect(grid.locator(`[data-cell="${four}"]`)).toHaveAttribute('aria-pressed', 'true');
-  await expect(panel.getByRole('heading', { name: `Cellule ${four}`, exact: true })).toBeVisible();
 });

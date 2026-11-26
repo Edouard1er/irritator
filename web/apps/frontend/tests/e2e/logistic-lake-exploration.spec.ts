@@ -72,7 +72,7 @@ test('la comparaison anime deux cartes de 296 cellules avec les mêmes mois, val
   await expect(leftCell).toHaveAttribute('aria-pressed', 'true');
   await expect(rightCell).toHaveAttribute('aria-pressed', 'true');
   await expect(panel.getByRole('combobox', { name: 'Cellule à consulter' })).toHaveValue(id!);
-  await expect(chart(panel)).toHaveAttribute('data-series', `${id},Biomasse totale`);
+  await expect(chart(panel)).toHaveAttribute('data-series', id!);
   await expect(panel.locator(`[data-series-cell="${id}"]`)).toHaveAttribute('data-selected', 'true');
 
   await slider(panel).fill('10');

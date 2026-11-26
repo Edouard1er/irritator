@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { catalog, type RunRequest, type RunResult } from '@contracts';
+import { LakeTrajectoryChart } from '@/components/simulation/logistic-lake-trajectories';
 import { LogisticSpatialExperiment } from '@/components/simulation/logistic-spatial-experiment';
 import { lakeDomain } from '../../../examples/logistic-grid';
 import { lakeMeshFromGeoJson, lakeResolutions, runLakeBatches } from '@/lib/simulation/spatial-experiment';
@@ -247,7 +248,7 @@ it('lit aux trois vitesses, recule, boucle et reste en pause après avoir quitt�
   }
 });
 
-it('réutilise les scènes présentées et limite la sélection compacte à trois trajectoires supplémentaires', async () => {
+it('réutilise les scènes présentées et limite la sélection à dix trajectoires supplémentaires', async () => {
   const requests: RunRequest[] = [];
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
     if (String(url).startsWith('/api/logistic-lake?')) return lakePlan(new Request(new URL(String(url), 'http://localhost')));
@@ -269,31 +270,66 @@ it('réutilise les scènes présentées et limite la sélection compacte à troi
   expect(screen.getByRole('combobox', { name: 'Résolution du lac' })).toHaveValue('18x9');
   const grids = screen.getAllByRole('group', { name: /Grille humide du lac de Guiers/ });
   const picker = screen.getByRole('group', { name: 'Comparer les trajectoires' });
+  const plot = screen.getByRole('img', { name: 'Trajectoires logistiques' });
+  const legend = screen.getByRole('list', { name: 'Séries à l’instant consulté' });
   const search = within(picker).getByRole('searchbox');
-  const selectable = [...grids[0]!.querySelectorAll('[data-cell][aria-pressed="false"]')].slice(0, 4)
+  const selected = grids[0]!.querySelector('[data-cell][aria-pressed="true"]')!.getAttribute('data-cell')!;
+  const selectable = [...grids[0]!.querySelectorAll('[data-cell][aria-pressed="false"]')].slice(0, 11)
     .map(element => element.getAttribute('data-cell')!);
   const beforeReading = fetcher.mock.calls.length;
-  for (const id of selectable.slice(0, 3)) {
+  expect(plot).toHaveAttribute('data-series', selected);
+  expect(plot.querySelectorAll('[data-lake-axis]:not([data-lake-axis="time"])')).toHaveLength(1);
+  expect(within(plot).getByText('Biomasse des cellules (t)')).toBeInTheDocument();
+  expect(plot.querySelectorAll('[data-lake-curve]')).toHaveLength(1);
+  for (const id of selectable.slice(0, 10)) {
     fireEvent.change(search, { target: { value: id.toLowerCase() } });
     fireEvent.click(within(picker).getByRole('button', { name: `Comparer ${id}` }));
     expect(within(picker).getByRole('button', { name: `Retirer ${id} de la comparaison` })).toBeVisible();
     expect(container.querySelectorAll(`[data-map-selection="${id}"]`)).toHaveLength(2);
     expect(container.querySelector(`[data-lake-mark="${id}"]`)).toBeInTheDocument();
   }
-  const [first, , , fourth] = selectable as [string, string, string, string];
-  fireEvent.change(search, { target: { value: fourth } });
-  expect(within(picker).getByRole('button', { name: `Comparer ${fourth}` })).toBeDisabled();
+  expect(within(picker).getByText('10 / 10 cellules supplémentaires')).toBeVisible();
+  expect(plot.querySelectorAll('[data-lake-curve]')).toHaveLength(11);
+  expect(within(legend).getAllByRole('listitem')).toHaveLength(11);
+  expect(legend).not.toHaveTextContent('Biomasse totale');
+  const first = selectable[0]!;
+  const eleventh = selectable[10]!;
+  fireEvent.change(search, { target: { value: eleventh } });
+  const addEleventh = within(picker).getByRole('button', { name: `Comparer ${eleventh}` });
+  expect(addEleventh).toBeDisabled();
   fireEvent.click(within(picker).getByRole('button', { name: `Retirer ${first} de la comparaison` }));
-  expect(within(picker).getByRole('button', { name: `Comparer ${fourth}` })).toBeEnabled();
-  fireEvent.click(within(grids[1]!).getByRole('button', { name: fourth }));
-  expect(within(grids[0]!).getByRole('button', { name: fourth })).toHaveAttribute('aria-pressed', 'true');
+  expect(addEleventh).toBeEnabled();
+  fireEvent.click(addEleventh);
+  fireEvent.click(within(grids[1]!).getByRole('button', { name: eleventh }));
+  expect(within(grids[0]!).getByRole('button', { name: eleventh })).toHaveAttribute('aria-pressed', 'true');
+  expect(plot).toHaveAttribute('data-series', [eleventh, ...selectable.slice(1, 10)].join(','));
   fireEvent.change(screen.getByRole('slider', { name: 'Temps simulé' }), { target: { value: 10 } });
   fireEvent.change(screen.getByRole('combobox', { name: 'Affichage de la carte' }), { target: { value: 'density' } });
   fireEvent.click(within(grids[0]!.parentElement!).getByRole('button', { name: 'Zoom avant' }));
   fireEvent.click(workshop);
   expect(screen.getByRole('table', { name: /Biomasses totales simulées/ })).toBeVisible();
   expect(screen.getByText('Fraction humide')).toBeVisible();
+  expect(container.querySelector('[data-total-biomass]')).toHaveAttribute('data-total-biomass');
+  expect(container.querySelectorAll('[data-map-total]')).toHaveLength(2);
+  expect(container.querySelector('[data-map-total-difference]')).toHaveAttribute('data-map-total-difference');
   expect(grids[1]).toHaveAttribute('data-time', '10');
   expect(grids[1]).toHaveAttribute('data-zoom', '1.5');
   expect(fetcher).toHaveBeenCalledTimes(beforeReading);
+});
+
+it('laisse une interruption dans la trajectoire et signale une observation absente au survol', () => {
+  const points = [12, 16, null, 24, 28].map((value, time) => ({ time, value }));
+  const { container } = render(<LakeTrajectoryChart curves={[{ name: 'C11', color: '#202c38', points }]}
+    tick={2} time={2} start={0} end={4} />);
+  const segments = container.querySelectorAll('[data-lake-curve="C11"] polyline');
+  expect([...segments].map(segment => segment.getAttribute('points'))).toEqual(['0,12 1,16', '3,24 4,28']);
+  expect(container.querySelector('[data-lake-mark="C11"]')).toBeNull();
+  expect(container.querySelector('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', '2');
+  const hoverArea = container.querySelector('svg rect')!;
+  vi.spyOn(hoverArea, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 100));
+  fireEvent.pointerMove(hoverArea, { clientX: 50 });
+  expect(screen.getByText('2,0 mois')).toBeVisible();
+  expect(screen.getByText('Point absent')).toBeVisible();
+  fireEvent.pointerLeave(hoverArea);
+  expect(screen.queryByText('Point absent')).not.toBeInTheDocument();
 });

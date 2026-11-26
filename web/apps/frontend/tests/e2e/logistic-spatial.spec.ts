@@ -63,11 +63,11 @@ async function expectPlottedSeries(panel: Locator, result: RunResult, ids: strin
       value: expectedAt(result, id, month).value,
     };
   });
-  await expect(chart(panel)).toHaveAttribute('data-series', [...ids, ...(lake ? ['Biomasse totale'] : [])].join(','));
+  await expect(chart(panel)).toHaveAttribute('data-series', ids.join(','));
   if (lake) {
     const plot = chart(panel);
     await expect(plot.locator('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', String(month));
-    await expect(plot.locator('[data-lake-curve]')).toHaveCount(ids.length + 1);
+    await expect(plot.locator('[data-lake-curve]')).toHaveCount(ids.length);
     for (const { id, x, y, value } of expected) {
       await expect(plot.locator(`[data-lake-curve="${id}"] polyline`))
         .toHaveAttribute('points', x.map((time, index) => `${time},${y[index]}`).join(' '));
@@ -708,7 +708,7 @@ test('les pleins écrans partagent instant, sélection et cadrage avec la grille
     await expect.poll(() => page.evaluate(() => document.fullscreenElement?.textContent)).toContain(text);
     if (name === 'Trajectoires') {
       await expect(chart(panel)).toHaveAttribute('data-time', '12');
-      await expect(chart(panel)).toHaveAttribute('data-series', `${cellId},Biomasse totale`);
+      await expect(chart(panel)).toHaveAttribute('data-series', cellId);
       const plot = chart(panel).locator('svg');
       await expect.poll(() => plot.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(500);
       if (refinementEvidence) await page.screenshot({ path: path.join(refinementEvidence, 'plein-ecran-trajectoires.png'), animations: 'disabled' });

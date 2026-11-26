@@ -1,21 +1,21 @@
 import { memo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import type { LakeCell } from '@/lib/simulation/lake-exploration';
-import { logisticSeriesColor } from './logistic-trajectories';
 import styles from './logistic-spatial.module.css';
 
-export const maxLakeComparisons = 3;
+export const maxLakeComparisons = 10;
 const resultLimit = 8;
 
-export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, selected, compared, select, add, remove }: {
-  cells: readonly LakeCell[]; selected: string; compared: readonly string[];
+export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, selected, colors, select, add, remove }: {
+  cells: readonly LakeCell[]; selected: string; colors: ReadonlyMap<string, string>;
   select: (id: string) => void; add: (id: string) => void; remove: (id: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const searchInput = useRef<HTMLInputElement>(null);
   const search = query.trim().toUpperCase();
   const matches = search ? cells.filter(cell => cell.id.toUpperCase().includes(search)) : [];
-  const selectedCell = cells.find(cell => cell.id === selected);
+  const selectedColor = colors.get(selected);
+  const compared = [...colors].filter(([id]) => id !== selected);
   const full = compared.length >= maxLakeComparisons;
 
   function consult(id: string) {
@@ -31,16 +31,14 @@ export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, 
   return <fieldset className={styles.lakePicker}>
     <legend>Comparer les trajectoires</legend>
     <div className={styles.lakeChips}>
-      {selectedCell && <span data-picker-cell={selected} className={styles.lakeChip}
-        style={{ color: logisticSeriesColor(selectedCell) }}>Cellule consultée · {selected}</span>}
-      {compared.map(id => {
-        const cell = cells.find(item => item.id === id);
-        return cell && <button type="button" key={id} data-picker-cell={id} className={styles.lakeChip}
-          aria-label={`Retirer ${id} de la comparaison`} style={{ color: logisticSeriesColor(cell) }}
+      {selectedColor && <span data-picker-cell={selected} className={styles.lakeChip}
+        style={{ color: selectedColor }}>Cellule consultée · {selected}</span>}
+      {compared.map(([id, color]) =>
+        <button type="button" key={id} data-picker-cell={id} className={styles.lakeChip}
+          aria-label={`Retirer ${id} de la comparaison`} style={{ color }}
           onClick={() => { remove(id); searchInput.current?.focus(); }}>
           {id} <X size={13} aria-hidden="true" />
-        </button>;
-      })}
+        </button>)}
     </div>
     <label className={styles.lakeSearch}>
       <Search size={15} aria-hidden="true" />
@@ -62,7 +60,7 @@ export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, 
       {matches.slice(0, resultLimit).map(({ id }) => <li key={id}>
         <strong>{id}</strong>
         <button type="button" disabled={id === selected} aria-label={`Consulter ${id}`} onClick={() => consult(id)}>Consulter</button>
-        <button type="button" disabled={id === selected || full || compared.includes(id)} aria-label={`Comparer ${id}`}
+        <button type="button" disabled={full || colors.has(id)} aria-label={`Comparer ${id}`}
           onClick={() => { add(id); clearSearch(); }}>Ajouter</button>
       </li>)}
     </ul>}

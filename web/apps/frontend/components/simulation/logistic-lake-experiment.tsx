@@ -11,7 +11,6 @@ import { downloadLakeFile, lakeSvgToPng, lakeViewSvg, type LakeViewSnapshot } fr
 import { LakeCellDetails, LakeDomainMetrics, LakeMapLegend, LakeMapPane } from './logistic-lake-readings';
 import { LakeTrajectoryPicker, maxLakeComparisons } from './logistic-lake-picker';
 import { LakeTrajectoryChart, type LakeCurve } from './logistic-lake-trajectories';
-import { logisticSeriesColor } from './logistic-trajectories';
 import { SpatialFullscreen } from './spatial-fullscreen';
 import styles from './logistic-spatial.module.css';
 
@@ -29,6 +28,11 @@ const demos: readonly { label: string; primary: Distribution; secondary?: Distri
 const gradientNotice = 'Gradient biologique synthétique — non calibré';
 const beginning = { tick: 0, playing: false, started: false };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
+const lakePrimaryColor = '#202c38';
+const lakeComparisonColors = [
+  '#0072b2', '#b54f00', '#007a59', '#9e3d87', '#956a00',
+  '#6745ad', '#a92235', '#007b85', '#724b32', '#52721c',
+];
 
 type PendingRun = { key: string; controller: AbortController };
 type Progress = { key: string; done: number; count?: number };
@@ -72,7 +76,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   const [speed, setSpeed] = useState<(typeof lakePlaybackSpeeds)[number]>(1);
   const [loop, setLoop] = useState(false);
   const [selected, setSelected] = useState('');
-  const [compared, setCompared] = useState<string[]>([]);
+  const [compared, setCompared] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [view, setView] = useState(initialLakeView);
   const simulation = plan?.domain.parameters.simulation;
   const interval = plan?.domain.parameters.samplingInterval;
@@ -88,7 +92,8 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
       const largest = next.domain.cells.reduce((a, b) => b.wetFraction > a.wetFraction ? b : a);
       const ids = new Set(next.domain.cells.map(cell => cell.id));
       setSelected(previous => ids.has(previous) ? previous : largest.id);
-      setCompared(previous => previous.every(id => ids.has(id)) ? previous : previous.filter(id => ids.has(id)));
+      setCompared(previous => [...previous.keys()].every(id => ids.has(id))
+        ? previous : new Map([...previous].filter(([id]) => ids.has(id))));
     }).catch(cause => {
       if (!controller.signal.aborted) setPlanError(errorText(cause));
     }).finally(() => {
@@ -129,24 +134,17 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   const limits = useMemo(() => display === 'difference' ? [-limit || 0, 0, limit] as const : lakeDisplays[display].limits, [display, limit]);
   const milestoneTicks = useMemo(() => lakeComparisonMonths.map(instant => timeline.indexOf(instant)), [timeline]);
   const cellOptions = useMemo(() => plan?.domain.cells.map(cell => <option key={cell.id} value={cell.id}>{cell.id}</option>), [plan]);
-  const highlights = useMemo(() => {
-    const ids = new Set([selected, ...compared]);
-    return new Map(plan?.domain.cells.filter(cell => ids.has(cell.id)).map(cell => [cell.id, logisticSeriesColor(cell)]));
-  }, [selected, compared, plan]);
+  const highlights = useMemo(() => new Map<string, string>(selected ? [[selected, lakePrimaryColor], ...compared] : compared),
+    [selected, compared]);
   const chartSeries = useMemo<LakeCurve[]>(() => {
     if (!primary) return [];
-    const chartIds = [selected, ...compared];
-    const chartCells = chartIds.flatMap(id => {
+    return [...highlights].flatMap(([id, color]) => {
       const trajectory = primary.trajectories.get(id);
       return trajectory ? [{
-        name: id, points: trajectory.samples, color: logisticSeriesColor(trajectory.cell), selected: id === selected,
+        name: id, points: trajectory.samples, color, selected: id === selected,
       }] : [];
     });
-    return [...chartCells, {
-      name: 'Biomasse totale', points: timeline.map((at, tick) => ({ time: at, value: primary.totals[tick]! })),
-      color: '#193a40', aggregate: true,
-    }];
-  }, [primary, selected, compared, timeline]);
+  }, [primary, selected, highlights]);
 
   useEffect(() => {
     protectedScenarios.current = [primaryKey, referenceKey, ...(comparing ? [secondaryKey] : [])];
@@ -192,7 +190,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     if (inputs.resolution !== next.resolution) {
       setCursor(beginning);
       setSelected('');
-      setCompared([]);
+      setCompared(new Map());
       setView(initialLakeView);
     } else {
       setCursor(value => ({ ...value, playing: false }));
@@ -213,14 +211,21 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     changeInputs(next, comparison ? [next, comparison] : [next]);
   }
 
+  const removeCell = useCallback((id: string) => {
+    setCompared(colors => colors.has(id) ? new Map([...colors].filter(([other]) => other !== id)) : colors);
+  }, []);
   const selectCell = useCallback((id: string) => {
     setSelected(id);
-    setCompared(ids => ids.includes(id) ? ids.filter(other => other !== id) : ids);
-  }, []);
+    removeCell(id);
+  }, [removeCell]);
   const addCell = useCallback((id: string) => {
-    setCompared(ids => id === selected || ids.includes(id) || ids.length >= maxLakeComparisons ? ids : [...ids, id]);
+    setCompared(colors => {
+      if (id === selected || colors.has(id) || colors.size >= maxLakeComparisons) return colors;
+      const usedColors = new Set(colors.values());
+      const color = lakeComparisonColors.find(candidate => !usedColors.has(candidate));
+      return color ? new Map(colors).set(id, color) : colors;
+    });
   }, [selected]);
-  const removeCell = useCallback((id: string) => setCompared(ids => ids.filter(other => other !== id)), []);
 
   async function run(target: LakeInputs) {
     const key = lakeKey(target);
@@ -484,15 +489,15 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
           {primary && !selectedReading && <p className={styles.coverage}>Aucune observation à cet instant.</p>}
         </SpatialFullscreen>
         <SpatialFullscreen active={active} label="Trajectoires" controls={fullscreenControls}>
-          <LakeTrajectoryPicker cells={plan.domain.cells} selected={selected} compared={compared}
+          <LakeTrajectoryPicker cells={plan.domain.cells} selected={selected} colors={highlights}
             select={selectCell} add={addCell} remove={removeCell} />
           {primary ? <>
             {active && <LakeTrajectoryChart time={time} tick={cursor.tick}
               start={simulation.start} end={simulation.end} curves={chartSeries} />}
             <ul className={styles.series} aria-label="Séries à l’instant consulté">
-              {chartSeries.map(({ name, color, points, selected, aggregate }) => {
+              {chartSeries.map(({ name, color, points, selected }) => {
                 const value = points[cursor.tick]?.value;
-                return <li key={name} data-series-cell={aggregate ? undefined : name}
+                return <li key={name} data-series-cell={name}
                   data-selected={selected || undefined} data-time={time} data-biomass={value}>
                   <i aria-hidden="true" style={{ background: color }} />
                   <strong>{name}</strong>
