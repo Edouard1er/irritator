@@ -4,8 +4,9 @@ import { spatialRequest, type SpatialDimension } from '../../../../examples/logi
 
 export { spatialRequest, type SpatialDimension };
 export { constantDomain, constantDomainCell, lakeSurfaceAreaKm2, spatialDimensions, type LakeDomain, type SpatialMode } from '../../../../examples/logistic-grid';
-export { clipLakeMesh, lakeDistributionId, lakeMaxAlpha, lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
-  type LakeDistribution, type LakeMesh } from '../../../../examples/logistic-lake';
+export { clipLakeMesh, lakeDefaultGradientProfile, lakeDistributionId, lakeDistributionProfile, lakeGradientProfiles, lakeMaxAlpha,
+  lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
+  type LakeDistribution, type LakeGradientProfile, type LakeMesh } from '../../../../examples/logistic-lake';
 export { LakeRunError, runLakeBatches, type LakePlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
 
 export async function runLakeBatch(request: RunRequest, signal: AbortSignal): Promise<HttpResult> {

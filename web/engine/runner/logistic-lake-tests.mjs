@@ -338,6 +338,44 @@ function trajectoryDifference(series, reference, interval) {
     atMonths: [differences[0], differences[100], differences[200]] };
 }
 
+test('P1.14 — Trajectoires natives des profils sigmoïdes sur les six grilles', async t => {
+  for (const resolution of lakeResolutions) {
+    const mesh = lakeMeshFromGeoJson(source, resolution);
+    const grid = `${mesh.rows}x${mesh.columns}`;
+    for (const [kind, alpha] of [['wet-gradient', 0], ['wet-gradient', 0.3], ['wet-gradient', 0.6], ['gradient', 0.6]]) {
+      const domain = lakeDomain(mesh, 'proportional', { kind, alpha, profile: 'sigmoid-v2' });
+      const { observations, trace } = await runLakeSimulation(domain, async request => runNative(request));
+      assert.equal(trace.parameters.distribution.profile, 'sigmoid-v2');
+      assert.equal(trace.points, domain.cells.length * 201);
+      assert.equal(trace.batches.length, domain.batches.length);
+      const maxRunCalls = Math.max(...trace.batches.map(batch => batch.runCalls));
+      assert.ok(maxRunCalls <= caps.maxRunCalls);
+      assert.ok(trace.batches.every(batch => batch.modelId.includes('-sigmoid-v2-')));
+      const ratios = domain.cells.map(cell => cell.initial / cell.capacity);
+      const areaBelow20 = domain.cells.reduce((sum, cell, index) => sum + (ratios[index] < 0.2 ? cell.area : 0), 0);
+      const areaAbove80 = domain.cells.reduce((sum, cell, index) => sum + (ratios[index] > 0.8 ? cell.area : 0), 0);
+      const totals = [0, 100, 200].map(tick => observations.reduce((sum, row) => sum + row.samples[tick].value, 0));
+      t.diagnostic(JSON.stringify({ grid, kind, alpha, points: trace.points, maxRunCalls,
+        ratioMin: Math.min(...ratios), ratioMax: Math.max(...ratios), areaBelow20, areaAbove80, totals,
+        localErrors: trace.localErrors, aggregateErrors: trace.aggregateErrors }));
+      assert.ok(Math.abs(totals[0] - 45_000) < 1e-8);
+      assert.ok(trace.aggregateErrors.maxRelative < 1e-4);
+      for (const [index, { component, samples }] of observations.entries()) {
+        const { initial, capacity, growth, quantum } = domain.cells[index];
+        assert.equal(component, domain.cells[index].component);
+        assert.equal(samples.length, 201);
+        for (const { time, value } of samples) {
+          const expected = exact(time, initial, capacity, growth);
+          const floorAllowance = quantum === 1e-9 ? 1e-7 : 0;
+          assert.ok(Number.isFinite(value) && value > 0);
+          assert.ok(Math.abs(value - expected) <= 0.005 * expected + floorAllowance,
+            `${grid} ${kind} α=${alpha} ${component} t=${time}: ${value} au lieu de ${expected}`);
+        }
+      }
+    }
+  }
+});
+
 test('P1.11 — Sépare les écarts analytiques de maillage et les erreurs QSS3', async t => {
   const casesByResolution = lakeResolutions.map(resolution => {
     const mesh = lakeMeshFromGeoJson(source, resolution);

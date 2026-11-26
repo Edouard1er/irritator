@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Download, Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
 import { errorText } from '@/lib/api/client';
-import { lakeMaxAlpha, lakeResolutionId, lakeResolutions, LakeRunError, runLakeBatch, runLakeBatches,
+import { lakeDefaultGradientProfile, lakeDistributionId, lakeGradientProfiles, lakeMaxAlpha, lakeResolutionId, lakeResolutions, LakeRunError, runLakeBatch, runLakeBatches,
   samplingTimeline, type LakePlan, type LakeRunTrace } from '@/lib/simulation/spatial-experiment';
 import { initialLakeView, lakeAlpha, lakeComparisonMonths, lakeDifferenceLimit, lakeDisplays, lakeDistributionOptions, lakeKey,
-  lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakeReading, lakeScenarioLabel, lakeSignedTonnes,
+  lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakeProfileLabels, lakeReading, lakeScenarioLabel, lakeSignedTonnes,
   lakeSyntheticNotice, lakeTonnes, retainLakeDataset, type LakeDataset, type LakeDisplay, type LakeInputs,
   type LakeScaleMode } from '@/lib/simulation/lake-exploration';
 import { downloadLakeFile, lakeSvgToPng, lakeViewSvg, type LakeViewSnapshot } from '@/lib/simulation/lake-view-export';
@@ -19,8 +19,12 @@ type Distribution = Omit<LakeInputs, 'resolution'>;
 const homogeneous: Distribution = { kind: 'homogeneous', alpha: 0.3 };
 const northSouth: Distribution = { kind: 'gradient', alpha: 0.3 };
 const wetGradient: Distribution = { kind: 'wet-gradient', alpha: 0.6 };
+const contrast: Distribution = { ...wetGradient, profile: 'sigmoid-v2' };
 const demos: readonly { label: string; primary: Distribution; secondary?: Distribution }[] = [
   { label: 'Biomasse initiale homogène', primary: homogeneous },
+  { label: 'Gradient sigmoïde · 0,3', primary: { ...contrast, alpha: 0.3 } },
+  { label: 'Gradient sigmoïde · 0,6', primary: contrast },
+  { label: 'Comparer homogène / sigmoïde', primary: homogeneous, secondary: contrast },
   { label: 'Gradient nord-sud · 0,3', primary: northSouth },
   { label: 'Gradient pondéré par surface humide · 0,6', primary: wetGradient },
   { label: 'Comparer homogène / gradient', primary: homogeneous, secondary: northSouth },
@@ -38,8 +42,9 @@ type PendingRun = { key: string; controller: AbortController };
 type Progress = { key: string; done: number; count?: number };
 type Failure = { key: string; message: string; trace?: LakeRunTrace };
 
-async function configureLake({ resolution, kind, alpha }: LakeInputs, signal: AbortSignal): Promise<LakePlan> {
+async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal): Promise<LakePlan> {
   const query = new URLSearchParams({ resolution, distribution: kind, alpha: String(alpha) });
+  if (kind !== 'homogeneous') query.set('profile', profile ?? lakeDefaultGradientProfile);
   const response = await fetch(`/api/logistic-lake?${query}`, { signal });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
@@ -379,7 +384,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     <div className={styles.lakeOptions}>
       {workshop && resolutionControl}
       <DistributionInputs inputs={draft} applied={primary ? inputs : undefined} label="Distribution biologique"
-        intensityLabel="Intensité du gradient α" change={setDraft} />
+        profileLabel="Profil du gradient" intensityLabel="Intensité du gradient α" change={setDraft} />
       {!workshop && draft.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
     </div>
     <div className={styles.runActions}>
@@ -446,7 +451,8 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
           </div>
           {comparing && <div className={styles.lakeSecondary}>
             <DistributionInputs inputs={alternateDraft} applied={secondary ? alternateInputs : undefined}
-              label="Distribution à comparer" intensityLabel="Intensité du gradient comparé α" change={setAlternateDraft} />
+              label="Distribution à comparer" profileLabel="Profil du gradient comparé"
+              intensityLabel="Intensité du gradient comparé α" change={setAlternateDraft} />
             {!workshop && alternateDraft.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
             {secondaryChanged ? <button type="button" disabled={!planReady || (!!progress && progress.key !== secondaryKey)}
               onClick={() => {
@@ -535,11 +541,12 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   </div>;
 }
 
-function DistributionInputs({ inputs, applied, change, label, intensityLabel }: {
+function DistributionInputs({ inputs, applied, change, label, profileLabel, intensityLabel }: {
   inputs: Distribution;
   applied?: Distribution;
   change: (value: Distribution) => void;
   label: string;
+  profileLabel: string;
   intensityLabel: string;
 }) {
   return <>
@@ -551,14 +558,27 @@ function DistributionInputs({ inputs, applied, change, label, intensityLabel }: 
         {lakeDistributionOptions.map(({ kind, label }) => <option key={kind} value={kind}>{label}</option>)}
       </select>
     </label>
-    {inputs.kind !== 'homogeneous' && <label className={styles.gradientIntensity}>
-      <span>{intensityLabel} proposée <strong>{lakeAlpha(inputs.alpha)}</strong></span>
-      <input type="range" min={0} max={lakeMaxAlpha} step={0.01} value={inputs.alpha}
-        aria-label={intensityLabel} aria-valuetext={lakeAlpha(inputs.alpha)}
-        onChange={event => change({ ...inputs, alpha: Number(event.currentTarget.value) })} />
-      <small>{applied && applied.kind !== 'homogeneous'
-        ? `Intensité simulée α = ${lakeAlpha(applied.alpha)}` : 'Aucun gradient simulé pour cette carte'}</small>
-    </label>}
+    {inputs.kind !== 'homogeneous' && <>
+      <label className={styles.dimensions}>{profileLabel}
+        <select value={inputs.profile ?? lakeDefaultGradientProfile} onChange={event => {
+          const profile = lakeGradientProfiles.find(candidate => candidate === event.currentTarget.value);
+          if (profile) change({ ...inputs, profile });
+        }}>
+          {lakeGradientProfiles.map(profile => <option key={profile} value={profile}>{lakeProfileLabels[profile]}</option>)}
+        </select>
+      </label>
+      <label className={styles.gradientIntensity}>
+        <span>{intensityLabel} proposée <strong>{lakeAlpha(inputs.alpha)}</strong></span>
+        <input type="range" min={0} max={lakeMaxAlpha} step={0.01} value={inputs.alpha}
+          aria-label={intensityLabel} aria-valuetext={lakeAlpha(inputs.alpha)}
+          onChange={event => change({ ...inputs, alpha: Number(event.currentTarget.value) })} />
+        <small>{applied && applied.kind !== 'homogeneous'
+          ? `Intensité simulée α = ${lakeAlpha(applied.alpha)}` : 'Aucun gradient simulé pour cette carte'}</small>
+      </label>
+    </>}
+    {applied && applied.kind !== 'homogeneous' && <small>
+      Profil simulé · {lakeProfileLabels[applied.profile ?? lakeDefaultGradientProfile]}
+    </small>}
   </>;
 }
 
@@ -584,7 +604,9 @@ function LakeExport({ snapshot, resolution }: { snapshot?: LakeViewSnapshot; res
     try {
       const svg = new Blob([lakeViewSvg(snapshot)], { type: 'image/svg+xml;charset=utf-8' });
       const file = format === 'svg' ? svg : await lakeSvgToPng(svg);
-      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${snapshot.maps.length === 2 ? '-comparaison' : ''}`;
+      const scenarios = snapshot.maps.map(({ dataset }) => lakeDistributionId(dataset.trace.parameters.distribution));
+      const suffix = scenarios.length === 2 ? `-comparaison-${scenarios.join('-')}` : scenarios[0] === 'homogeneous' ? '' : `-${scenarios[0]}`;
+      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${suffix}`;
       downloadLakeFile(file, `${name}.${format}`);
     } catch {
       setFailure('Impossible d’exporter l’image. Réessayez au format SVG.');

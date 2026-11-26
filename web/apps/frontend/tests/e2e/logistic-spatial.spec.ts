@@ -804,7 +804,7 @@ test('le gradient nord-sud relance les six maillages et compare les observations
     await intensity.fill('0.6');
     await expect(panel.getByText('Gradient biologique synthétique — non calibré')).toBeVisible();
     expect(responses).toHaveLength(previousRequests);
-    const gradient = await run(batchCount, `${prefix}-g0p6`);
+    const gradient = await run(batchCount, `logistic-lake-${size}-p-linear-v1-g0p6`);
     expect(gradient.observations).toHaveLength(wetCells);
     await slider(panel).fill('0');
     const initialRatios = await grid.getByRole('button').evaluateAll(cells => cells.map(cell => ({
@@ -828,7 +828,7 @@ test('le gradient nord-sud relance les six maillages et compare les observations
     await showMonths(gradient.totals, size, 'gradient', capture);
     if (size === '6x3') {
       await intensity.fill('0');
-      const zero = await run(1, prefix);
+      const zero = await run(1, `logistic-lake-${size}-p-linear-v1-g0`);
       expect(zero).toEqual(homogeneous);
       await intensity.fill('0.6');
     }
@@ -844,9 +844,9 @@ test('le gradient nord-sud relance les six maillages et compare les observations
   const downloading = page.waitForEvent('download');
   await panel.getByRole('button', { name: 'Télécharger la trace JSON' }).click();
   const download = await downloading;
-  expect(download.suggestedFilename()).toBe('lac-de-guiers-48x24-gradient-0.6.json');
+  expect(download.suggestedFilename()).toBe('lac-de-guiers-48x24-gradient-linear-v1-0.6.json');
   const trace = JSON.parse(readFileSync(await download.path(), 'utf8'));
-  expect(trace).toMatchObject({ parameters: { rows: 48, columns: 24, distribution: { kind: 'gradient', alpha: 0.6 } },
+  expect(trace).toMatchObject({ parameters: { rows: 48, columns: 24, distribution: { kind: 'gradient', alpha: 0.6, profile: 'linear-v1' } },
     plannedBatches: 17, points: 296 * 201 });
   expect(trace.aggregateErrors.maxAbsoluteTonnes).toBeLessThan(1);
   expect(errors).toEqual([]);
@@ -867,7 +867,7 @@ test('le gradient pondéré compare les trois distributions et conserve la lectu
   await distribution.selectOption({ label: 'Gradient pondéré par surface humide' });
   await expect(intensity).toHaveValue('0.6');
   const weighted = await executeRequest(page, panel, apply);
-  expect(weighted.request.model.id).toBe('logistic-lake-6x3-proportional-wg0p6-1');
+  expect(weighted.request.model.id).toBe('logistic-lake-6x3-p-linear-v1-wg0p6-1');
   expect(weighted.result.observations).toHaveLength(13);
   expect(weighted.result.observations.every(series => series.samples.length === 201)).toBe(true);
   const initialValues = (request: RunRequest) => request.model.components
@@ -900,15 +900,17 @@ test('le gradient pondéré compare les trois distributions et conserve la lectu
   const downloading = page.waitForEvent('download');
   await panel.getByRole('button', { name: 'Télécharger la trace JSON' }).click();
   const download = await downloading;
-  expect(download.suggestedFilename()).toBe('lac-de-guiers-6x3-wet-gradient-0.6.json');
+  expect(download.suggestedFilename()).toBe('lac-de-guiers-6x3-wet-gradient-linear-v1-0.6.json');
   expect(JSON.parse(readFileSync(await download.path(), 'utf8'))).toMatchObject({
-    parameters: { rows: 6, columns: 3, distribution: { kind: 'wet-gradient', alpha: 0.6 } },
+    parameters: { rows: 6, columns: 3, distribution: { kind: 'wet-gradient', alpha: 0.6, profile: 'linear-v1' } },
     points: 13 * 201, plannedBatches: 1, batches: [{ modelId: weighted.request.model.id }],
   });
 
   await intensity.fill('0');
   const zero = await executeRequest(page, panel, apply);
-  expect(zero).toEqual(homogeneous);
+  expect(zero.request.model.id).toBe('logistic-lake-6x3-p-linear-v1-wg0-1');
+  expect({ ...zero.request, model: { ...zero.request.model, id: homogeneous.request.model.id } }).toEqual(homogeneous.request);
+  expect({ ...zero.result, modelId: homogeneous.result.modelId }).toEqual(homogeneous.result);
   await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('12x6');
   await expect(comparison).toHaveAccessibleName(/12 × 6/);
   await expect(comparison.getByText('À simuler', { exact: true })).toHaveCount(9);

@@ -2,7 +2,7 @@ import {
   lakeFraming, lakeLegend, lakeMapColor, lakeMapInk, lakeMapReading, lakeMonth, lakeOutline,
   lakeSignedTonnes, lakeSyntheticNotice, lakeTotalTonnes, type LakeCell, type LakeDataset, type LakeDisplay, type LakeView,
 } from './lake-exploration';
-import type { LakeMesh } from './spatial-experiment';
+import { lakeDistributionProfile, type LakeMesh } from './spatial-experiment';
 
 export type LakeViewSnapshot = {
   mesh: LakeMesh;
@@ -34,6 +34,8 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
   const line = 'vector-effect="non-scaling-stroke"';
   const comparison = maps.length === 2 ? maps[1]!.dataset.totals[tick]! - maps[0]!.dataset.totals[tick]! : undefined;
   const panels = maps.map(({ title, dataset }, index) => {
+    const { distribution } = dataset.trace.parameters;
+    const profile = lakeDistributionProfile(distribution);
     const total = dataset.totals[tick]!;
     const gain = total - dataset.totals[0]!;
     const regions = cells.map(cell => {
@@ -48,11 +50,13 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     const markers = cells.filter(cell => highlights.has(cell.id)).map(cell =>
       `<circle cx="${cell.wetCentroid[0]}" cy="${cell.wetCentroid[1]}" r="${markerRadius * (cell.id === selected ? 1 : 0.7)}"`
       + ` fill="none" stroke="${escapeXml(highlights.get(cell.id)!)}" stroke-width="${cell.id === selected ? 3 : 2}" ${line}/>`).join('');
-    return `<g transform="translate(${32 + index * (cardWidth + 20)} 112)" data-map-total="${total}">
+    return `<g transform="translate(${32 + index * (cardWidth + 20)} 112)" data-map-total="${total}"
+  data-distribution="${distribution.kind}" data-profile="${profile}" data-alpha="${distribution.kind === 'homogeneous' ? 0 : distribution.alpha}">
   <rect width="${cardWidth}" height="622" rx="14" fill="#fff" stroke="#d4e2df"/>
   <text x="20" y="34" font-size="24" font-weight="700">${escapeXml(title)}</text>
   <text x="20" y="62" font-size="18">Biomasse totale · ${lakeTotalTonnes(total)}</text>
   <text x="20" y="85" font-size="16">Évolution depuis le début · ${lakeSignedTonnes(gain)}</text>
+  ${distribution.kind === 'homogeneous' ? '' : `<text x="${cardWidth - 20}" y="85" text-anchor="end" font-size="16">Profil ${profile}</text>`}
   <svg x="20" y="101" width="${cardWidth - 40}" height="502" viewBox="${viewBox}" overflow="hidden">
     <g clip-path="url(#lake-shore)">${regions}</g>
     ${markers}

@@ -1,7 +1,7 @@
 import { ApiError, caps, catalog, requestSchema, validateRequest, type RunRequest } from '../packages/contracts/index.js';
 import single from './logistic-single-v1.json' with { type: 'json' };
 import reference from './logistic-nine-cells-v1.json' with { type: 'json' };
-import { lakeMaxAlpha, lakeResolutionId, type LakeDistribution, type LakeMesh } from './logistic-lake.js';
+import { lakeDefaultGradientProfile, lakeMaxAlpha, lakeResolutionId, type LakeDistribution, type LakeMesh } from './logistic-lake.js';
 
 export const spatialDimensions = [2, 3, 4] as const;
 export type SpatialDimension = typeof spatialDimensions[number];
@@ -62,6 +62,40 @@ export const lakeQuantumFraction = 3e-7;
 export type LakeQuantum = 'absolute' | 'proportional';
 const quantumBounds = catalog.components.find(atom => atom.type === 'qss3_integrator')!.parameters.dQ!;
 
+function sigmoidInitials(capacities: readonly number[], positions: readonly number[], alpha: number, total: number) {
+  const epsilon = 0.01;
+  const steepness = 12 * (alpha / lakeMaxAlpha) ** 2;
+  const offsets = positions.map(y => steepness * (0.5 - y));
+  const biomass = (capacity: number, offset: number, center: number) =>
+    capacity * (epsilon + (1 - 2 * epsilon) / (1 + Math.exp(-(center + offset))));
+
+  // At the bracket endpoints every cell is strictly below or above half capacity.
+  let lower = -1 - steepness / 2;
+  let upper = 1 + steepness / 2;
+  for (let step = 0; step < 60; step++) {
+    const center = (lower + upper) / 2;
+    const sum = capacities.reduce((value, capacity, index) => value + biomass(capacity, offsets[index]!, center), 0);
+    if (sum < total) lower = center;
+    else upper = center;
+  }
+  const center = (lower + upper) / 2;
+  return capacities.map((capacity, index) => biomass(capacity, offsets[index]!, center));
+}
+
+function linearInitials(areas: readonly number[], positions: readonly number[], alpha: number, total: number, wet: boolean) {
+  const weights = areas.map((area, index) => area * (1 + alpha * (0.5 - positions[index]!)));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const initials = weights.map(weight => total * weight / totalWeight);
+  if (wet) {
+    const last = initials.length - 1;
+    const subtotal = initials.slice(0, last).reduce((sum, initial) => sum + initial, 0);
+    const remainder = total - subtotal;
+    // Absorb rounding in the last cell, keeping its biomass if too small to resolve the remainder.
+    if (remainder > 0) initials[last] = remainder;
+  }
+  return initials;
+}
+
 export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional',
   distribution: LakeDistribution = { kind: 'homogeneous' }) {
   const { initialDensity, capacityDensity, growth, horizon } = constantDomain;
@@ -74,23 +108,20 @@ export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional
   }
   const totalFraction = mesh.cells.reduce((sum, cell) => sum + cell.wetFraction, 0);
   const areas = mesh.cells.map(cell => lakeSurfaceAreaKm2 * cell.wetFraction / totalFraction);
-  const weights = alpha === 0 ? undefined : mesh.cells.map(({ row, wetCentroid }, index) => {
-    const y = distribution.kind === 'wet-gradient' ? wetCentroid[1] / mesh.height : (row + 0.5) / mesh.rows;
-    return areas[index]! * (1 + alpha * (0.5 - y));
-  });
-  const totalWeight = weights?.reduce((sum, weight) => sum + weight, 0);
-  const initials = weights?.map(weight => initialTonnes * weight / totalWeight!);
-  if (initials && distribution.kind === 'wet-gradient') {
-    const last = initials.length - 1;
-    const subtotal = initials.slice(0, last).reduce((sum, initial) => sum + initial, 0);
-    const remainder = initialTonnes - subtotal;
-    // Absorb rounding in the last cell, keeping its biomass if too small to resolve the remainder.
-    if (remainder > 0) initials[last] = remainder;
+  const capacities = areas.map(area => capacityDensity * area);
+  const explicitProfile = distribution.kind === 'homogeneous' ? undefined : distribution.profile;
+  const profile = explicitProfile ?? lakeDefaultGradientProfile;
+  let initials: number[] | undefined;
+  if (alpha > 0) {
+    const wet = distribution.kind === 'wet-gradient';
+    const positions = mesh.cells.map(({ row, wetCentroid }) => wet ? wetCentroid[1] / mesh.height : (row + 0.5) / mesh.rows);
+    initials = profile === 'sigmoid-v2' ? sigmoidInitials(capacities, positions, alpha, initialTonnes)
+      : linearInitials(areas, positions, alpha, initialTonnes, wet);
   }
   const cells = mesh.cells.map((cell, index) => {
     const area = areas[index]!;
     const initial = initials?.[index] ?? initialDensity * area;
-    const capacity = capacityDensity * area;
+    const capacity = capacities[index]!;
     const quantum = strategy === 'absolute' ? constantDomain.quantum
       : Math.min(quantumBounds.maximum, Math.max(quantumBounds.minimum, capacity * lakeQuantumFraction));
     return { ...cell, component: `${cell.id}-N`, area, initial, capacity, growth, quantum, samplingInterval };
@@ -106,15 +137,20 @@ export function lakeDomain(mesh: LakeMesh, strategy: LakeQuantum = 'proportional
   );
   const resolution = lakeResolutionId(mesh);
   const gradientPrefix = distribution.kind === 'wet-gradient' ? 'wg' : 'g';
-  const distributionSuffix = alpha === 0 ? '' : `-${gradientPrefix}${String(alpha).replace('.', 'p')}`;
+  const alphaId = `${gradientPrefix}${String(alpha).replace('.', 'p')}`;
+  // Keep native IDs for historical requests that omitted the profile.
+  const distributionSuffix = explicitProfile ? `-${explicitProfile}-${alphaId}` : alpha === 0 ? '' : `-${alphaId}`;
+  // The abbreviated strategy leaves room for the profile and full-precision α in the 64-character ID.
+  const strategyId = explicitProfile ? strategy[0] : strategy;
   const batches: { request: RunRequest; cells: typeof cells }[] = [];
   for (let offset = 0; offset < cells.length; offset += batchSize) {
     const members = cells.slice(offset, offset + batchSize);
-    const id = `logistic-lake-${resolution}-${strategy}${distributionSuffix}-${batches.length + 1}`;
+    const id = `logistic-lake-${resolution}-${strategyId}${distributionSuffix}-${batches.length + 1}`;
     batches.push({ request: buildRequest(id, members, simulation), cells: members });
   }
   const parameters = { rows: mesh.rows, columns: mesh.columns, areaKm2: lakeSurfaceAreaKm2,
-    initialDensity, initialTonnes, capacityDensity, growth, simulation, samplingInterval, distribution,
+    initialDensity, initialTonnes, capacityDensity, growth, simulation, samplingInterval,
+    distribution: distribution.kind === 'homogeneous' ? distribution : { ...distribution, profile },
     quantum: strategy === 'absolute' ? { strategy, tonnes: constantDomain.quantum }
       : { strategy, capacityFraction: lakeQuantumFraction, minimum: quantumBounds.minimum, maximum: quantumBounds.maximum } };
   return { cells, batches, parameters };

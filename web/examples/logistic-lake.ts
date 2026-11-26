@@ -11,10 +11,19 @@ export const lakeResolutions = [
 export type LakeResolution = typeof lakeResolutions[number];
 export const lakeResolutionId = ({ rows, columns }: { rows: number; columns: number }) => `${rows}x${columns}`;
 export const lakeMaxAlpha = 0.6;
-export type LakeDistribution = { kind: 'homogeneous' } | { kind: 'gradient' | 'wet-gradient'; alpha: number };
+export const lakeGradientProfiles = ['linear-v1', 'sigmoid-v2'] as const;
+export type LakeGradientProfile = typeof lakeGradientProfiles[number];
+export const lakeDefaultGradientProfile = lakeGradientProfiles[0];
+export type LakeDistribution = { kind: 'homogeneous' } |
+  { kind: 'gradient' | 'wet-gradient'; alpha: number; profile?: LakeGradientProfile };
+
+export function lakeDistributionProfile(distribution: LakeDistribution) {
+  return distribution.kind === 'homogeneous' ? distribution.kind : distribution.profile ?? lakeDefaultGradientProfile;
+}
 
 export function lakeDistributionId(distribution: LakeDistribution): string {
-  return distribution.kind === 'homogeneous' ? distribution.kind : `${distribution.kind}-${distribution.alpha}`;
+  if (distribution.kind === 'homogeneous') return distribution.kind;
+  return `${distribution.kind}-${lakeDistributionProfile(distribution)}-${distribution.alpha}`;
 }
 
 type Point = readonly [number, number];

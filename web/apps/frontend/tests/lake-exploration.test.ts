@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { lakeDifferenceLimit, lakeMapColor, lakeMapValue, lakeReading, retainLakeDataset,
+import { lakeDifferenceLimit, lakeKey, lakeMapColor, lakeMapValue, lakeReading, retainLakeDataset,
   type LakeDataset } from '@/lib/simulation/lake-exploration';
 
 it('sépare les unités cartographiques et conserve les points manquants', () => {
@@ -26,4 +26,10 @@ it('borne les séries de la session et conserve les scénarios consultés', () =
   const after = retainLakeDataset(before, 'comparaison', scenario, ['homogène', 'gradient affiché', 'comparaison']);
   expect([...after.keys()]).toEqual(['homogène', 'gradient affiché', 'comparaison']);
   expect(before.has('ancien gradient')).toBe(true);
+});
+
+it('distingue les profils du même gradient dans le cache des scénarios', () => {
+  const inputs = { resolution: '18x9', kind: 'wet-gradient', alpha: 0.6 } as const;
+  expect(lakeKey(inputs)).toBe(lakeKey({ ...inputs, profile: 'linear-v1' }));
+  expect(lakeKey(inputs)).not.toBe(lakeKey({ ...inputs, profile: 'sigmoid-v2' }));
 });

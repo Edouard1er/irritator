@@ -1,6 +1,7 @@
-import { lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeMesh, type LakeRunTrace, type SpatialTrajectory } from './spatial-experiment';
+import { lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeGradientProfile, type LakeMesh,
+  type LakeRunTrace, type SpatialTrajectory } from './spatial-experiment';
 
-export type LakeInputs = { resolution: string; kind: LakeDistribution['kind']; alpha: number };
+export type LakeInputs = { resolution: string; kind: LakeDistribution['kind']; alpha: number; profile?: LakeGradientProfile };
 export type LakeCell = LakeDomain['cells'][number];
 export type LakeDisplay = 'ratio' | 'density' | 'difference';
 export type LakeScaleMode = 'fixed' | 'month';
@@ -42,13 +43,17 @@ const lakePalettes = new Map<ColorStops, readonly string[]>(Object.values(lakeDi
   return [colors, palette];
 }));
 
-export const lakeKey = ({ resolution, kind, alpha }: LakeInputs) =>
-  `${resolution}-${lakeDistributionId(kind === 'homogeneous' ? { kind } : { kind, alpha })}`;
+export const lakeKey = ({ resolution, kind, alpha, profile }: LakeInputs) =>
+  `${resolution}-${lakeDistributionId(kind === 'homogeneous' ? { kind } : { kind, alpha, ...(profile ? { profile } : {}) })}`;
 
 export const lakeAlpha = (alpha: number) => String(alpha).replace('.', ',');
-export const lakeScenarioLabel = ({ kind, alpha }: Pick<LakeInputs, 'kind' | 'alpha'>) =>
-  lakeDistributionOptions.find(option => option.kind === kind)!.label
-  + (kind === 'homogeneous' ? '' : ` · α = ${lakeAlpha(alpha)}`);
+export const lakeProfileLabels = { 'linear-v1': 'Linéaire historique', 'sigmoid-v2': 'Sigmoïde contrastée' } as const;
+export function lakeScenarioLabel({ kind, alpha, profile }: Omit<LakeInputs, 'resolution'>) {
+  const label = kind !== 'homogeneous' && profile === 'sigmoid-v2'
+    ? (kind === 'wet-gradient' ? 'Sigmoïde · centroïdes humides' : 'Sigmoïde · milieu des lignes')
+    : lakeDistributionOptions.find(option => option.kind === kind)!.label;
+  return label + (kind === 'homogeneous' ? '' : ` · α = ${lakeAlpha(alpha)}`);
+}
 
 export const lakeMonth = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 export const lakeNumber = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });

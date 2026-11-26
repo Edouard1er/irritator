@@ -113,8 +113,28 @@ it.each([
   'resolution=6x3&distribution=wet-gradient&alpha=0.61',
   'resolution=6x3&distribution=wet-gradient&alpha=-0.01',
   'resolution=6x3&distribution=wet-gradient&alpha=NaN',
+  'resolution=6x3&distribution=wet-gradient&alpha=0.6&profile=unknown',
+  'resolution=6x3&distribution=wet-gradient&alpha=0.6&profile=',
+  'resolution=6x3&distribution=homogeneous&profile=sigmoid-v2',
 ])('rejette la configuration %s', async query => {
   expect((await lakePlan(new Request(`http://localhost/api/logistic-lake?${query}`))).status).toBe(400);
+});
+
+it('versionne le profil dans les plans et identifiants sans modifier le gradient historique', async () => {
+  const url = 'http://localhost/api/logistic-lake?resolution=6x3&distribution=wet-gradient&alpha=0.6';
+  const implicit = await (await lakePlan(new Request(url))).json();
+  const linear = await (await lakePlan(new Request(`${url}&profile=linear-v1`))).json();
+  const sigmoid = await (await lakePlan(new Request(`${url}&profile=sigmoid-v2`))).json();
+  expect(linear.domain.cells).toEqual(implicit.domain.cells);
+  expect(linear.reference).toEqual(implicit.reference);
+  expect(implicit.domain.parameters.distribution.profile).toBe('linear-v1');
+  expect(implicit.domain.batches[0].request.model.id).toBe('logistic-lake-6x3-proportional-wg0p6-1');
+  expect(linear.domain.batches[0].request.model.id).toContain('-linear-v1-');
+  expect(sigmoid.domain.batches[0].request.model.id).toContain('-sigmoid-v2-');
+  expect(sigmoid.domain.parameters.distribution).toEqual({ kind: 'wet-gradient', alpha: 0.6, profile: 'sigmoid-v2' });
+  expect(sigmoid.reference.local).not.toEqual(linear.reference.local);
+  const preciseUrl = url.replace('6x3', '48x24').replace('0.6', '0.0000019999999999999995');
+  expect((await lakePlan(new Request(`${preciseUrl}&profile=sigmoid-v2`))).status).toBe(200);
 });
 
 it('prépare le gradient côté serveur, annule le lot en cours et compare uniquement les observations terminées', async () => {

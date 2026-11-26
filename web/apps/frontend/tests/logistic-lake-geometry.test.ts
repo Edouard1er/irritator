@@ -67,6 +67,12 @@ test('conserve un fragment résolu et comptabilise le résidu sous le seuil', ()
   expect(retained.cells.map(cell => cell.id)).toEqual(['C00', 'C01']);
   expect(retained.discardedWetFraction).toBe(0);
   expect(lakeDomain(mesh).cells[0]!.area).toBe(lakeSurfaceAreaKm2);
+  const sigmoid = lakeDomain(retained, 'proportional', { kind: 'wet-gradient', alpha: 0.6, profile: 'sigmoid-v2' });
+  const fragment = sigmoid.cells[1]!;
+  expect(fragment.area).toBeLessThan(1e-6);
+  expect(fragment.initial).toBeGreaterThan(0);
+  expect(fragment.initial).toBeLessThan(fragment.capacity);
+  expect(fragment.quantum).toBe(1e-9);
 });
 
 test.each([
@@ -113,4 +119,51 @@ test.each([
   expect(domain.cells.reduce((total, cell) => total + cell.area, 0)).toBeCloseTo(300, 10);
   expect(domain.cells.reduce((total, cell) => total + cell.initial, 0)).toBeCloseTo(45_000, 8);
   expect(domain.cells.reduce((total, cell) => total + cell.capacity, 0)).toBeCloseTo(90_000, 8);
+});
+
+test.each([...lakeResolutions])('normalise la sigmoïde sur la surface humide de la grille %j', resolution => {
+  const data = JSON.parse(readFileSync(resolve('data/geography/lac-de-guiers.hydrolakes.geojson'), 'utf8'));
+  const mesh = lakeMeshFromGeoJson(data, resolution);
+  const homogeneous = lakeDomain(mesh);
+  for (const kind of ['gradient', 'wet-gradient'] as const) {
+    const create = (alpha: number) => lakeDomain(mesh, 'proportional', { kind, alpha, profile: 'sigmoid-v2' });
+    expect(create(0).cells).toEqual(homogeneous.cells);
+    let previousSpan = 0;
+    for (const alpha of [0, 0.15, 0.3, 0.6]) {
+      const domain = create(alpha);
+      expect(create(alpha)).toEqual(domain);
+      const { cells } = domain;
+      expect(cells.reduce((sum, cell) => sum + cell.area, 0)).toBeCloseTo(300, 10);
+      expect(cells.reduce((sum, cell) => sum + cell.initial, 0)).toBeCloseTo(45_000, 8);
+      expect(cells.reduce((sum, cell) => sum + cell.capacity, 0)).toBeCloseTo(90_000, 8);
+      const positions = cells.map(cell => ({
+        y: kind === 'wet-gradient' ? cell.wetCentroid[1] / mesh.height : (cell.row + 0.5) / mesh.rows,
+        ratio: cell.initial / cell.capacity, area: cell.area,
+      })).sort((a, b) => a.y - b.y);
+      const steepness = 12 * (alpha / 0.6) ** 2;
+      const offsets = positions.map(({ y, ratio }, index) => {
+        expect(ratio).toBeGreaterThan(0.01);
+        expect(ratio).toBeLessThan(0.99);
+        if (index > 0) expect(ratio).toBeLessThanOrEqual(positions[index - 1]!.ratio + 1e-14);
+        if (alpha === 0) expect(ratio).toBe(0.5);
+        // Invert the logistic to recover the same calibration constant in every cell.
+        return Math.log((ratio - 0.01) / (0.99 - ratio)) - steepness * (0.5 - y);
+      });
+      expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1e-11);
+      const span = positions[0]!.ratio - positions.at(-1)!.ratio;
+      if (alpha > 0) expect(span).toBeGreaterThan(previousSpan);
+      previousSpan = span;
+      if (alpha === 0.6) {
+        expect(span).toBeGreaterThan(0.85);
+        const extremeArea = (testRatio: (ratio: number) => boolean) =>
+          positions.reduce((sum, { area, ratio }) => sum + (testRatio(ratio) ? area : 0), 0);
+        expect(extremeArea(ratio => ratio < 0.2)).toBeGreaterThan(60);
+        expect(extremeArea(ratio => ratio > 0.8)).toBeGreaterThan(60);
+        if (resolution.rows === 18 && kind === 'wet-gradient') {
+          expect(positions.at(-1)!.ratio).toBeCloseTo(0.011, 3);
+          expect(positions[0]!.ratio).toBeCloseTo(0.967, 3);
+        }
+      }
+    }
+  }
 });

@@ -7,17 +7,19 @@ import { lakeViewSvg, type LakeViewSnapshot } from '@/lib/simulation/lake-view-e
 
 it('sérialise deux cartes autonomes avec la même découpe et les valeurs intactes', () => {
   const mesh = clipLakeMesh([[[0, 0], [1, 0], [0, 2]]], 3, 6);
-  const { cells, parameters } = lakeDomain(mesh);
-  function dataset(multiplier: number) {
+  const homogeneous = lakeDomain(mesh);
+  const sigmoid = lakeDomain(mesh, 'proportional', { kind: 'wet-gradient', alpha: 0.6, profile: 'sigmoid-v2' });
+  const { cells } = homogeneous;
+  function dataset({ cells, parameters }: typeof homogeneous, multiplier: number): LakeDataset {
     const trajectories = new Map(cells.map(cell => [cell.id, {
       ...parameters.simulation, cell, samples: [{ time: 0, value: cell.initial }, { time: 0.1, value: cell.initial * multiplier }],
       constant: false,
     }]));
     const totals = [0, 1].map(tick => [...trajectories.values()].reduce((sum, row) => sum + row.samples[tick]!.value, 0));
-    return { cells: new Map(cells.map(cell => [cell.id, cell])), trajectories, totals, trace: {} as LakeDataset['trace'] };
+    return { cells: new Map(cells.map(cell => [cell.id, cell])), trajectories, totals, trace: { parameters } as LakeDataset['trace'] };
   }
-  const reference = dataset(1.1);
-  const scenario = dataset(1.23456789);
+  const reference = dataset(homogeneous, 1.1);
+  const scenario = dataset(sigmoid, 1.23456789);
   const cell = cells[0]!;
   const snapshot: LakeViewSnapshot = {
     mesh, cells, maps: [{ title: 'Homogène', dataset: reference }, { title: 'Gradient <α> & grille', dataset: scenario }],
@@ -34,6 +36,10 @@ it('sérialise deux cartes autonomes avec la même découpe et les valeurs intac
   expect(svg.querySelector('clipPath path')?.getAttribute('clip-rule')).toBe('evenodd');
   const maps = [...svg.querySelectorAll('[data-map-total]')];
   expect(maps).toHaveLength(2);
+  expect(maps[0]!.getAttribute('data-profile')).toBe('homogeneous');
+  expect(maps[1]!.getAttribute('data-profile')).toBe('sigmoid-v2');
+  expect(maps[1]!.getAttribute('data-alpha')).toBe('0.6');
+  expect(maps[1]!.textContent).toContain('Profil sigmoid-v2');
   expect(maps[1]!.getAttribute('data-map-total')).toBe(String(scenario.totals[1]));
   expect(maps[1]!.textContent).toContain(lakeTotalTonnes(scenario.totals[1]));
   expect(maps[1]!.textContent).toContain('Gradient <α> & grille');

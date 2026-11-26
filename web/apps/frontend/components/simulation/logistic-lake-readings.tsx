@@ -1,10 +1,11 @@
-import { useState, type ComponentProps } from 'react';
+import { useMemo, useState, type ComponentProps } from 'react';
 import { formatSmall, lakeLegend, lakeNumber, lakeReading, lakeSignedTonnes, lakeTonnes, lakeTotalTonnes,
   type LakeCell, type LakeDataset, type LakeDisplay } from '@/lib/simulation/lake-exploration';
 import { LogisticLakeGrid } from './logistic-lake-grid';
 import styles from './logistic-spatial.module.css';
 
 const percent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 3 });
+const rangePercent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 1 });
 const signedPercent = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 3, signDisplay: 'exceptZero' });
 
 export function LakeCellDetails({ cell, dataset, tick, scientificDetails = false, initialKnown = true, workshop = false }: {
@@ -74,11 +75,28 @@ export function LakeMapPane({ title, initialKnown, workshop, ...grid }: Omit<Com
   const total = grid.dataset?.totals[grid.tick];
   const initial = grid.dataset?.totals[0];
   const gain = total !== undefined && initial !== undefined ? total - initial : undefined;
+  const { dataset, cells } = grid;
+  const initialRange = useMemo(() => {
+    const initialCells = dataset?.cells.values() ?? (initialKnown ? cells : []);
+    let minimum = Infinity;
+    let maximum = -Infinity;
+    for (const { initial, capacity } of initialCells) {
+      const ratio = initial / capacity;
+      minimum = Math.min(minimum, ratio);
+      maximum = Math.max(maximum, ratio);
+    }
+    return Number.isFinite(minimum) ? [minimum, maximum] as const : undefined;
+  }, [cells, dataset, initialKnown]);
   return <div className={styles.lakeMapPane}>
     <h3>{title}</h3>
     <div className={styles.lakeSummary}>
       <p className={styles.lakeMapTotal}>Biomasse totale <strong data-map-total={total}>{lakeTotalTonnes(total)}</strong></p>
       {workshop && <p className={styles.lakeMapTotal}>Évolution depuis le début <strong data-map-gain={gain}>{lakeSignedTonnes(gain)}</strong></p>}
+      {initialRange && <p className={styles.lakeMapTotal}>
+        B/K initial <strong data-initial-ratio-min={initialRange[0]} data-initial-ratio-max={initialRange[1]}>
+          {rangePercent.format(initialRange[0])} à {rangePercent.format(initialRange[1])}
+        </strong>
+      </p>}
     </div>
     <LogisticLakeGrid {...grid} inspect={setHovered} />
     {cell && <div className={styles.lakeMapDetails} data-hovered={!!hovered || undefined}>

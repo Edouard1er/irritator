@@ -112,7 +112,7 @@ test('pr√©sente les simulations natives et exporte le mois et les cartes affich√
   const svgDownload = page.waitForEvent('download');
   await exportButton.click();
   const svg = await svgDownload;
-  expect(svg.suggestedFilename()).toBe('lac-de-guiers-18x9-mois-10-comparaison.svg');
+  expect(svg.suggestedFilename()).toBe('lac-de-guiers-18x9-mois-10-comparaison-homogeneous-gradient-linear-v1-0.3.svg');
   const xml = await readFile((await svg.path())!, 'utf8');
   const structure = await page.evaluate(({ xml, id }) => {
     const svg = new DOMParser().parseFromString(xml, 'image/svg+xml');
@@ -141,7 +141,7 @@ test('pr√©sente les simulations natives et exporte le mois et les cartes affich√
   await exportButton.click();
   const png = await pngDownload;
   const bytes = await readFile((await png.path())!);
-  expect(png.suggestedFilename()).toBe('lac-de-guiers-18x9-mois-10-comparaison.png');
+  expect(png.suggestedFilename()).toBe('lac-de-guiers-18x9-mois-10-comparaison-homogeneous-gradient-linear-v1-0.3.png');
   expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([2720, 1880]);
   await save(png, 'export-comparaison-mois-10.png');
