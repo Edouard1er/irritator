@@ -45,6 +45,33 @@
   margin-bottom: 12px;
 }
 .lakeOptions .dimensions { margin: 0; }
+.exchangeSettings {
+  margin: 12px 0;
+  min-inline-size: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px 12px;
+}
+.exchangeSettings legend { padding: 0 6px; font-weight: 650; }
+.exchangePair, .exchangeTime {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.exchangePair .dimensions, .exchangeTime .dimensions { margin: 0; }
+.exchangePair button[aria-pressed="true"] { background: #17655e; color: white; }
+.exchangeTime { margin: 10px 0 14px; }
+.exchangeTime > label { display: grid; gap: 3px; flex: 1 1 230px; }
+.exchangeTime input { width: 100%; accent-color: #17655e; }
+.exchangeTime .playActions { flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
+.exchangeFullscreenTime { flex: 1 1 560px; max-width: 1000px; }
+.exchangeFullscreenTime .exchangeTime { margin: 0; }
+.exchangeFlow { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: baseline; margin: 8px 0; }
+.exchangeFlow small { color: var(--muted); }
+.exchangeMaps .lakeCell[data-wet-neighbor="true"] { stroke: #481c70; stroke-width: 2.5; stroke-dasharray: 3 2; }
+.exchangeMaps .lakeMarker[data-pair-marker] { stroke-width: 3px; filter: drop-shadow(0 0 1px white); }
+.exchangeMaps:fullscreen .lakeMaps .lakeMapDetails:not([data-hovered]) { display: none; }
 .gradientNotice { color: #654511; font-size: 13px; font-weight: 600; }
 .gradientIntensity {
   display: grid;

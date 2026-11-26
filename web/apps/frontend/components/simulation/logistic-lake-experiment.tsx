@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
-import { Download, Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
+import { Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
 import { errorText } from '@/lib/api/client';
-import { lakeDefaultGradientProfile, lakeDistributionId, lakeGradientProfiles, lakeMaxAlpha, lakeResolutionId, lakeResolutions, LakeRunError, runLakeBatch, runLakeBatches,
+import { lakeResolutionId, lakeResolutions, LakeRunError, runLakeBatch, runLakeBatches,
   samplingTimeline, type LakePlan, type LakeRunTrace } from '@/lib/simulation/spatial-experiment';
-import { initialLakeView, lakeAlpha, lakeComparisonMonths, lakeDifferenceLimit, lakeDisplays, lakeDistributionOptions, lakeKey,
-  lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakeProfileLabels, lakeReading, lakeScenarioLabel, lakeSignedTonnes,
+import { configureLake, initialLakeView, lakeComparisonColors, lakeComparisonMonths, lakeDataset, lakeDifferenceLimit, lakeDisplays,
+  lakeDistributionOptions, lakeKey, lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakePrimaryColor, lakeReading, lakeScenarioLabel, lakeSignedTonnes,
   lakeSyntheticNotice, lakeTonnes, retainLakeDataset, type LakeDataset, type LakeDisplay, type LakeInputs,
   type LakeScaleMode } from '@/lib/simulation/lake-exploration';
-import { downloadLakeFile, lakeSvgToPng, lakeViewSvg, type LakeViewSnapshot } from '@/lib/simulation/lake-view-export';
+import { downloadLakeFile, type LakeViewSnapshot } from '@/lib/simulation/lake-view-export';
+import { DistributionInputs, LakeExport, RunProgress } from './logistic-lake-controls';
 import { LakeCellDetails, LakeDomainMetrics, LakeMapLegend, LakeMapPane } from './logistic-lake-readings';
 import { LakeTrajectoryPicker, maxLakeComparisons } from './logistic-lake-picker';
 import { LakeTrajectoryChart, type LakeCurve } from './logistic-lake-trajectories';
@@ -32,23 +33,10 @@ const demos: readonly { label: string; primary: Distribution; secondary?: Distri
 const gradientNotice = 'Gradient biologique synthétique — non calibré';
 const beginning = { tick: 0, playing: false, started: false };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
-const lakePrimaryColor = '#202c38';
-const lakeComparisonColors = [
-  '#0072b2', '#b54f00', '#007a59', '#9e3d87', '#956a00',
-  '#6745ad', '#a92235', '#007b85', '#724b32', '#52721c',
-];
 
 type PendingRun = { key: string; controller: AbortController };
 type Progress = { key: string; done: number; count?: number };
 type Failure = { key: string; message: string; trace?: LakeRunTrace };
-
-async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal): Promise<LakePlan> {
-  const query = new URLSearchParams({ resolution, distribution: kind, alpha: String(alpha) });
-  if (kind !== 'homogeneous') query.set('profile', profile ?? lakeDefaultGradientProfile);
-  const response = await fetch(`/api/logistic-lake?${query}`, { signal });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
 
 function downloadTrace(trace: LakeRunTrace) {
   const { distribution } = trace.parameters;
@@ -252,16 +240,10 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
         },
       });
       if (running.current !== task || controller.signal.aborted) return;
-      const cells = new Map(domain.cells.map(cell => [cell.id, cell]));
-      const totals = Array<number>(timeline.length).fill(0);
-      const trajectories = new Map(domain.cells.map((cell, index) => {
-        const samples = observations[index]!.samples;
-        samples.forEach(({ value }, tick) => { totals[tick] = totals[tick]! + value; });
-        return [cell.id, { cell, samples, constant: false, ...domain.parameters.simulation }] as const;
-      }));
+      const dataset = lakeDataset(domain, { observations, trace });
       const protectedKeys = protectedScenarios.current;
-      setDatasets(previous => retainLakeDataset(previous, key, { cells, totals, trajectories, trace }, protectedKeys));
-      setSummaries(previous => new Map(previous).set(key, milestoneTicks.map(tick => totals[tick]!)));
+      setDatasets(previous => retainLakeDataset(previous, key, dataset, protectedKeys));
+      setSummaries(previous => new Map(previous).set(key, milestoneTicks.map(tick => dataset.totals[tick]!)));
     } catch (cause) {
       if (running.current !== task || controller.signal.aborted) return;
       setFailure({ key, message: errorText(cause), ...(cause instanceof LakeRunError ? { trace: cause.trace } : {}) });
@@ -538,91 +520,5 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
         </tbody>
       </table>
     </div>}
-  </div>;
-}
-
-function DistributionInputs({ inputs, applied, change, label, profileLabel, intensityLabel }: {
-  inputs: Distribution;
-  applied?: Distribution;
-  change: (value: Distribution) => void;
-  label: string;
-  profileLabel: string;
-  intensityLabel: string;
-}) {
-  return <>
-    <label className={styles.dimensions}>{label}
-      <select value={inputs.kind} onChange={event => {
-        const option = lakeDistributionOptions.find(({ kind }) => kind === event.currentTarget.value);
-        if (option) change({ ...inputs, kind: option.kind });
-      }}>
-        {lakeDistributionOptions.map(({ kind, label }) => <option key={kind} value={kind}>{label}</option>)}
-      </select>
-    </label>
-    {inputs.kind !== 'homogeneous' && <>
-      <label className={styles.dimensions}>{profileLabel}
-        <select value={inputs.profile ?? lakeDefaultGradientProfile} onChange={event => {
-          const profile = lakeGradientProfiles.find(candidate => candidate === event.currentTarget.value);
-          if (profile) change({ ...inputs, profile });
-        }}>
-          {lakeGradientProfiles.map(profile => <option key={profile} value={profile}>{lakeProfileLabels[profile]}</option>)}
-        </select>
-      </label>
-      <label className={styles.gradientIntensity}>
-        <span>{intensityLabel} proposée <strong>{lakeAlpha(inputs.alpha)}</strong></span>
-        <input type="range" min={0} max={lakeMaxAlpha} step={0.01} value={inputs.alpha}
-          aria-label={intensityLabel} aria-valuetext={lakeAlpha(inputs.alpha)}
-          onChange={event => change({ ...inputs, alpha: Number(event.currentTarget.value) })} />
-        <small>{applied && applied.kind !== 'homogeneous'
-          ? `Intensité simulée α = ${lakeAlpha(applied.alpha)}` : 'Aucun gradient simulé pour cette carte'}</small>
-      </label>
-    </>}
-    {applied && applied.kind !== 'homogeneous' && <small>
-      Profil simulé · {lakeProfileLabels[applied.profile ?? lakeDefaultGradientProfile]}
-    </small>}
-  </>;
-}
-
-function RunProgress({ progress, cancel, workshop }: { progress: Progress; cancel: () => void; workshop?: boolean }) {
-  return <>
-    {progress.count === undefined ? <span>Préparation du scénario…</span> : <label className={styles.progress}>
-      <progress value={progress.done} max={progress.count} />
-      <span aria-live="polite">{workshop ? 'Simulation en cours' : `${progress.done} / ${progress.count} lots natifs`}</span>
-    </label>}
-    <button type="button" onClick={cancel}>Annuler le calcul</button>
-  </>;
-}
-
-function LakeExport({ snapshot, resolution }: { snapshot?: LakeViewSnapshot; resolution: string }) {
-  const [format, setFormat] = useState<'svg' | 'png'>('svg');
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState('');
-
-  async function exportView() {
-    if (!snapshot || busy) return;
-    setFailure('');
-    setBusy(true);
-    try {
-      const svg = new Blob([lakeViewSvg(snapshot)], { type: 'image/svg+xml;charset=utf-8' });
-      const file = format === 'svg' ? svg : await lakeSvgToPng(svg);
-      const scenarios = snapshot.maps.map(({ dataset }) => lakeDistributionId(dataset.trace.parameters.distribution));
-      const suffix = scenarios.length === 2 ? `-comparaison-${scenarios.join('-')}` : scenarios[0] === 'homogeneous' ? '' : `-${scenarios[0]}`;
-      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${suffix}`;
-      downloadLakeFile(file, `${name}.${format}`);
-    } catch {
-      setFailure('Impossible d’exporter l’image. Réessayez au format SVG.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return <div className={styles.lakeExport}>
-    <button type="button" disabled={!snapshot || busy} onClick={() => void exportView()}>
-      <Download size={15} aria-hidden="true" /> Exporter cette vue
-    </button>
-    <select aria-label="Format de l’image" value={format} disabled={busy}
-      onChange={event => setFormat(event.currentTarget.value === 'png' ? 'png' : 'svg')}>
-      <option value="svg">SVG</option><option value="png">PNG</option>
-    </select>
-    {failure && <span role="alert">{failure}</span>}
   </div>;
 }

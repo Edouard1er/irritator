@@ -7,7 +7,10 @@ export { constantDomain, constantDomainCell, lakeSurfaceAreaKm2, spatialDimensio
 export { clipLakeMesh, lakeDefaultGradientProfile, lakeDistributionId, lakeDistributionProfile, lakeGradientProfiles, lakeMaxAlpha,
   lakeMeshFromGeoJson, lakeResolutionId, lakeResolutions,
   type LakeDistribution, type LakeGradientProfile, type LakeMesh } from '../../../../examples/logistic-lake';
-export { LakeRunError, runLakeBatches, type LakePlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
+export { LakeRunError, runLakeBatches, type LakePlan, type LakeExchangePlan, type LakeRunTrace } from '../../../../examples/logistic-lake-run';
+export { lakeExchangeIntensities, lakeExchangeResolutions, lakeExchangeFlux, type LakeExchange, type LakeExchangeInputs,
+  type LakeExchangeIntensity } from '../../../../examples/logistic-lake-exchange';
+export { lakeWetFrontier, type WetFrontier } from '../../../../examples/lake-wet-frontier';
 
 export async function runLakeBatch(request: RunRequest, signal: AbortSignal): Promise<HttpResult> {
   // ENGINE_BUSY is issued before the native process is started.

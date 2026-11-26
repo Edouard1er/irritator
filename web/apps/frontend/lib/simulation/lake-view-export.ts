@@ -1,13 +1,13 @@
 import {
-  lakeFraming, lakeLegend, lakeMapColor, lakeMapInk, lakeMapReading, lakeMonth, lakeOutline,
-  lakeSignedTonnes, lakeSyntheticNotice, lakeTotalTonnes, type LakeCell, type LakeDataset, type LakeDisplay, type LakeView,
+  formatSmall, lakeExchangeDirection, lakeExchangePath, lakeFraming, lakeLegend, lakeMapColor, lakeMapInk, lakeMapReading, lakeMonth, lakeOutline,
+  lakeSignedTonnes, lakeSyntheticNotice, lakeTotalTonnes, type LakeCell, type LakeDataset, type LakeDisplay, type LakeExchangeOverlay, type LakeView,
 } from './lake-exploration';
 import { lakeDistributionProfile, type LakeMesh } from './spatial-experiment';
 
 export type LakeViewSnapshot = {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
-  maps: readonly { title: string; dataset: LakeDataset }[];
+  maps: readonly { title: string; dataset: LakeDataset; exchange?: LakeExchangeOverlay }[];
   reference?: LakeDataset;
   display: LakeDisplay;
   limits: readonly [number, number, number];
@@ -33,7 +33,7 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
   const { noData, grid, outline: shore } = lakeMapInk;
   const line = 'vector-effect="non-scaling-stroke"';
   const comparison = maps.length === 2 ? maps[1]!.dataset.totals[tick]! - maps[0]!.dataset.totals[tick]! : undefined;
-  const panels = maps.map(({ title, dataset }, index) => {
+  const panels = maps.map(({ title, dataset, exchange }, index) => {
     const { distribution } = dataset.trace.parameters;
     const profile = lakeDistributionProfile(distribution);
     const total = dataset.totals[tick]!;
@@ -50,6 +50,8 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     const markers = cells.filter(cell => highlights.has(cell.id)).map(cell =>
       `<circle cx="${cell.wetCentroid[0]}" cy="${cell.wetCentroid[1]}" r="${markerRadius * (cell.id === selected ? 1 : 0.7)}"`
       + ` fill="none" stroke="${escapeXml(highlights.get(cell.id)!)}" stroke-width="${cell.id === selected ? 3 : 2}" ${line}/>`).join('');
+    const exchangePath = exchange && lakeExchangePath(exchange, markerRadius);
+    const direction = exchange && lakeExchangeDirection(exchange);
     return `<g transform="translate(${32 + index * (cardWidth + 20)} 112)" data-map-total="${total}"
   data-distribution="${distribution.kind}" data-profile="${profile}" data-alpha="${distribution.kind === 'homogeneous' ? 0 : distribution.alpha}">
   <rect width="${cardWidth}" height="622" rx="14" fill="#fff" stroke="#d4e2df"/>
@@ -61,7 +63,14 @@ export function lakeViewSvg({ mesh, cells, maps, reference, display, limits, ada
     <g clip-path="url(#lake-shore)">${regions}</g>
     ${markers}
     <path d="${outline}" fill="none" stroke="${shore}" ${line}/>
+    ${exchange ? `<g clip-path="url(#lake-shore)" data-exchange-pair="${escapeXml(exchange.a + ' ' + exchange.b)}">
+      <path d="${exchangePath}" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" ${line}/>
+      <path d="${exchangePath}" stroke="#183343" stroke-width="3" stroke-linecap="round" fill="none" ${line}
+        ${exchange.flux ? '' : 'stroke-dasharray="3 3"'}/>
+    </g>` : ''}
   </svg>
+  ${direction && exchange?.flux !== undefined ? `<text x="20" y="611" font-size="15" data-flow="${exchange.flux}">
+    ${escapeXml(direction)} · ${formatSmall(Math.abs(exchange.flux))} t/mois · reconstitué</text>` : ''}
 </g>`;
   });
   const scaleWidth = 420;

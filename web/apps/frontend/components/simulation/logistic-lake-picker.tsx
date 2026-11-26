@@ -6,16 +6,18 @@ import styles from './logistic-spatial.module.css';
 export const maxLakeComparisons = 10;
 const resultLimit = 8;
 
-export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, selected, colors, select, add, remove }: {
+export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, selected, colors, select, add, remove, fixed }: {
   cells: readonly LakeCell[]; selected: string; colors: ReadonlyMap<string, string>;
   select: (id: string) => void; add: (id: string) => void; remove: (id: string) => void;
+  fixed?: readonly string[] | undefined;
 }) {
   const [query, setQuery] = useState('');
   const searchInput = useRef<HTMLInputElement>(null);
   const search = query.trim().toUpperCase();
   const matches = search ? cells.filter(cell => cell.id.toUpperCase().includes(search)) : [];
   const selectedColor = colors.get(selected);
-  const compared = [...colors].filter(([id]) => id !== selected);
+  const pinned = fixed ?? [selected];
+  const compared = [...colors].filter(([id]) => !pinned.includes(id));
   const full = compared.length >= maxLakeComparisons;
 
   function consult(id: string) {
@@ -31,8 +33,9 @@ export const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, 
   return <fieldset className={styles.lakePicker}>
     <legend>Comparer les trajectoires</legend>
     <div className={styles.lakeChips}>
-      {selectedColor && <span data-picker-cell={selected} className={styles.lakeChip}
+      {!fixed && selectedColor && <span data-picker-cell={selected} className={styles.lakeChip}
         style={{ color: selectedColor }}>Cellule consultée · {selected}</span>}
+      {fixed?.map(id => <span key={id} data-picker-cell={id} className={styles.lakeChip} style={{ color: colors.get(id) }}>{id}</span>)}
       {compared.map(([id, color]) =>
         <button type="button" key={id} data-picker-cell={id} className={styles.lakeChip}
           aria-label={`Retirer ${id} de la comparaison`} style={{ color }}

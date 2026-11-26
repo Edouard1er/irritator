@@ -1,5 +1,6 @@
 import { parseResult, type RunRequest, type RunResult } from '../packages/contracts/index.js';
 import type { LakeDomain } from './logistic-grid.js';
+import type { LakeExchange } from './logistic-lake-exchange.js';
 import type { LakeMesh } from './logistic-lake.js';
 
 type BatchTrace = {
@@ -10,7 +11,7 @@ type BatchTrace = {
   runCalls: number;
   points: number;
   resultBytes: number;
-  errors: NumericalErrors;
+  errors?: NumericalErrors;
 };
 
 type NumericalErrors = { maxAbsoluteTonnes: number; maxRelative: number };
@@ -18,6 +19,7 @@ const emptyErrors = (): NumericalErrors => ({ maxAbsoluteTonnes: 0, maxRelative:
 
 export type LakeRunTrace = {
   parameters: LakeDomain['parameters'];
+  exchange?: LakeExchange;
   startedAt: string;
   elapsedMs: number;
   wetCells: number;
@@ -32,6 +34,7 @@ export type LakeRunTrace = {
 
 export type LakeReference = { local: number[][]; total: number[] };
 export type LakePlan = { mesh: LakeMesh; domain: LakeDomain; reference: LakeReference };
+export type LakeExchangePlan = { mesh: LakeMesh; domain: LakeDomain & { exchange: LakeExchange } };
 
 export class LakeRunError extends Error {
   constructor(public trace: LakeRunTrace, cause: unknown) {
@@ -45,7 +48,8 @@ function recordError(errors: NumericalErrors, observed: number, expected: number
   errors.maxRelative = Math.max(errors.maxRelative, absolute / expected);
 }
 
-export async function runLakeBatches(domain: LakeDomain, reference: LakeReference, execute: (request: RunRequest) => Promise<unknown>, options: {
+export async function runLakeBatches(domain: LakeDomain & { exchange?: LakeExchange }, reference: LakeReference | undefined,
+  execute: (request: RunRequest) => Promise<unknown>, options: {
   signal?: AbortSignal;
   onProgress?: (completed: number) => void;
 } = {}) {
@@ -54,12 +58,14 @@ export async function runLakeBatches(domain: LakeDomain, reference: LakeReferenc
   const { start, end } = parameters.simulation;
   const ticks = Math.round((end - start) / parameters.samplingInterval) + 1;
   const totals = new Float64Array(ticks);
-  const observations: RunResult['observations'] = [];
+  const observations = new Map<string, RunResult['observations'][number]>();
+  const cellIndices = new Map(cells.map((cell, index) => [cell.component, index]));
   const encoder = new TextEncoder();
   const started = performance.now();
   const trace: LakeRunTrace = {
     parameters, startedAt: new Date().toISOString(), elapsedMs: 0, wetCells: cells.length,
     plannedBatches: batches.length, batches: [], points: 0, resultBytes: 0,
+    ...(domain.exchange && { exchange: domain.exchange }),
   };
   const localErrors = emptyErrors();
 
@@ -75,8 +81,12 @@ export async function runLakeBatches(domain: LakeDomain, reference: LakeReferenc
       const runId = (raw as { runId?: unknown }).runId;
       const errors = emptyErrors();
       for (const [index, observation] of result.observations.entries()) {
-        const cell = members[index]!;
-        const analytical = reference.local[observations.length + index]!;
+        const cell = members[index];
+        const cellIndex = cellIndices.get(observation.component);
+        if (!cell || observation.component !== cell.component || observations.has(cell.component) || cellIndex === undefined) {
+          throw new Error(`Observation inattendue ou en double pour ${observation.component}.`);
+        }
+        const analytical = reference?.local[cellIndex];
         const { samples } = observation;
         if (samples.length !== ticks) throw new Error(`Série incomplète pour ${observation.component} (${samples.length}/${ticks} points).`);
         if (Math.abs(samples[0]!.value - cell.initial) > 32 * Number.EPSILON * cell.initial) {
@@ -88,20 +98,24 @@ export async function runLakeBatches(domain: LakeDomain, reference: LakeReferenc
             throw new Error(`Date inattendue pour ${observation.component} à l’indice ${tick}.`);
           }
           if (value < 0) throw new Error(`Biomasse négative pour ${observation.component} à l’indice ${tick}.`);
-          recordError(errors, value, analytical[tick]!);
-          totals[tick] = totals[tick]! + value;
+          if (analytical) {
+            recordError(errors, value, analytical[tick]!);
+            totals[tick] = totals[tick]! + value;
+          }
         }
       }
       const points = result.observations.length * ticks;
       trace.batches.push({ modelId: result.modelId, ...(typeof runId === 'string' ? { runId } : {}),
         elapsedMs: performance.now() - batchStarted, cells: members.length, runCalls: result.simulation.runCalls,
-        points, resultBytes, errors });
+        points, resultBytes, ...(reference && { errors }) });
       trace.points += points;
       trace.resultBytes += resultBytes;
-      localErrors.maxAbsoluteTonnes = Math.max(localErrors.maxAbsoluteTonnes, errors.maxAbsoluteTonnes);
-      localErrors.maxRelative = Math.max(localErrors.maxRelative, errors.maxRelative);
-      trace.localErrors = localErrors;
-      observations.push(...result.observations);
+      if (reference) {
+        localErrors.maxAbsoluteTonnes = Math.max(localErrors.maxAbsoluteTonnes, errors.maxAbsoluteTonnes);
+        localErrors.maxRelative = Math.max(localErrors.maxRelative, errors.maxRelative);
+        trace.localErrors = localErrors;
+      }
+      for (const observation of result.observations) observations.set(observation.component, observation);
     } catch (cause) {
       signal?.throwIfAborted();
       trace.elapsedMs = performance.now() - started;
@@ -114,9 +128,12 @@ export async function runLakeBatches(domain: LakeDomain, reference: LakeReferenc
     onProgress?.(trace.batches.length);
   }
 
-  const aggregateErrors = emptyErrors();
-  totals.forEach((total, tick) => recordError(aggregateErrors, total, reference.total[tick]!));
-  trace.aggregateErrors = aggregateErrors;
+  if (observations.size !== cells.length) throw new Error('Les lots ne couvrent pas toutes les cellules humides.');
+  if (reference) {
+    const aggregateErrors = emptyErrors();
+    totals.forEach((total, tick) => recordError(aggregateErrors, total, reference.total[tick]!));
+    trace.aggregateErrors = aggregateErrors;
+  }
   trace.elapsedMs = performance.now() - started;
-  return { observations, trace };
+  return { observations: cells.map(cell => observations.get(cell.component)!), trace };
 }

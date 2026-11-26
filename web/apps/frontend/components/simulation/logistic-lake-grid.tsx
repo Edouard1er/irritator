@@ -2,8 +2,8 @@
 import { memo, useId, useLayoutEffect, useMemo, useRef, type PointerEvent } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import type { LakeMesh } from '@/lib/simulation/spatial-experiment';
-import { initialLakeView, lakeFraming, lakeMapColor, lakeMapReading, lakeOutline,
-  type LakeCell, type LakeDataset, type LakeDisplay, type LakeView } from '@/lib/simulation/lake-exploration';
+import { initialLakeView, lakeExchangeDirection, lakeExchangePath, lakeFraming, lakeMapColor, lakeMapReading, lakeOutline,
+  type LakeCell, type LakeDataset, type LakeDisplay, type LakeExchangeOverlay, type LakeView } from '@/lib/simulation/lake-exploration';
 import styles from './logistic-spatial.module.css';
 
 const tonnes = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
@@ -12,13 +12,15 @@ const arrowDirections: Record<string, readonly [number, number]> = {
 };
 const zoomLevels = [1, 1.5, 2, 3, 4, 6, 8];
 
-const LakeRegions = memo(function LakeRegions({ cells, selected, select, inspect }: {
+const LakeRegions = memo(function LakeRegions({ cells, selected, select, inspect, neighbors }: {
   cells: readonly LakeCell[]; selected: string; select: (id: string) => void; inspect: (id: string | undefined) => void;
+  neighbors?: ReadonlySet<string> | undefined;
 }) {
   return <>{cells.map(cell => <rect key={cell.id} className={styles.lakeCell}
     x={cell.x} y={cell.y} width={cell.width} height={cell.height} vectorEffect="non-scaling-stroke"
     role="button" tabIndex={selected === cell.id ? 0 : -1} aria-label={cell.id} aria-pressed={selected === cell.id}
     data-cell={cell.id} data-row={cell.row} data-column={cell.column} data-wet-fraction={cell.wetFraction} data-area={cell.area}
+    data-wet-neighbor={neighbors?.has(cell.id) || undefined}
     onPointerEnter={() => inspect(cell.id)} onPointerLeave={() => inspect(undefined)}
     onClick={() => { inspect(undefined); select(cell.id); }}
     onKeyDown={event => {
@@ -38,6 +40,7 @@ function numericAttribute(element: SVGRectElement, attribute: string, value?: nu
 
 export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   mesh, cells, dataset, reference, display, limits, tick, time, selected, select, inspect, view, setView, label, highlights,
+  exchange, neighbors, pairCells,
 }: {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
@@ -54,6 +57,9 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   setView: React.Dispatch<React.SetStateAction<LakeView>>;
   label: string;
   highlights: ReadonlyMap<string, string>;
+  exchange?: LakeExchangeOverlay | undefined;
+  neighbors?: ReadonlySet<string> | undefined;
+  pairCells?: readonly string[] | undefined;
 }) {
   const clip = useId();
   const regions = useRef<SVGGElement>(null);
@@ -65,6 +71,7 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   const zoomIndex = zoomLevels.indexOf(view.zoom);
   const markedCells = useMemo(() => cells.filter(cell => highlights.has(cell.id)), [cells, highlights]);
   const { viewBox, markerRadius } = lakeFraming(mesh, view);
+  const exchangePath = exchange && lakeExchangePath(exchange, markerRadius);
 
   useLayoutEffect(() => {
     if (!regions.current) return;
@@ -161,13 +168,23 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
         </clipPath>
       </defs>
       <g ref={regions} clipPath={`url(#${clip})`}>
-        <LakeRegions cells={cells} selected={selected} select={select} inspect={inspect} />
+        <LakeRegions cells={cells} selected={selected} select={select} inspect={inspect} neighbors={neighbors} />
       </g>
-      {markedCells.map(cell => <circle key={cell.id} className={styles.lakeMarker} aria-hidden="true"
-        data-map-selection={cell.id} data-selected={cell.id === selected || undefined}
-        cx={cell.wetCentroid[0]} cy={cell.wetCentroid[1]}
-        r={markerRadius * (cell.id === selected ? 1 : 0.7)} stroke={highlights.get(cell.id)} vectorEffect="non-scaling-stroke" />)}
+      {markedCells.map(cell => {
+        const paired = pairCells?.includes(cell.id);
+        const radius = markerRadius * (paired ? 1.65 : cell.id === selected ? 1 : 0.7);
+        return <circle key={cell.id} className={styles.lakeMarker} aria-hidden="true"
+          data-map-selection={cell.id} data-selected={cell.id === selected || undefined} data-pair-marker={paired || undefined}
+          cx={cell.wetCentroid[0]} cy={cell.wetCentroid[1]}
+          r={radius} stroke={highlights.get(cell.id)} vectorEffect="non-scaling-stroke" />;
+      })}
       <path className={styles.lakeOutline} d={outline} fill="none" vectorEffect="non-scaling-stroke" aria-hidden="true" />
+      {exchange && <g clipPath={`url(#${clip})`} pointerEvents="none" aria-hidden="true"
+        data-exchange-pair={`${exchange.a} ${exchange.b}`} data-flow-direction={lakeExchangeDirection(exchange)} data-flow={exchange.flux}>
+        <path d={exchangePath} fill="none" stroke="white" strokeWidth={6} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <path d={exchangePath} fill="none" stroke="#183343" strokeWidth={3} strokeLinecap="round"
+          strokeDasharray={exchange.flux ? undefined : '3 3'} vectorEffect="non-scaling-stroke" />
+      </g>}
     </svg>
     <figcaption>Lac de Guiers · Contour HydroLAKES · Grille {mesh.rows} × {mesh.columns}</figcaption>
   </figure>;

@@ -10,6 +10,7 @@ import {
   type SpatialCell, type SpatialDimension, type SpatialDraft, type SpatialDrafts, type SpatialMode, type SpatialTrajectory,
 } from '@/lib/simulation/spatial-experiment';
 import { LogisticLakeExperiment } from './logistic-lake-experiment';
+import { LogisticLakeInteractions } from './logistic-lake-interactions';
 import { LogisticTrajectories, LogisticTrajectoryPlot, logisticSeriesColor } from './logistic-trajectories';
 import styles from './logistic-spatial.module.css';
 
@@ -68,30 +69,34 @@ function ratioColor(ratio: number | undefined) {
 }
 
 export function LogisticSpatialExperiment({ active }: { active: boolean }) {
-  const [mode, setMode] = useState<SpatialMode | 'lake'>('independent');
+  const [mode, setMode] = useState<SpatialMode | 'lake' | 'interactions'>('independent');
   const [lakeVisited, setLakeVisited] = useState(false);
+  const [interactionsVisited, setInteractionsVisited] = useState(false);
   return <section className={styles.experiment} aria-labelledby="logistic-spatial-heading">
     <header className={styles.heading}>
       <div>
         <h1 id="logistic-spatial-heading">Expérience logistique spatiale</h1>
-        {mode !== 'lake' && <p>Démonstration sur grille fictive — données biologiques synthétiques</p>}
+        {(mode === 'independent' || mode === 'constant') && <p>Démonstration sur grille fictive — données biologiques synthétiques</p>}
       </div>
       <label className={styles.dimensions}>
         Mode de l’expérience
         <select value={mode} onChange={event => {
           const value = event.currentTarget.value;
           if (value === 'lake') setLakeVisited(true);
-          setMode(value === 'constant' || value === 'lake' ? value : 'independent');
+          if (value === 'interactions') setInteractionsVisited(true);
+          setMode(value === 'constant' || value === 'lake' || value === 'interactions' ? value : 'independent');
         }}>
           <option value="independent">Populations indépendantes</option>
           <option value="constant">Domaine constant</option>
           <option value="lake">Silhouette du lac</option>
+          <option value="interactions">Interactions spatiales</option>
         </select>
       </label>
     </header>
     <SpatialExperimentMode mode="independent" visible={mode === 'independent'} active={active && mode === 'independent'} />
     <SpatialExperimentMode mode="constant" visible={mode === 'constant'} active={active && mode === 'constant'} />
     {lakeVisited && <LogisticLakeExperiment visible={mode === 'lake'} active={active && mode === 'lake'} />}
+    {interactionsVisited && <LogisticLakeInteractions visible={mode === 'interactions'} active={active && mode === 'interactions'} />}
   </section>;
 }
 

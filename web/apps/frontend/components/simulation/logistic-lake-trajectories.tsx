@@ -8,6 +8,7 @@ export type LakeCurve = {
   points: readonly SpatialTotal[];
   color: string;
   selected?: boolean;
+  dashed?: boolean;
 };
 
 const levels = [0, 0.25, 0.5, 0.75, 1];
@@ -37,7 +38,7 @@ const LakeCurves = memo(function LakeCurves({ curves, transform }: {
     return <g data-lake-curve={curve.name} key={curve.name}>
       {segments.filter(segment => segment.length).map((segment, index) =>
         <polyline key={index} points={segment.join(' ')} fill="none" stroke={curve.color}
-          strokeWidth={curve.selected ? 3.5 : 2} vectorEffect="non-scaling-stroke" />)}
+          strokeWidth={curve.selected ? 3.5 : 2} strokeDasharray={curve.dashed ? '6 4' : undefined} vectorEffect="non-scaling-stroke" />)}
     </g>;
   })}</g>;
 });

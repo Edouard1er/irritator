@@ -165,18 +165,18 @@ function checkBudget(count: number, grid: string) {
   }
 }
 
-type ModelCell = { id: string; initial: number; capacity?: number | undefined; quantum?: number };
+type ModelCell = { id: string; initial: number; capacity?: number | undefined; quantum?: number; growth?: number };
 
-function buildRequest(id: string, cells: readonly ModelCell[], simulation: RunRequest['simulation']): RunRequest {
+export function buildRequest(id: string, cells: readonly ModelCell[], simulation: RunRequest['simulation']): RunRequest {
   const template = single.model;
   const model: RunRequest['model'] = { id, components: [], connections: [], observations: [] };
-  for (const { id, initial, capacity, quantum } of cells) {
+  for (const { id, initial, capacity, quantum, growth } of cells) {
     for (const atom of template.components) {
       const parameters = { ...atom.parameters } as Record<string, number>;
       if (atom.id === 'N') parameters.X = initial;
       if (capacity !== undefined) {
         if (atom.id === 'N') parameters.dQ = quantum ?? constantDomain.quantum;
-        if (atom.id === 'r') parameters.value = constantDomain.growth;
+        if (atom.id === 'r') parameters.value = growth ?? constantDomain.growth;
         if (atom.id === 'sum') parameters['coeff-1'] = -1 / capacity;
       }
       model.components.push({ ...atom, id: `${id}-${atom.id}`, parameters });

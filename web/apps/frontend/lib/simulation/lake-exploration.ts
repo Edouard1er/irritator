@@ -1,5 +1,6 @@
-import { lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeGradientProfile, type LakeMesh,
-  type LakeRunTrace, type SpatialTrajectory } from './spatial-experiment';
+import { lakeDefaultGradientProfile, lakeDistributionId, type LakeDistribution, type LakeDomain, type LakeGradientProfile, type LakeMesh,
+  type LakeExchangeInputs, type LakeExchangePlan, type LakePlan, type LakeRunTrace, type SpatialTrajectory, type WetFrontier,
+  type runLakeBatches } from './spatial-experiment';
 
 export type LakeInputs = { resolution: string; kind: LakeDistribution['kind']; alpha: number; profile?: LakeGradientProfile };
 export type LakeCell = LakeDomain['cells'][number];
@@ -17,6 +18,11 @@ export const lakeDatasetLimit = 3;
 export const lakeComparisonMonths = [0, 10, 20];
 export const lakePlaybackInterval = 90;
 export const lakePlaybackSpeeds = [1, 2, 4] as const;
+export const lakePrimaryColor = '#202c38';
+export const lakeComparisonColors = [
+  '#0072b2', '#b54f00', '#007a59', '#9e3d87', '#956a00',
+  '#6745ad', '#a92235', '#007b85', '#724b32', '#52721c',
+];
 export const lakeSyntheticNotice = 'Simulation expérimentale — données biologiques synthétiques';
 export const lakeDistributionOptions = [
   { kind: 'homogeneous', label: 'Distribution homogène' },
@@ -77,6 +83,26 @@ export const lakeFraming = (mesh: LakeMesh, { zoom, dx, dy }: LakeView) => {
     markerRadius: width * 0.014 };
 };
 
+export type LakeExchangeOverlay = { a: string; b: string; frontier: WetFrontier; flux?: number };
+
+export function lakeExchangePath({ frontier, flux }: LakeExchangeOverlay, radius: number) {
+  const { axis, boundary, segments, direction } = frontier;
+  const segment = segments.reduce((longest, next) => next.end - next.start > longest.end - longest.start ? next : longest);
+  const center = (segment.start + segment.end) / 2;
+  const length = Math.min(3 * radius, (segment.end - segment.start) / 2);
+  const toward = direction * (flux !== undefined && flux < 0 ? -1 : 1);
+  const point = (along: number, across = 0) => (axis === 0
+    ? [boundary + toward * along, center + across]
+    : [center + across, boundary + toward * along]).join(',');
+  const head = Math.min(radius, length / 2);
+  return `M${point(-length)}L${point(length)}` + (flux
+    ? `M${point(length - head, head)}L${point(length)}L${point(length - head, -head)}` : '');
+}
+
+export function lakeExchangeDirection({ a, b, flux }: LakeExchangeOverlay) {
+  return flux === undefined ? undefined : flux > 0 ? `${a} → ${b}` : flux < 0 ? `${b} → ${a}` : 'Flux nul';
+}
+
 export const lakeMapInk = { noData: '#edf3f3', grid: '#477a74', outline: '#3b6665' };
 
 export function lakeLegend(display: LakeDisplay, limits: readonly [number, number, number], adaptive: boolean, available: boolean) {
@@ -105,6 +131,38 @@ export function retainLakeDataset(
     next.delete(oldest);
   }
   return next;
+}
+
+export function configureLake(inputs: LakeInputs, signal: AbortSignal): Promise<LakePlan>;
+export function configureLake(inputs: LakeInputs, signal: AbortSignal, exchange: LakeExchangeInputs): Promise<LakeExchangePlan>;
+export async function configureLake({ resolution, kind, alpha, profile }: LakeInputs, signal: AbortSignal, exchange?: LakeExchangeInputs) {
+  const query = new URLSearchParams({ resolution, distribution: kind, alpha: String(alpha) });
+  if (kind !== 'homogeneous') query.set('profile', profile ?? lakeDefaultGradientProfile);
+  if (exchange) {
+    query.set('a', exchange.a);
+    query.set('b', exchange.b);
+    query.set('mu', String(exchange.mu));
+  }
+  const response = await fetch(`/api/logistic-lake?${query}`, { signal });
+  if (!response.ok) {
+    if (exchange && response.status === 400) {
+      const { message } = await response.json();
+      throw new Error(message);
+    }
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export function lakeDataset(domain: LakeDomain, { observations, trace }: Awaited<ReturnType<typeof runLakeBatches>>): LakeDataset {
+  const cells = new Map(domain.cells.map(cell => [cell.id, cell]));
+  const totals = Array<number>(observations[0]!.samples.length).fill(0);
+  const trajectories = new Map(domain.cells.map((cell, index) => {
+    const samples = observations[index]!.samples;
+    samples.forEach(({ value }, tick) => { totals[tick] = totals[tick]! + value; });
+    return [cell.id, { cell, samples, constant: false, ...domain.parameters.simulation }] as const;
+  }));
+  return { cells, totals, trajectories, trace };
 }
 
 export function lakeReading(dataset: LakeDataset | undefined, id: string, tick: number): LakeReading | undefined {
