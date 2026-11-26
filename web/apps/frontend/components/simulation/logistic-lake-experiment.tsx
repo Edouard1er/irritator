@@ -1,29 +1,34 @@
-import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { Download, Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react';
 import { errorText } from '@/lib/api/client';
 import { lakeMaxAlpha, lakeResolutionId, lakeResolutions, LakeRunError, runLakeBatch, runLakeBatches,
   samplingTimeline, type LakePlan, type LakeRunTrace } from '@/lib/simulation/spatial-experiment';
-import { lakeComparisonMonths, lakeDifferenceLimit, lakeDisplays, lakeDistributionOptions, lakeKey, lakePlaybackInterval,
-  lakePlaybackSpeeds, lakeReading, retainLakeDataset,
-  type LakeCell, type LakeDataset, type LakeDisplay, type LakeInputs, type LakeScaleMode } from '@/lib/simulation/lake-exploration';
-import { initialLakeView } from './logistic-lake-grid';
-import { LakeCellDetails, LakeDomainMetrics, LakeMapLegend, LakeMapPane, lakeMonth, lakeNumber, lakeSignedTonnes,
-  lakeTonnes } from './logistic-lake-readings';
+import { initialLakeView, lakeAlpha, lakeComparisonMonths, lakeDifferenceLimit, lakeDisplays, lakeDistributionOptions, lakeKey,
+  lakeMonth, lakeNumber, lakePlaybackInterval, lakePlaybackSpeeds, lakeReading, lakeScenarioLabel, lakeSignedTonnes,
+  lakeSyntheticNotice, lakeTonnes, retainLakeDataset, type LakeDataset, type LakeDisplay, type LakeInputs,
+  type LakeScaleMode } from '@/lib/simulation/lake-exploration';
+import { downloadLakeFile, lakeSvgToPng, lakeViewSvg, type LakeViewSnapshot } from '@/lib/simulation/lake-view-export';
+import { LakeCellDetails, LakeDomainMetrics, LakeMapLegend, LakeMapPane } from './logistic-lake-readings';
+import { LakeTrajectoryPicker, maxLakeComparisons } from './logistic-lake-picker';
 import { LakeTrajectoryChart, type LakeCurve } from './logistic-lake-trajectories';
 import { logisticSeriesColor } from './logistic-trajectories';
 import { SpatialFullscreen } from './spatial-fullscreen';
 import styles from './logistic-spatial.module.css';
 
 const defaultInputs: LakeInputs = { resolution: lakeResolutionId(lakeResolutions[0]), kind: 'homogeneous', alpha: 0.3 };
-const alternate: Omit<LakeInputs, 'resolution'> = { kind: 'wet-gradient', alpha: 0.6 };
+type Distribution = Omit<LakeInputs, 'resolution'>;
+const homogeneous: Distribution = { kind: 'homogeneous', alpha: 0.3 };
+const northSouth: Distribution = { kind: 'gradient', alpha: 0.3 };
+const wetGradient: Distribution = { kind: 'wet-gradient', alpha: 0.6 };
+const demos: readonly { label: string; primary: Distribution; secondary?: Distribution }[] = [
+  { label: 'Biomasse initiale homogène', primary: homogeneous },
+  { label: 'Gradient nord-sud · 0,3', primary: northSouth },
+  { label: 'Gradient pondéré par surface humide · 0,6', primary: wetGradient },
+  { label: 'Comparer homogène / gradient', primary: homogeneous, secondary: northSouth },
+];
 const gradientNotice = 'Gradient biologique synthétique — non calibré';
 const beginning = { tick: 0, playing: false, started: false };
 const statusLabel = { idle: 'Non lancé', running: 'En cours', completed: 'Terminé', error: 'Erreur' };
-const maxCompared = 3;
-const alphaText = (alpha: number) => String(alpha).replace('.', ',');
-const distributionLabel = ({ kind, alpha }: LakeInputs) =>
-  lakeDistributionOptions.find(option => option.kind === kind)!.label
-  + (kind === 'homogeneous' ? '' : ` · α = ${alphaText(alpha)}`);
 
 type PendingRun = { key: string; controller: AbortController };
 type Progress = { key: string; done: number; count?: number };
@@ -39,17 +44,16 @@ async function configureLake({ resolution, kind, alpha }: LakeInputs, signal: Ab
 function downloadTrace(trace: LakeRunTrace) {
   const { distribution } = trace.parameters;
   const resolution = lakeResolutionId(trace.parameters);
-  const url = URL.createObjectURL(new Blob([JSON.stringify(trace, null, 2)], { type: 'application/json' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `lac-de-guiers-${distribution.kind === 'homogeneous' ? resolution : lakeKey({ resolution, ...distribution })}.json`;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const name = distribution.kind === 'homogeneous' ? resolution : lakeKey({ resolution, ...distribution });
+  downloadLakeFile(new Blob([JSON.stringify(trace, null, 2)], { type: 'application/json' }), `lac-de-guiers-${name}.json`);
 }
 
 export function LogisticLakeExperiment({ visible, active }: { visible: boolean; active: boolean }) {
   const [plan, setPlan] = useState<LakePlan>();
   const [inputs, setInputs] = useState(defaultInputs);
+  const [draft, setDraft] = useState<Distribution>(homogeneous);
+  const [workshop, setWorkshop] = useState(false);
+  const [scheduled, setScheduled] = useState<readonly LakeInputs[]>([]);
   const [planError, setPlanError] = useState('');
   const [planning, setPlanning] = useState(true);
   const [datasets, setDatasets] = useState<ReadonlyMap<string, LakeDataset>>(() => new Map());
@@ -62,7 +66,8 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   const [display, setDisplay] = useState<LakeDisplay>('ratio');
   const [scale, setScale] = useState<LakeScaleMode>('fixed');
   const [comparing, setComparing] = useState(false);
-  const [alternateInputs, setAlternateInputs] = useState(alternate);
+  const [alternateInputs, setAlternateInputs] = useState(wetGradient);
+  const [alternateDraft, setAlternateDraft] = useState(wetGradient);
   const [cursor, setCursor] = useState(beginning);
   const [speed, setSpeed] = useState<(typeof lakePlaybackSpeeds)[number]>(1);
   const [loop, setLoop] = useState(false);
@@ -81,7 +86,9 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
       if (controller.signal.aborted) return;
       setPlan(next);
       const largest = next.domain.cells.reduce((a, b) => b.wetFraction > a.wetFraction ? b : a);
-      setSelected(previous => previous || largest.id);
+      const ids = new Set(next.domain.cells.map(cell => cell.id));
+      setSelected(previous => ids.has(previous) ? previous : largest.id);
+      setCompared(previous => previous.every(id => ids.has(id)) ? previous : previous.filter(id => ids.has(id)));
     }).catch(cause => {
       if (!controller.signal.aborted) setPlanError(errorText(cause));
     }).finally(() => {
@@ -99,8 +106,12 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   useEffect(() => () => running.current?.controller.abort(), []);
 
   const primaryKey = lakeKey(inputs);
-  const secondaryInputs = { resolution: inputs.resolution, ...alternateInputs };
+  const draftInputs = { ...draft, resolution: inputs.resolution };
+  const primaryChanged = lakeKey(draftInputs) !== primaryKey;
+  const secondaryInputs = { ...alternateInputs, resolution: inputs.resolution };
   const secondaryKey = lakeKey(secondaryInputs);
+  const alternateTarget = { ...alternateDraft, resolution: inputs.resolution };
+  const secondaryChanged = lakeKey(alternateTarget) !== secondaryKey;
   const referenceInputs: LakeInputs = { ...inputs, kind: 'homogeneous' };
   const referenceKey = lakeKey(referenceInputs);
   const planReady = plan && !planning && !planError;
@@ -118,9 +129,13 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   const limits = useMemo(() => display === 'difference' ? [-limit || 0, 0, limit] as const : lakeDisplays[display].limits, [display, limit]);
   const milestoneTicks = useMemo(() => lakeComparisonMonths.map(instant => timeline.indexOf(instant)), [timeline]);
   const cellOptions = useMemo(() => plan?.domain.cells.map(cell => <option key={cell.id} value={cell.id}>{cell.id}</option>), [plan]);
+  const highlights = useMemo(() => {
+    const ids = new Set([selected, ...compared]);
+    return new Map(plan?.domain.cells.filter(cell => ids.has(cell.id)).map(cell => [cell.id, logisticSeriesColor(cell)]));
+  }, [selected, compared, plan]);
   const chartSeries = useMemo<LakeCurve[]>(() => {
     if (!primary) return [];
-    const chartIds = [selected, ...compared.filter(id => id !== selected)];
+    const chartIds = [selected, ...compared];
     const chartCells = chartIds.flatMap(id => {
       const trajectory = primary.trajectories.get(id);
       return trajectory ? [{
@@ -162,14 +177,17 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     running.current?.controller.abort();
     running.current = null;
     setProgress(undefined);
+    setScheduled([]);
   }
 
-  function changeInputs(next: LakeInputs) {
-    if (lakeKey(inputs) === lakeKey(next) && !planError) return;
+  function changeInputs(next: LakeInputs, launch: readonly LakeInputs[] = []) {
     cancelRun();
+    setScheduled(launch);
+    if (lakeKey(inputs) === lakeKey(next) && !planError) return;
     preparing.current?.abort();
     setPlanning(true);
     setPlanError('');
+    setFailure(undefined);
     setInputs({ ...next });
     if (inputs.resolution !== next.resolution) {
       setCursor(beginning);
@@ -181,6 +199,29 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     }
   }
 
+  function showDemo(demo: typeof demos[number]) {
+    const resolution = ['18x9', '24x12', '48x24'].includes(inputs.resolution) ? inputs.resolution : '18x9';
+    const next = { ...demo.primary, resolution };
+    const comparison = demo.secondary && { ...demo.secondary, resolution };
+    setDraft(demo.primary);
+    setComparing(!!comparison);
+    if (demo.secondary) {
+      setAlternateInputs(demo.secondary);
+      setAlternateDraft(demo.secondary);
+    }
+    setCursor(value => ({ ...value, playing: false }));
+    changeInputs(next, comparison ? [next, comparison] : [next]);
+  }
+
+  const selectCell = useCallback((id: string) => {
+    setSelected(id);
+    setCompared(ids => ids.includes(id) ? ids.filter(other => other !== id) : ids);
+  }, []);
+  const addCell = useCallback((id: string) => {
+    setCompared(ids => id === selected || ids.includes(id) || ids.length >= maxLakeComparisons ? ids : [...ids, id]);
+  }, [selected]);
+  const removeCell = useCallback((id: string) => setCompared(ids => ids.filter(other => other !== id)), []);
+
   async function run(target: LakeInputs) {
     const key = lakeKey(target);
     if (!planReady || running.current || datasets.has(key)) return;
@@ -189,7 +230,6 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     running.current = task;
     setFailure(undefined);
     setProgress({ key, done: 0 });
-    if (key === primaryKey && !secondary) setCursor(beginning);
     try {
       const { domain, reference: analytical } = key === primaryKey ? plan : await configureLake(target, controller.signal);
       if (controller.signal.aborted) return;
@@ -215,6 +255,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     } catch (cause) {
       if (running.current !== task || controller.signal.aborted) return;
       setFailure({ key, message: errorText(cause), ...(cause instanceof LakeRunError ? { trace: cause.trace } : {}) });
+      setScheduled([]);
     } finally {
       if (running.current === task) {
         running.current = null;
@@ -222,6 +263,16 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
       }
     }
   }
+
+  const runScheduled = useEffectEvent(() => {
+    const [target, ...rest] = scheduled;
+    if (!target || !planReady || running.current) return;
+    setScheduled(rest);
+    if (!datasets.has(lakeKey(target))) void run(target);
+  });
+  useEffect(() => {
+    runScheduled();
+  }, [scheduled, planReady, progress]);
 
   function togglePlayback() {
     setCursor(value => value.playing ? { ...value, playing: false }
@@ -235,7 +286,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   if (!visible) return null;
   if (!plan || !simulation || !interval || !capacity) return planError ? <>
     <p className={styles.error} role="alert">Chargement du contour impossible · {planError}</p>
-    <button onClick={() => changeInputs(inputs)}>Recharger le contour</button>
+    <button onClick={() => changeInputs(inputs, scheduled)}>Recharger le contour</button>
   </> : <p role="status">Chargement du contour HydroLAKES…</p>;
 
   const trace = planReady && phase !== 'running' ? primary?.trace ?? primaryFailure?.trace : undefined;
@@ -244,6 +295,11 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
   const total = primary?.totals[cursor.tick];
   const alternateTotal = secondary?.totals[cursor.tick];
   const totalDifference = total !== undefined && alternateTotal !== undefined ? alternateTotal - total : undefined;
+  const resolutionControl = <label className={styles.dimensions}>Résolution du lac
+    <select value={inputs.resolution} onChange={event => changeInputs({ ...inputs, resolution: event.currentTarget.value })}>
+      {lakeResolutions.map(size => <option key={lakeResolutionId(size)} value={lakeResolutionId(size)}>{size.rows} × {size.columns}</option>)}
+    </select>
+  </label>;
   const stepControls = <>
     <button type="button" aria-label="Observation précédente" title="Observation précédente" disabled={!ready || cursor.tick === 0}
       onClick={() => seek(cursor.tick - 1)}><StepBack size={16} aria-hidden="true" /></button>
@@ -274,44 +330,65 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
     aria-valuetext={lakeMonth.format(time) + ' mois'}
     onChange={event => seek(Math.round((Number(event.currentTarget.value) - simulation.start) / interval))} />;
   const fullscreenControls = <div className={styles.lakeFullscreenControls}>
-    {inputs.kind !== 'homogeneous' && <span className={styles.gradientNotice}>{gradientNotice}</span>}
+    <span className={styles.lakeNotice}>{lakeSyntheticNotice}</span>
+    {!workshop && inputs.kind !== 'homogeneous' && <span className={styles.gradientNotice}>{gradientNotice}</span>}
     <div className={styles.playActions}>{stepControls}{playbackSettings}</div>
     <div className={styles.fullscreenTime}>{selected} · {lakeMonth.format(time)} mois {timeSlider('Temps en plein écran')}</div>
   </div>;
   const commonMap = { mesh: plan.mesh, cells: plan.domain.cells, reference, display, limits, tick: cursor.tick,
-    time, selected, select: setSelected, view, setView };
+    time, selected, select: selectCell, view, setView, workshop, highlights };
+  const snapshot: LakeViewSnapshot | undefined = primary && (!comparing || secondary) && (display !== 'difference' || reference) ? {
+    mesh: plan.mesh, cells: plan.domain.cells, reference, display, limits, tick: cursor.tick, time, view, selected, highlights,
+    adaptive: scale === 'month', maps: [
+      { title: lakeScenarioLabel(inputs), dataset: primary },
+      ...(secondary ? [{ title: lakeScenarioLabel(secondaryInputs), dataset: secondary }] : []),
+    ],
+  } : undefined;
   const optionalRun = (target: LakeInputs, label: string) => {
     const key = lakeKey(target);
     const failed = failure?.key === key && key !== primaryKey ? failure : undefined;
-    if (datasets.has(key)) return <p className={styles.coverage}>Observations disponibles · {distributionLabel(target)}</p>;
+    if (datasets.has(key)) return <p className={styles.coverage}>
+      {workshop ? 'Simulation disponible' : 'Observations disponibles'} · {lakeScenarioLabel(target)}
+    </p>;
     if (progress?.key === primaryKey && key === primaryKey) return <p>Simulation en cours.</p>;
     return <div className={styles.lakeScenarioState}>
       {failed && <p role="alert" className={styles.error}>Simulation impossible · {failed.message}</p>}
-      {failed?.trace && <button type="button" onClick={() => downloadTrace(failed.trace!)}>Télécharger la trace de l’erreur</button>}
-      {progress?.key === key ? <RunProgress progress={progress} cancel={cancelRun} /> : <>
+      {!workshop && failed?.trace && <button type="button" onClick={() => downloadTrace(failed.trace!)}>Télécharger la trace de l’erreur</button>}
+      {progress?.key === key ? <RunProgress progress={progress} cancel={cancelRun} workshop={workshop} /> : <>
         <p>{failed ? 'Calcul à réessayer.' : 'Scénario à simuler.'}</p>
         <button type="button" disabled={!!progress || !planReady} onClick={() => void run(target)}>{label}</button>
       </>}
     </div>;
   };
 
-  return <>
+  return <div className={styles.lakeExperience} data-workshop={workshop || undefined}>
+    <div className={styles.lakeMode}>
+      <p className={styles.lakeNotice}>{lakeSyntheticNotice}</p>
+      <button type="button" aria-pressed={workshop} onClick={() => setWorkshop(value => !value)}>Mode atelier</button>
+    </div>
+    {workshop && <section className={styles.lakeDemos} aria-label="Scénarios de démonstration">
+      <h2>Scénarios de démonstration</h2>
+      <p>Les grilles 18 × 9 et 24 × 12 conviennent à la présentation. La grille 48 × 24 permet d’examiner le détail.</p>
+      <div>{demos.map(demo => <button type="button" key={demo.label} onClick={() => showDemo(demo)}>{demo.label}</button>)}</div>
+    </section>}
     <div className={styles.lakeOptions}>
-      <DistributionInputs inputs={inputs} label="Distribution biologique" intensityLabel="Intensité du gradient α"
-        change={value => changeInputs({ ...inputs, ...value })} />
-      {inputs.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
+      {workshop && resolutionControl}
+      <DistributionInputs inputs={draft} applied={primary ? inputs : undefined} label="Distribution biologique"
+        intensityLabel="Intensité du gradient α" change={setDraft} />
+      {!workshop && draft.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
     </div>
     <div className={styles.runActions}>
       <span className={styles.status} data-phase={phase} role="status">{planning ? 'Préparation du maillage…' : statusLabel[phase]}</span>
-      {progress?.key === primaryKey && <RunProgress progress={progress} cancel={cancelRun} />}
-      {trace && <button type="button" onClick={() => downloadTrace(trace)}>Télécharger la trace JSON</button>}
-      <button className="primary" onClick={() => void run(inputs)} disabled={!!progress || !planReady || !!primary}>
-        <Play size={16} aria-hidden="true" /> Lancer la simulation
+      {progress?.key === primaryKey && <RunProgress progress={progress} cancel={cancelRun} workshop={workshop} />}
+      {!workshop && trace && <button type="button" onClick={() => downloadTrace(trace)}>Télécharger la trace JSON</button>}
+      <button className="primary" type="button" onClick={() => changeInputs(draftInputs, [draftInputs])}
+        disabled={!planReady || (!primaryChanged && (!!progress || !!primary))}>
+        <Play size={16} aria-hidden="true" /> {draft.kind !== 'homogeneous' || primaryChanged ? 'Appliquer et simuler' : 'Lancer la simulation'}
       </button>
     </div>
     {planError && <div className={styles.error} role="alert">
       <p>Préparation du lac impossible · {planError}</p>
-      <button type="button" onClick={() => changeInputs(inputs)}>Réessayer</button>
+      <button type="button" onClick={() => changeInputs(inputs, scheduled)}>Réessayer</button>
     </div>}
     {primaryFailure && !planError && <p className={styles.error} role="alert">Simulation impossible · {primaryFailure.message}</p>}
 
@@ -329,15 +406,11 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
       <SpatialFullscreen as="section" className={styles.panel} aria-labelledby="logistic-spatial-grid"
         active={active} label="Biomasse par cellule" controls={fullscreenControls}>
         <div className={styles.panelHeading}><h2 id="logistic-spatial-grid">Biomasse par cellule</h2></div>
-        <label className={styles.dimensions}>Résolution du lac
-          <select value={inputs.resolution} onChange={event => changeInputs({ ...inputs, resolution: event.currentTarget.value })}>
-            {lakeResolutions.map(size => <option key={lakeResolutionId(size)} value={lakeResolutionId(size)}>{size.rows} × {size.columns}</option>)}
-          </select>
-        </label>
-        <SpatialFullscreen active={active} label="Indicateurs du domaine" controls={fullscreenControls}>
+        {!workshop && resolutionControl}
+        {!workshop && <SpatialFullscreen active={active} label="Indicateurs du domaine" controls={fullscreenControls}>
           <LakeDomainMetrics area={plan.domain.parameters.areaKm2} cells={plan.domain.cells.length}
             initial={plan.domain.parameters.initialTonnes} capacity={capacity} dataset={primary} tick={cursor.tick} />
-        </SpatialFullscreen>
+        </SpatialFullscreen>}
 
         <SpatialFullscreen active={active} label="Carte du lac" controls={fullscreenControls}>
           <div className={styles.lakeMapOptions}>
@@ -352,24 +425,31 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
                 <option value="month">Ajustée au mois</option>
               </select>
             </label>}
-            <label className={styles.dimensions}>Cellule à consulter
-              <select value={selected} onChange={event => setSelected(event.currentTarget.value)}>
+            {!workshop && <label className={styles.dimensions}>Cellule à consulter
+              <select value={selected} onChange={event => selectCell(event.currentTarget.value)}>
                 {cellOptions}
               </select>
-            </label>
+            </label>}
             <label className={styles.lakeCheck}><input type="checkbox" checked={comparing} onChange={event => {
-              if (!event.currentTarget.checked && running.current?.key === secondaryKey && secondaryKey !== primaryKey) cancelRun();
+              if (!event.currentTarget.checked) {
+                if (running.current?.key === secondaryKey && secondaryKey !== primaryKey) cancelRun();
+                else setScheduled(targets => targets.filter(target => lakeKey(target) !== secondaryKey || secondaryKey === primaryKey));
+              }
               setComparing(event.currentTarget.checked);
             }} /> Comparer deux scénarios</label>
+            <LakeExport snapshot={snapshot} resolution={inputs.resolution} />
           </div>
           {comparing && <div className={styles.lakeSecondary}>
-            <DistributionInputs inputs={alternateInputs} label="Distribution à comparer" intensityLabel="Intensité du gradient comparé α"
-              change={next => {
-                if (running.current?.key === secondaryKey && secondaryKey !== primaryKey) cancelRun();
-                setAlternateInputs(next);
-              }} />
-            {alternateInputs.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
-            {optionalRun(secondaryInputs, 'Lancer le scénario comparé')}
+            <DistributionInputs inputs={alternateDraft} applied={secondary ? alternateInputs : undefined}
+              label="Distribution à comparer" intensityLabel="Intensité du gradient comparé α" change={setAlternateDraft} />
+            {!workshop && alternateDraft.kind !== 'homogeneous' && <p className={styles.gradientNotice}>{gradientNotice}</p>}
+            {secondaryChanged ? <button type="button" disabled={!planReady || (!!progress && progress.key !== secondaryKey)}
+              onClick={() => {
+                cancelRun();
+                setAlternateInputs(alternateDraft);
+                setScheduled([alternateTarget]);
+              }}>Appliquer et simuler le scénario comparé</button> : optionalRun(secondaryInputs,
+              alternateDraft.kind === 'homogeneous' ? 'Lancer le scénario comparé' : 'Appliquer et simuler le scénario comparé')}
           </div>}
           {display === 'difference' && !reference && <div className={styles.lakeReference}>
             <p>Simulez la distribution homogène sur cette grille pour afficher les écarts.</p>
@@ -380,28 +460,32 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
           </div>}
           {primary && display === 'difference' && reference && !primary.trajectories.get(selected)?.samples[cursor.tick]
             && <p className={styles.coverage}>Observation absente à ce mois pour la cellule sélectionnée.</p>}
-          <LakeMapLegend display={display} limits={limits} adaptive={scale === 'month'} available={!!reference && ready} />
+          <LakeMapLegend display={display} limits={limits} adaptive={scale === 'month'} available={!!reference && ready} workshop={workshop} />
           {comparing && <p className={styles.lakeDelta}>
             Écart de biomasse totale (droite − gauche) <strong data-map-total-difference={totalDifference}>{lakeSignedTonnes(totalDifference)}</strong>
           </p>}
           <div className={styles.lakeMaps} data-comparison={comparing || undefined}>
             <LakeMapPane key={lakeResolutionId(plan.mesh)} {...commonMap} dataset={primary} initialKnown={!!planReady}
-              title={distributionLabel(inputs)} label="Grille humide du lac de Guiers" />
+              title={lakeScenarioLabel(inputs)} label="Grille humide du lac de Guiers" />
             {comparing && <LakeMapPane key={`comparaison-${lakeResolutionId(plan.mesh)}`} {...commonMap} dataset={secondary}
               initialKnown={!!planReady && secondaryKey === primaryKey}
-              title={distributionLabel(secondaryInputs)} label="Grille humide du lac de Guiers · comparaison" />}
+              title={lakeScenarioLabel(secondaryInputs)} label="Grille humide du lac de Guiers · comparaison" />}
           </div>
-          <p className={styles.coverage}>La surface de référence est répartie selon la fraction humide dans la projection locale.</p>
+          {!workshop && <p className={styles.coverage}>La surface de référence est répartie selon la fraction humide dans la projection locale.</p>}
         </SpatialFullscreen>
       </SpatialFullscreen>
 
       <section className={styles.panel} aria-label={`Paramètres de ${selected}`}>
         <SpatialFullscreen active={active} label="Détails de la cellule" controls={fullscreenControls}>
-          <div className={styles.panelHeading}><h2>Cellule {selected}</h2><span>Valeurs locales</span></div>
-          {selectedCell && <LakeCellDetails cell={selectedCell} dataset={primary} tick={cursor.tick} scientificDetails initialKnown={!!planReady} />}
+          <div className={styles.panelHeading}><h2>Cellule <span style={{ color: highlights.get(selected) }}>{selected}</span></h2>
+            {!workshop && <span>Valeurs locales</span>}</div>
+          {selectedCell && <LakeCellDetails cell={selectedCell} dataset={primary} tick={cursor.tick}
+            scientificDetails={!workshop} workshop={workshop} initialKnown={!!planReady} />}
           {primary && !selectedReading && <p className={styles.coverage}>Aucune observation à cet instant.</p>}
         </SpatialFullscreen>
         <SpatialFullscreen active={active} label="Trajectoires" controls={fullscreenControls}>
+          <LakeTrajectoryPicker cells={plan.domain.cells} selected={selected} compared={compared}
+            select={selectCell} add={addCell} remove={removeCell} />
           {primary ? <>
             {active && <LakeTrajectoryChart time={time} tick={cursor.tick}
               start={simulation.start} end={simulation.end} curves={chartSeries} />}
@@ -418,12 +502,11 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
             </ul>
           </> : <div className={styles.chartMessage}>{phase === 'running'
             ? 'Simulation en cours.' : 'Lancez la simulation pour consulter les trajectoires.'}</div>}
-          <LakeTrajectoryPicker cells={plan.domain.cells} selected={selected} compared={compared} setCompared={setCompared} />
         </SpatialFullscreen>
       </section>
     </div>
 
-    <div className={styles.lakeComparison}>
+    {!workshop && <div className={styles.lakeComparison}>
       <table>
         <caption>Biomasses totales simulées (t) · Grille {inputs.resolution.replace('x', ' × ')}</caption>
         <thead><tr><th scope="col">Distribution</th>
@@ -434,7 +517,7 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
             const target = { ...inputs, kind };
             const points = summaries.get(lakeKey(target));
             return <tr key={kind}>
-              <th scope="row">{distributionLabel(target)}</th>
+              <th scope="row">{lakeScenarioLabel(target)}</th>
               {lakeComparisonMonths.map((instant, index) => {
                 const value = points?.[index];
                 return <td key={instant} data-comparison-biomass={value}>{value === undefined ? 'À simuler' : lakeNumber.format(value)}</td>;
@@ -443,29 +526,14 @@ export function LogisticLakeExperiment({ visible, active }: { visible: boolean; 
           })}
         </tbody>
       </table>
-    </div>
-  </>;
+    </div>}
+  </div>;
 }
 
-const LakeTrajectoryPicker = memo(function LakeTrajectoryPicker({ cells, selected, compared, setCompared }: {
-  cells: readonly LakeCell[]; selected: string; compared: readonly string[]; setCompared: Dispatch<SetStateAction<string[]>>;
-}) {
-  return <fieldset className={styles.compare}>
-    <legend>Comparer les trajectoires</legend>
-    {cells.map(cell => <label key={cell.id}>
-      <input type="checkbox" aria-label={`Comparer ${cell.id}`} checked={cell.id === selected || compared.includes(cell.id)}
-        disabled={cell.id === selected || (!compared.includes(cell.id) && compared.length >= maxCompared)}
-        onChange={event => {
-          const checked = event.currentTarget.checked;
-          setCompared(ids => checked ? [...ids, cell.id] : ids.filter(id => id !== cell.id));
-        }} />{cell.id}
-    </label>)}
-  </fieldset>;
-});
-
-function DistributionInputs({ inputs, change, label, intensityLabel }: {
-  inputs: Omit<LakeInputs, 'resolution'>;
-  change: (value: Omit<LakeInputs, 'resolution'>) => void;
+function DistributionInputs({ inputs, applied, change, label, intensityLabel }: {
+  inputs: Distribution;
+  applied?: Distribution;
+  change: (value: Distribution) => void;
   label: string;
   intensityLabel: string;
 }) {
@@ -479,20 +547,55 @@ function DistributionInputs({ inputs, change, label, intensityLabel }: {
       </select>
     </label>
     {inputs.kind !== 'homogeneous' && <label className={styles.gradientIntensity}>
-      <span>{intensityLabel} <strong>{alphaText(inputs.alpha)}</strong></span>
+      <span>{intensityLabel} proposée <strong>{lakeAlpha(inputs.alpha)}</strong></span>
       <input type="range" min={0} max={lakeMaxAlpha} step={0.01} value={inputs.alpha}
-        aria-label={intensityLabel} aria-valuetext={alphaText(inputs.alpha)}
+        aria-label={intensityLabel} aria-valuetext={lakeAlpha(inputs.alpha)}
         onChange={event => change({ ...inputs, alpha: Number(event.currentTarget.value) })} />
+      <small>{applied && applied.kind !== 'homogeneous'
+        ? `Intensité simulée α = ${lakeAlpha(applied.alpha)}` : 'Aucun gradient simulé pour cette carte'}</small>
     </label>}
   </>;
 }
 
-function RunProgress({ progress, cancel }: { progress: Progress; cancel: () => void }) {
+function RunProgress({ progress, cancel, workshop }: { progress: Progress; cancel: () => void; workshop?: boolean }) {
   return <>
     {progress.count === undefined ? <span>Préparation du scénario…</span> : <label className={styles.progress}>
       <progress value={progress.done} max={progress.count} />
-      <span aria-live="polite">{progress.done} / {progress.count} lots natifs</span>
+      <span aria-live="polite">{workshop ? 'Simulation en cours' : `${progress.done} / ${progress.count} lots natifs`}</span>
     </label>}
     <button type="button" onClick={cancel}>Annuler le calcul</button>
   </>;
+}
+
+function LakeExport({ snapshot, resolution }: { snapshot?: LakeViewSnapshot; resolution: string }) {
+  const [format, setFormat] = useState<'svg' | 'png'>('svg');
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState('');
+
+  async function exportView() {
+    if (!snapshot || busy) return;
+    setFailure('');
+    setBusy(true);
+    try {
+      const svg = new Blob([lakeViewSvg(snapshot)], { type: 'image/svg+xml;charset=utf-8' });
+      const file = format === 'svg' ? svg : await lakeSvgToPng(svg);
+      const name = `lac-de-guiers-${resolution}-mois-${snapshot.time}${snapshot.maps.length === 2 ? '-comparaison' : ''}`;
+      downloadLakeFile(file, `${name}.${format}`);
+    } catch {
+      setFailure('Impossible d’exporter l’image. Réessayez au format SVG.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className={styles.lakeExport}>
+    <button type="button" disabled={!snapshot || busy} onClick={() => void exportView()}>
+      <Download size={15} aria-hidden="true" /> Exporter cette vue
+    </button>
+    <select aria-label="Format de l’image" value={format} disabled={busy}
+      onChange={event => setFormat(event.currentTarget.value === 'png' ? 'png' : 'svg')}>
+      <option value="svg">SVG</option><option value="png">PNG</option>
+    </select>
+    {failure && <span role="alert">{failure}</span>}
+  </div>;
 }

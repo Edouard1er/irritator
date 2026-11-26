@@ -74,7 +74,7 @@ export function LogisticSpatialExperiment({ active }: { active: boolean }) {
     <header className={styles.heading}>
       <div>
         <h1 id="logistic-spatial-heading">Expérience logistique spatiale</h1>
-        <p>Démonstration sur grille fictive — données biologiques synthétiques</p>
+        {mode !== 'lake' && <p>Démonstration sur grille fictive — données biologiques synthétiques</p>}
       </div>
       <label className={styles.dimensions}>
         Mode de l’expérience

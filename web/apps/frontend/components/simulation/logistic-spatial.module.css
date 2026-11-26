@@ -236,7 +236,8 @@
 .lakeCell { fill: #edf3f3; stroke: #477a74; stroke-width: 1px; cursor: pointer; }
 .lakeCell[aria-pressed="true"] { stroke: #143f43; stroke-width: 3px; }
 .lakeCell:hover, .lakeCell:focus-visible { stroke: #87480e; stroke-width: 3px; outline: none; }
-.lakeMarker { fill: none; stroke: #143f43; stroke-width: 2px; pointer-events: none; }
+.lakeMarker { fill: none; stroke-width: 2px; pointer-events: none; }
+.lakeMarker[data-selected] { stroke-width: 3px; }
 .lakeScale {
   display: flex;
   justify-content: space-between;
@@ -401,7 +402,87 @@
 }
 .compare label:has(input:checked) { background: #eaf5ef; border-color: #afcfc1; }
 .compare label:has(input:disabled) { cursor: default; }
-.panels[data-mode="lake"] .compare { max-height: 185px; overflow: auto; }
+.lakeMode, .lakeExport, .lakeSummary, .lakeChips, .lakeDemos > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lakeMode { justify-content: space-between; margin-bottom: 12px; }
+.lakeNotice { color: #654511; font-size: 13px; font-weight: 650; }
+.lakeMode button[aria-pressed="true"] { background: #17655e; border-color: #17655e; color: white; }
+.lakeExport button { display: inline-flex; align-items: center; gap: 5px; }
+.lakeExport select { min-height: 34px; font-size: 13px; }
+.lakeExport [role="alert"] { color: #842f39; font-size: 13px; }
+.lakeDemos {
+  padding: 13px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f5faf8;
+  margin-bottom: 14px;
+}
+.lakeDemos h2 { margin: 0 0 3px; font-size: 16px; }
+.lakeDemos p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.lakeDemos button { font-size: 13px; }
+.lakeExperience[data-workshop] .panels { grid-template-columns: minmax(0, 1fr); }
+.lakeExperience[data-workshop] .lakeSummary { align-items: stretch; gap: 7px 16px; margin-block: 8px; }
+.lakeExperience[data-workshop] .lakeMapTotal {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--muted);
+}
+.lakeExperience[data-workshop] .lakeMapTotal strong { color: var(--ink); font-size: clamp(15px, 2vw, 22px); }
+.lakeExperience[data-workshop] .lakeMapPane h3 { font-size: clamp(15px, 1.5vw, 19px); min-height: 0; }
+.lakeExperience[data-workshop] .lakeMaps .lakeGrid { height: clamp(310px, 44vw, 520px); }
+.lakeExperience[data-workshop] .fullscreenTarget:fullscreen:has(> .lakeMaps) {
+  display: flex;
+  flex-direction: column;
+  padding: clamp(12px, 2vw, 28px);
+}
+.lakeExperience[data-workshop] .fullscreenTarget:fullscreen > .lakeMaps { flex: 1 0 424px; }
+.lakeExperience[data-workshop] .fullscreenTarget:fullscreen > .lakeMaps :is(.lakeMapPane, .lakeFigure) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.lakeExperience[data-workshop] .fullscreenTarget:fullscreen > .lakeMaps .lakeFigure { flex: 1 1 auto; }
+.lakeExperience[data-workshop] .fullscreenTarget:fullscreen > .lakeMaps .lakeGrid {
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 240px;
+}
+.lakePicker {
+  min-width: 0;
+  margin: 10px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.lakePicker legend { padding-inline: 5px; font-size: 13px; font-weight: 650; }
+.lakeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid currentColor;
+  border-radius: 20px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.lakeSearch { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); }
+.lakeSearch input { width: min(100%, 245px); padding: 5px 8px; font-size: 13px; }
+.lakePicker .coverage { margin: 5px 0 0; }
+.lakeSearchResults { list-style: none; margin: 5px 0 0; padding: 0; width: fit-content; max-width: 100%; }
+.lakeSearchResults li {
+  display: grid;
+  grid-template-columns: minmax(60px, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  padding-block: 3px;
+  font-size: 13px;
+}
+.lakeSearchResults button { font-size: 12px; }
 
 @media (min-width: 1000px) {
   .lakeMaps[data-comparison] .lakeMapDetails .parameters { grid-template-columns: repeat(4, minmax(0, 1fr)); }

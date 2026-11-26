@@ -30,7 +30,7 @@ test('la comparaison anime deux cartes de 296 cellules avec les mêmes mois, val
   await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('48x24');
   await distribution.selectOption('wet-gradient');
   await panel.getByRole('slider', { name: 'Intensité du gradient α' }).fill('0.6');
-  await panel.getByRole('button', { name: 'Lancer la simulation', exact: true }).click();
+  await panel.getByRole('button', { name: 'Appliquer et simuler', exact: true }).click();
   await expect(panel.getByText('Terminé', { exact: true })).toBeVisible({ timeout: 60000 });
   const weighted = await observations(0);
   expect(weighted).toHaveLength(296);
@@ -46,8 +46,10 @@ test('la comparaison anime deux cartes de 296 cellules avec les mêmes mois, val
   const secondary = panel.getByRole('combobox', { name: 'Distribution à comparer' });
   await secondary.selectOption('homogeneous');
   await expect(right.getByRole('button')).toHaveCount(296);
-  await expect(right.locator('[data-biomass]')).toHaveCount(0);
-  const compareRun = panel.getByRole('button', { name: 'Lancer le scénario comparé' });
+  await expect(right.locator('[data-biomass]')).toHaveCount(296);
+  await expect(right.locator('[data-biomass]').first()).toHaveAttribute('data-biomass', String(weighted[0]!.samples[0]!.value));
+  expect(responses).toHaveLength(17);
+  const compareRun = panel.getByRole('button', { name: 'Appliquer et simuler le scénario comparé' });
   await compareRun.click();
   await expect(panel.getByText('Observations disponibles · Distribution homogène')).toBeVisible({ timeout: 60000 });
   const homogeneous = await observations(17);
@@ -55,8 +57,10 @@ test('la comparaison anime deux cartes de 296 cellules avec les mêmes mois, val
   expect(responses).toHaveLength(34);
 
   await distribution.selectOption('homogeneous');
+  await panel.getByRole('button', { name: 'Appliquer et simuler', exact: true }).click();
   await expect(panel.getByText('Terminé', { exact: true })).toBeVisible();
   await secondary.selectOption('wet-gradient');
+  await compareRun.click();
   await expect(panel.getByText(/Observations disponibles · Gradient pondéré/)).toBeVisible();
   await expect(compareRun).toHaveCount(0);
 

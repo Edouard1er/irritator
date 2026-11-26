@@ -2,12 +2,11 @@
 import { memo, useId, useLayoutEffect, useMemo, useRef, type PointerEvent } from 'react';
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import type { LakeMesh } from '@/lib/simulation/spatial-experiment';
-import { lakeMapColor, lakeMapValue, lakeReading, type LakeCell, type LakeDataset, type LakeDisplay } from '@/lib/simulation/lake-exploration';
+import { initialLakeView, lakeFraming, lakeMapColor, lakeMapReading, lakeOutline,
+  type LakeCell, type LakeDataset, type LakeDisplay, type LakeView } from '@/lib/simulation/lake-exploration';
 import styles from './logistic-spatial.module.css';
 
 const tonnes = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
-export const initialLakeView = { zoom: 1, dx: 0, dy: 0 };
-type LakeView = typeof initialLakeView;
 const arrowDirections: Record<string, readonly [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
 };
@@ -38,7 +37,7 @@ function numericAttribute(element: SVGRectElement, attribute: string, value?: nu
 }
 
 export const LogisticLakeGrid = memo(function LogisticLakeGrid({
-  mesh, cells, dataset, reference, display, limits, tick, time, selected, select, inspect, view, setView, label,
+  mesh, cells, dataset, reference, display, limits, tick, time, selected, select, inspect, view, setView, label, highlights,
 }: {
   mesh: LakeMesh;
   cells: readonly LakeCell[];
@@ -54,17 +53,18 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
   view: LakeView;
   setView: React.Dispatch<React.SetStateAction<LakeView>>;
   label: string;
+  highlights: ReadonlyMap<string, string>;
 }) {
   const clip = useId();
   const regions = useRef<SVGGElement>(null);
-  const outline = useMemo(() => mesh.rings.map(ring =>
-    'M' + ring.map(point => point.join(',')).join('L') + 'Z').join(''), [mesh]);
+  const outline = useMemo(() => lakeOutline(mesh), [mesh]);
   const gesture = useRef<{ pointer: number; x: number; y: number; scale: number; view: typeof view; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
   const width = mesh.width + 0.04;
   const height = mesh.height + 0.04;
   const zoomIndex = zoomLevels.indexOf(view.zoom);
-  const selectedCell = cells.find(cell => cell.id === selected);
+  const markedCells = useMemo(() => cells.filter(cell => highlights.has(cell.id)), [cells, highlights]);
+  const { viewBox, markerRadius } = lakeFraming(mesh, view);
 
   useLayoutEffect(() => {
     if (!regions.current) return;
@@ -73,9 +73,7 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
     for (const node of nodes) {
       const region = node as SVGRectElement;
       const id = region.dataset.cell!;
-      const reading = lakeReading(dataset, id, tick);
-      const baseline = display === 'difference' ? (dataset === reference ? reading : lakeReading(reference, id, tick)) : undefined;
-      const value = lakeMapValue(display, reading, baseline);
+      const { reading, value } = lakeMapReading(dataset, reference, id, tick, display);
       numericAttribute(region, 'data-biomass', reading?.value);
       numericAttribute(region, 'data-observed-time', reading?.time);
       numericAttribute(region, 'data-biomass-ratio', reading?.ratio);
@@ -139,7 +137,7 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
     </div>
     <svg className={styles.lakeGrid} role="group" aria-label={label}
       tabIndex={0} aria-description="Après avoir zoomé, déplacez la carte par glisser ou avec les flèches."
-      viewBox={`${(mesh.width - width / view.zoom) / 2 + view.dx} ${(mesh.height - height / view.zoom) / 2 + view.dy} ${width / view.zoom} ${height / view.zoom}`}
+      viewBox={viewBox}
       data-rows={mesh.rows} data-columns={mesh.columns} data-time={time} data-zoom={view.zoom}
       onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
       onPointerLeave={event => {
@@ -165,9 +163,10 @@ export const LogisticLakeGrid = memo(function LogisticLakeGrid({
       <g ref={regions} clipPath={`url(#${clip})`}>
         <LakeRegions cells={cells} selected={selected} select={select} inspect={inspect} />
       </g>
-      {selectedCell && <circle className={styles.lakeMarker} aria-hidden="true"
-        cx={selectedCell.wetCentroid[0]} cy={selectedCell.wetCentroid[1]}
-        r={width / view.zoom * 0.014} vectorEffect="non-scaling-stroke" />}
+      {markedCells.map(cell => <circle key={cell.id} className={styles.lakeMarker} aria-hidden="true"
+        data-map-selection={cell.id} data-selected={cell.id === selected || undefined}
+        cx={cell.wetCentroid[0]} cy={cell.wetCentroid[1]}
+        r={markerRadius * (cell.id === selected ? 1 : 0.7)} stroke={highlights.get(cell.id)} vectorEffect="non-scaling-stroke" />)}
       <path className={styles.lakeOutline} d={outline} fill="none" vectorEffect="non-scaling-stroke" aria-hidden="true" />
     </svg>
     <figcaption>Lac de Guiers · Contour HydroLAKES · Grille {mesh.rows} × {mesh.columns}</figcaption>

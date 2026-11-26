@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { catalog, type RunRequest, type RunResult } from '@contracts';
 import { LogisticSpatialExperiment } from '@/components/simulation/logistic-spatial-experiment';
@@ -137,24 +137,27 @@ it('prépare le gradient côté serveur, annule le lot en cours et compare uniqu
   const { container } = render(<LogisticSpatialExperiment active />);
   fireEvent.change(screen.getByRole('combobox', { name: 'Mode de l’expérience' }), { target: { value: 'lake' } });
   const distribution = await screen.findByRole('combobox', { name: 'Distribution biologique' });
-  const launch = screen.getByRole('button', { name: 'Lancer la simulation' });
   expect(distribution).toHaveValue('homogeneous');
-  fireEvent.click(launch);
+  fireEvent.click(screen.getByRole('button', { name: 'Lancer la simulation' }));
   await screen.findByText('Terminé');
 
   fireEvent.change(distribution, { target: { value: 'gradient' } });
   const intensity = screen.getByRole('slider', { name: 'Intensité du gradient α' });
+  const launch = screen.getByRole('button', { name: /^Appliquer et simuler$/ });
   expect(screen.getByText('Gradient biologique synthétique — non calibré')).toBeVisible();
   expect(intensity).toHaveAttribute('max', '0.6');
   await waitFor(() => expect(launch).toBeEnabled());
   expect(runs).toHaveLength(1);
+  expect(plans).toHaveLength(1);
   fireEvent.click(launch);
   await waitFor(() => expect(releaseOld).toBeDefined());
   fireEvent.change(intensity, { target: { value: '0.6' } });
-  expect(oldSignal?.aborted).toBe(true);
+  expect(oldSignal?.aborted).toBe(false);
+  expect(plans).toHaveLength(2);
   await waitFor(() => expect(launch).toBeEnabled());
   expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(3);
   fireEvent.click(launch);
+  expect(oldSignal?.aborted).toBe(true);
   await screen.findByText('Terminé');
   await act(async () => releaseOld!());
   expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(6);
@@ -177,8 +180,9 @@ it('prépare le gradient côté serveur, annule le lot en cours et compare uniqu
 
   fireEvent.change(screen.getByRole('slider', { name: 'Intensité du gradient α' }), { target: { value: '0.3' } });
   await waitFor(() => expect(launch).toBeEnabled());
-  expect(wetComparison).toHaveTextContent('α = 0,3');
-  expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(3);
+  expect(wetComparison).toHaveTextContent('α = 0,6');
+  expect(screen.getByText('Intensité simulée α = 0,6')).toBeVisible();
+  expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(9);
   fireEvent.change(screen.getByRole('combobox', { name: 'Résolution du lac' }), { target: { value: '12x6' } });
   await waitFor(() => expect(launch).toBeEnabled());
   expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(0);
@@ -241,4 +245,55 @@ it('lit aux trois vitesses, recule, boucle et reste en pause après avoir quitt�
   } finally {
     vi.useRealTimers();
   }
+});
+
+it('réutilise les scènes présentées et limite la sélection compacte à trois trajectoires supplémentaires', async () => {
+  const requests: RunRequest[] = [];
+  const fetcher = vi.fn<typeof fetch>(async (url, options) => {
+    if (String(url).startsWith('/api/logistic-lake?')) return lakePlan(new Request(new URL(String(url), 'http://localhost')));
+    const request: RunRequest = JSON.parse(String(options?.body));
+    requests.push(request);
+    return Response.json(completedBatch(request));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const { container } = render(<LogisticSpatialExperiment active />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Mode de l’expérience' }), { target: { value: 'lake' } });
+  const workshop = await screen.findByRole('button', { name: 'Mode atelier' });
+  const beforeWorkshop = fetcher.mock.calls.length;
+  fireEvent.click(workshop);
+  expect(fetcher).toHaveBeenCalledTimes(beforeWorkshop);
+  expect(screen.queryByRole('table', { name: /Biomasses totales simulées/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Comparer homogène / gradient' }));
+  await screen.findByText(/Simulation disponible · Gradient nord-sud · α = 0,3/);
+  expect(requests).toHaveLength(8);
+  expect(screen.getByRole('combobox', { name: 'Résolution du lac' })).toHaveValue('18x9');
+  const grids = screen.getAllByRole('group', { name: /Grille humide du lac de Guiers/ });
+  const picker = screen.getByRole('group', { name: 'Comparer les trajectoires' });
+  const search = within(picker).getByRole('searchbox');
+  const selectable = [...grids[0]!.querySelectorAll('[data-cell][aria-pressed="false"]')].slice(0, 4)
+    .map(element => element.getAttribute('data-cell')!);
+  const beforeReading = fetcher.mock.calls.length;
+  for (const id of selectable.slice(0, 3)) {
+    fireEvent.change(search, { target: { value: id.toLowerCase() } });
+    fireEvent.click(within(picker).getByRole('button', { name: `Comparer ${id}` }));
+    expect(within(picker).getByRole('button', { name: `Retirer ${id} de la comparaison` })).toBeVisible();
+    expect(container.querySelectorAll(`[data-map-selection="${id}"]`)).toHaveLength(2);
+    expect(container.querySelector(`[data-lake-mark="${id}"]`)).toBeInTheDocument();
+  }
+  const [first, , , fourth] = selectable as [string, string, string, string];
+  fireEvent.change(search, { target: { value: fourth } });
+  expect(within(picker).getByRole('button', { name: `Comparer ${fourth}` })).toBeDisabled();
+  fireEvent.click(within(picker).getByRole('button', { name: `Retirer ${first} de la comparaison` }));
+  expect(within(picker).getByRole('button', { name: `Comparer ${fourth}` })).toBeEnabled();
+  fireEvent.click(within(grids[1]!).getByRole('button', { name: fourth }));
+  expect(within(grids[0]!).getByRole('button', { name: fourth })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.change(screen.getByRole('slider', { name: 'Temps simulé' }), { target: { value: 10 } });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Affichage de la carte' }), { target: { value: 'density' } });
+  fireEvent.click(within(grids[0]!.parentElement!).getByRole('button', { name: 'Zoom avant' }));
+  fireEvent.click(workshop);
+  expect(screen.getByRole('table', { name: /Biomasses totales simulées/ })).toBeVisible();
+  expect(screen.getByText('Fraction humide')).toBeVisible();
+  expect(grids[1]).toHaveAttribute('data-time', '10');
+  expect(grids[1]).toHaveAttribute('data-zoom', '1.5');
+  expect(fetcher).toHaveBeenCalledTimes(beforeReading);
 });

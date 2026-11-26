@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { SpatialTotal } from '@/lib/simulation/spatial-experiment';
-import { lakeMonth, lakeNumber } from './logistic-lake-readings';
+import { lakeMonth, lakeNumber } from '@/lib/simulation/lake-exploration';
 import styles from './logistic-spatial.module.css';
 
 export type LakeCurve = {

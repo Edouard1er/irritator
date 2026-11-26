@@ -530,7 +530,8 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
   const renderedIds = await grid.getByRole('button').evaluateAll(elements => elements.map(element => element.getAttribute('data-cell')));
   expect(renderedIds).toEqual(ids);
   expect(request.model.components).toHaveLength(91);
-  await panel.getByRole('checkbox', { name: 'Comparer C20', exact: true }).check();
+  await panel.getByRole('searchbox', { name: 'Rechercher une cellule par identifiant' }).fill('C20');
+  await panel.getByRole('button', { name: 'Comparer C20', exact: true }).click();
   const fills = [];
   const frames = process.env.IRRITATOR_LAKE_BROWSER_EVIDENCE;
   if (frames) await mkdir(frames, { recursive: true });
@@ -728,7 +729,7 @@ test('le gradient nord-sud relance les six maillages et compare les observations
   const distribution = panel.getByRole('combobox', { name: 'Distribution biologique' });
   const intensity = panel.getByRole('slider', { name: 'Intensité du gradient α' });
   const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
-  const launch = panel.getByRole('button', { name: 'Lancer la simulation', exact: true });
+  const launch = panel.getByRole('button', { name: /^(Lancer la simulation|Appliquer et simuler)$/ });
   const months = [0, 10, 20];
   const responses: Response[] = [];
   page.on('response', response => {
@@ -805,6 +806,7 @@ test('le gradient nord-sud relance les six maillages et compare les observations
     expect(responses).toHaveLength(previousRequests);
     const gradient = await run(batchCount, `${prefix}-g0p6`);
     expect(gradient.observations).toHaveLength(wetCells);
+    await slider(panel).fill('0');
     const initialRatios = await grid.getByRole('button').evaluateAll(cells => cells.map(cell => ({
       ratio: Number(cell.getAttribute('data-biomass-ratio')),
       fill: getComputedStyle(cell).fill,
@@ -857,13 +859,14 @@ test('le gradient pondéré compare les trois distributions et conserve la lectu
   const intensity = panel.getByRole('slider', { name: 'Intensité du gradient α' });
   const grid = panel.getByRole('group', { name: 'Grille humide du lac de Guiers' });
   const comparison = panel.getByRole('table', { name: /Biomasses totales simulées/ });
+  const apply = panel.getByRole('button', { name: 'Appliquer et simuler', exact: true });
   const homogeneous = await executeRequest(page, panel);
   await distribution.selectOption('gradient');
   await intensity.fill('0.6');
-  const row = await executeRequest(page, panel);
+  const row = await executeRequest(page, panel, apply);
   await distribution.selectOption({ label: 'Gradient pondéré par surface humide' });
   await expect(intensity).toHaveValue('0.6');
-  const weighted = await executeRequest(page, panel);
+  const weighted = await executeRequest(page, panel, apply);
   expect(weighted.request.model.id).toBe('logistic-lake-6x3-proportional-wg0p6-1');
   expect(weighted.result.observations).toHaveLength(13);
   expect(weighted.result.observations.every(series => series.samples.length === 201)).toBe(true);
@@ -904,7 +907,7 @@ test('le gradient pondéré compare les trois distributions et conserve la lectu
   });
 
   await intensity.fill('0');
-  const zero = await executeRequest(page, panel);
+  const zero = await executeRequest(page, panel, apply);
   expect(zero).toEqual(homogeneous);
   await panel.getByRole('combobox', { name: 'Résolution du lac' }).selectOption('12x6');
   await expect(comparison).toHaveAccessibleName(/12 × 6/);
