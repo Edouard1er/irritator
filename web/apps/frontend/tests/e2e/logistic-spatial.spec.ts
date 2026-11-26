@@ -4,29 +4,13 @@ import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { RunRequest, RunResult } from '@contracts';
+import { chart, isSimulation, openExperiment, slider } from './logistic-workshop';
 
-const experiment = 'Expérience logistique spatiale';
 const fixture: RunRequest = JSON.parse(readFileSync(new URL('../../../../examples/logistic-nine-cells-v1.json', import.meta.url), 'utf8'));
 const evidence = process.env.IRRITATOR_LOGISTIC_BROWSER_EVIDENCE;
 const refinementEvidence = process.env.IRRITATOR_LAKE_REFINEMENT_EVIDENCE;
 const heterogeneityEvidence = process.env.IRRITATOR_LAKE_GRADIENT_EVIDENCE;
 const formatBiomass = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 5 });
-const isSimulation = (request: { method(): string; url(): string }) =>
-  request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/simulations/run';
-
-async function openExperiment(page: Page) {
-  await page.goto('/');
-  const levelOne = page.getByRole('button', { name: 'Niveau 1 — Atelier actuel', exact: true });
-  await expect(levelOne).toBeVisible();
-  // Stage the editors' startup handshakes on the shared native process pool.
-  await expect(page.getByRole('button', { name: 'Moteur connecté' })).toBeVisible();
-  await page.getByRole('button', { name: 'Niveau 2 — Lac de Guiers', exact: true }).click();
-  await expect(page.locator('#level-two .engine-status')).toHaveText('Moteur connecté');
-  await page.getByRole('button', { name: experiment, exact: true }).click();
-  const panel = page.getByRole('region', { name: experiment, exact: true });
-  await expect(panel).toBeVisible();
-  return panel;
-}
 
 async function executeRequest(page: Page, panel: Locator, trigger = panel.getByRole('button', { name: 'Lancer la simulation', exact: true })) {
   const pending = page.waitForResponse(response => isSimulation(response.request()));
@@ -60,8 +44,6 @@ function compareNative(result: RunResult, request = fixture) {
   expect(result).toEqual(JSON.parse(native.stdout));
 }
 
-const slider = (panel: Locator) => panel.getByRole('slider', { name: 'Temps simulé', exact: true });
-const chart = (panel: Locator) => panel.getByLabel('Trajectoires logistiques', { exact: true });
 const cell = (panel: Locator, id: string) => panel.getByRole('button', { name: id, exact: true });
 
 function expectedAt(result: RunResult, id: string, month: number) {
@@ -72,7 +54,7 @@ function expectedAt(result: RunResult, id: string, month: number) {
   return samples[0]!;
 }
 
-async function expectPlottedSeries(panel: Locator, result: RunResult, ids: string[], month: number) {
+async function expectPlottedSeries(panel: Locator, result: RunResult, ids: string[], month: number, lake = false) {
   const expected = ids.map(id => {
     const { samples } = result.observations.find(({ component }) => component === `${id}-N`)!;
     const points = samples.length === 1 ? [...samples, { time: result.simulation.end, value: samples[0]!.value }] : samples;
@@ -81,7 +63,18 @@ async function expectPlottedSeries(panel: Locator, result: RunResult, ids: strin
       value: expectedAt(result, id, month).value,
     };
   });
-  await expect(chart(panel)).toHaveAttribute('data-series', ids.join(','));
+  await expect(chart(panel)).toHaveAttribute('data-series', [...ids, ...(lake ? ['Biomasse totale'] : [])].join(','));
+  if (lake) {
+    const plot = chart(panel);
+    await expect(plot.locator('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', String(month));
+    await expect(plot.locator('[data-lake-curve]')).toHaveCount(ids.length + 1);
+    for (const { id, x, y, value } of expected) {
+      await expect(plot.locator(`[data-lake-curve="${id}"] polyline`))
+        .toHaveAttribute('points', x.map((time, index) => `${time},${y[index]}`).join(' '));
+      await expect(plot.locator(`[data-lake-mark="${id}"]`)).toHaveAttribute('data-biomass', String(value));
+    }
+    return;
+  }
   const plot = chart(panel).locator('.js-plotly-plot');
   await expect(plot).toBeVisible();
   await expect.poll(() => plot.evaluate((element, { traces, time }) => {
@@ -551,7 +544,7 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
       await expect(cell(panel, id)).toHaveAttribute('data-biomass', String(point.value));
     }
     await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(sum));
-    await expectPlottedSeries(panel, result, ['C11', 'C20'], time);
+    await expectPlottedSeries(panel, result, ['C11', 'C20'], time, true);
     fills.push(await cell(panel, 'C11').evaluate(element => getComputedStyle(element).fill));
     if (frames) await panel.screenshot({ path: path.join(frames, `grille-t${time}.png`), animations: 'disabled' });
   }
@@ -567,7 +560,7 @@ test('la silhouette découpe les cellules et rejoue les trajectoires du runner',
   await mode.selectOption('lake');
   await expect(grid).toHaveAttribute('data-time', '20');
   await expect(cell(panel, 'C11')).toHaveAttribute('aria-pressed', 'true');
-  await expectPlottedSeries(panel, result, ['C11', 'C20'], 20);
+  await expectPlottedSeries(panel, result, ['C11', 'C20'], 20, true);
 });
 
 test('le contour peut être rechargé après une erreur sans affecter les autres modes', async ({ page }) => {
@@ -639,8 +632,8 @@ test('les six résolutions utilisent leurs lots natifs et publient la trace comp
     expect(await grid.getByRole('button').evaluateAll(elements => elements.map(element => element.getAttribute('data-cell')))).toEqual(observedIds);
     await slider(panel).fill('10');
     await expect(panel.locator('[data-total-biomass]')).toHaveAttribute('data-total-biomass', String(total));
-    await expect.poll(() => chart(panel).locator('.js-plotly-plot').evaluate(element =>
-      (element as HTMLElement & { data?: { x: number[] }[] }).data?.[0]?.x.length)).toBe(201);
+    await expect.poll(async () => (await chart(panel).locator('[data-lake-curve] polyline').first()
+      .getAttribute('points'))?.split(' ').length).toBe(201);
     if (refinementEvidence) await panel.screenshot({ path: path.join(refinementEvidence, `grille-${size}.png`), animations: 'disabled' });
   }
 
@@ -714,10 +707,9 @@ test('les pleins écrans partagent instant, sélection et cadrage avec la grille
     await expect.poll(() => page.evaluate(() => document.fullscreenElement?.textContent)).toContain(text);
     if (name === 'Trajectoires') {
       await expect(chart(panel)).toHaveAttribute('data-time', '12');
-      await expect(chart(panel)).toHaveAttribute('data-series', cellId);
-      const plot = chart(panel).locator('.js-plotly-plot');
-      await expect.poll(() => plot.evaluate(element =>
-        (element as HTMLElement & { _fullLayout?: { height: number } })._fullLayout?.height ?? 0)).toBeGreaterThan(500);
+      await expect(chart(panel)).toHaveAttribute('data-series', `${cellId},Biomasse totale`);
+      const plot = chart(panel).locator('svg');
+      await expect.poll(() => plot.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(500);
       if (refinementEvidence) await page.screenshot({ path: path.join(refinementEvidence, 'plein-ecran-trajectoires.png'), animations: 'disabled' });
     }
     await exit(name);
@@ -784,9 +776,7 @@ test('le gradient nord-sud relance les six maillages et compare les observations
       await expect(chart(panel)).toHaveAttribute('data-time', String(instant));
       if (capture && heterogeneityEvidence) {
         await expect(panel.getByLabel('Rapport biomasse sur capacité')).toBeInViewport();
-        await expect.poll(() => chart(panel).locator('.js-plotly-plot').evaluate((element, time) =>
-          (element as HTMLElement & { layout?: { shapes?: { x0: number }[] } }).layout?.shapes?.[0]?.x0 === time,
-        instant)).toBe(true);
+        await expect(chart(panel).locator('[data-lake-cursor]')).toHaveAttribute('data-lake-cursor', String(instant));
         await panel.screenshot({
           path: path.join(heterogeneityEvidence, `${size}-${kind}-t${instant}.png`), animations: 'disabled',
         });

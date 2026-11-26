@@ -183,3 +183,62 @@ it('prépare le gradient côté serveur, annule le lot en cours et compare uniqu
   await waitFor(() => expect(launch).toBeEnabled());
   expect(container.querySelectorAll('[data-comparison-biomass]')).toHaveLength(0);
 });
+
+it('lit aux trois vitesses, recule, boucle et reste en pause après avoir quitté le mode', async () => {
+  vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url, options) => {
+    if (String(url).startsWith('/api/logistic-lake?')) return lakePlan(new Request(new URL(String(url), 'http://localhost')));
+    return Response.json(completedBatch(JSON.parse(String(options?.body))));
+  }));
+  const { rerender } = render(<LogisticSpatialExperiment active />);
+  const mode = screen.getByRole('combobox', { name: 'Mode de l’expérience' });
+  fireEvent.change(mode, { target: { value: 'lake' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Lancer la simulation' }));
+  await screen.findByText('Terminé');
+  const position = screen.getByRole('slider', { name: 'Temps simulé' });
+  const speed = screen.getByRole('combobox', { name: 'Vitesse' });
+  const tick = () => Math.round(Number((position as HTMLInputElement).value) * 10);
+  vi.useFakeTimers();
+  const elapsed = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+  try {
+    for (const rate of [1, 2, 4]) {
+      fireEvent.click(screen.getByRole('button', { name: 'Remettre au début' }));
+      fireEvent.change(speed, { target: { value: String(rate) } });
+      fireEvent.click(screen.getByRole('button', { name: 'Lire' }));
+      elapsed(180);
+      expect(tick()).toBe(rate * 2);
+      fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+      elapsed(180);
+      expect(tick()).toBe(rate * 2);
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Observation précédente' }));
+    expect(tick()).toBe(7);
+    fireEvent.click(screen.getByRole('button', { name: 'Observation suivante' }));
+    expect(tick()).toBe(8);
+    fireEvent.change(position, { target: { value: 19.9 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reprendre' }));
+    elapsed(100);
+    expect(tick()).toBe(200);
+    expect(screen.getByRole('button', { name: 'Lire' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'En boucle' }));
+    fireEvent.change(position, { target: { value: 19.9 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reprendre' }));
+    elapsed(23);
+    expect(tick()).toBe(200);
+    elapsed(23);
+    expect(tick()).toBe(0);
+    elapsed(23);
+    expect(tick()).toBe(1);
+    fireEvent.change(mode, { target: { value: 'constant' } });
+    elapsed(180);
+    fireEvent.change(mode, { target: { value: 'lake' } });
+    expect(screen.getByRole('slider', { name: 'Temps simulé' })).toHaveValue('0.1');
+    fireEvent.click(screen.getByRole('button', { name: 'Reprendre' }));
+    rerender(<LogisticSpatialExperiment active={false} />);
+    elapsed(180);
+    rerender(<LogisticSpatialExperiment active />);
+    expect(screen.getByRole('slider', { name: 'Temps simulé' })).toHaveValue('0.1');
+    expect(screen.getByRole('button', { name: 'Reprendre' })).toBeEnabled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
