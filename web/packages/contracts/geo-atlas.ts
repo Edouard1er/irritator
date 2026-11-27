@@ -44,14 +44,20 @@ export function pointInRing(p: Position, ring: Position[]): boolean {
   return inside;
 }
 const ringsIntersect = (a: Position[], b: Position[]) => a.slice(1).some((p,i) => b.slice(1).some((q,j) => intersects(a[i]!,p,b[j]!,q)));
-function polygon(v: unknown, budget: { vertices: number }): asserts v is Position[][] {
+function polygon(v: unknown, budget: { vertices: number }, allowAdjacentRepeats: boolean): Position[][] {
   if (!Array.isArray(v) || !v.length || v.length > 32) fail('Polygone vide ou trop complexe.');
   const rings = v as unknown[];
+  const poly: Position[][] = [];
   for (const r of rings) {
     if (!Array.isArray(r) || r.length < 4 || r.length > 2048) fail('Anneau : 4 à 2048 sommets requis.');
-    const ring = r as Position[]; ring.forEach(point); budget.vertices += ring.length;
+    const rawRing = r as Position[]; rawRing.forEach(point); budget.vertices += rawRing.length;
     if (budget.vertices > 20000) fail('Atlas trop complexe (20000 sommets maximum).');
-    if (String(ring[0]) !== String(ring.at(-1))) fail('Anneau non fermé. Fermez le secteur.');
+    if (String(rawRing[0]) !== String(rawRing.at(-1))) fail('Anneau non fermé. Fermez le secteur.');
+    // SHP sources may contain zero-length steps. Keep the source coordinates and
+    // ignore only adjacent repetitions when checking the topology of an overlay.
+    const ring = allowAdjacentRepeats ? rawRing.filter((p, i) => i === 0 || String(p) !== String(rawRing[i-1])) : rawRing;
+    if (ring.length < 4) fail('Anneau dégénéré, sans surface.');
+    poly.push(ring);
     const unique = ring.slice(0,-1);
     if (new Set(unique.map(p => p.join(','))).size !== unique.length) fail('Sommet répété.');
     // Translate near the origin to avoid cancellation on small workshop sectors.
@@ -62,11 +68,25 @@ function polygon(v: unknown, budget: { vertices: number }): asserts v is Positio
       for (let j=i+2;j<ring.length-1;j++) if (!(i===0 && j===ring.length-2) && intersects(ring[i]!,ring[i+1]!,ring[j]!,ring[j+1]!)) fail('Secteur auto-croisé.');
     }
   }
-  const poly=v as Position[][];
   for (let i=1;i<poly.length;i++) {
     if (!pointInRing(poly[i]![0]!,poly[0]!) || ringsIntersect(poly[0]!,poly[i]!)) fail('Trou hors du contour ou touchant le contour.');
     for (let j=1;j<i;j++) if (ringsIntersect(poly[i]!,poly[j]!) || pointInRing(poly[i]![0]!,poly[j]!) || pointInRing(poly[j]![0]!,poly[i]!)) fail('Trous superposés.');
   }
+  return poly;
+}
+/** Shared bounded geometry checks for the atlas and local cartographic overlays. */
+export function validateAtlasGeometry(input: unknown, budget = { vertices: 0 }, allowAdjacentRepeats = false): asserts input is GeoGeometry {
+  const g=object(input,['type','coordinates']);
+  if (g.type==='Point') point(g.coordinates);
+  else if (g.type==='Polygon') polygon(g.coordinates,budget,allowAdjacentRepeats);
+  else if (g.type==='MultiPolygon' && Array.isArray(g.coordinates) && g.coordinates.length && g.coordinates.length<=32) {
+    const polys=g.coordinates.map(poly => polygon(poly,budget,allowAdjacentRepeats));
+    for (let i=0;i<polys.length;i++) for (let j=0;j<i;j++) {
+      const x=polys[i]!,y=polys[j]!;
+      const inPoly=(p:Position,poly:Position[][])=>pointInRing(p,poly[0]!)&&!poly.slice(1).some(r=>pointInRing(p,r));
+      if (x.some(r=>y.some(s=>ringsIntersect(r,s))) || inPoly(x[0]![0]!,y) || inPoly(y[0]![0]!,x)) fail('Parties du multipolygone superposées ou jointives.');
+    }
+  } else fail('Géométrie non prise en charge.');
 }
 export function validateGeoAtlas(input: unknown): asserts input is GeoAtlasV1 {
   const a=object(input,['kind','version','id','revision','createdAt','updatedAt','crs','sources','features']);
@@ -103,18 +123,8 @@ export function validateGeoAtlas(input: unknown): asserts input is GeoAtlasV1 {
     if (source.classification==='workshop-declaration' && !['fishing-point','fishing-area','reference-place'].includes(p.kind as string)) fail('Une déclaration ne certifie pas un contour.');
     if (f.geometry===null) { if (p.kind==='water-outline' || p.kind==='fishing-area') fail('Contour polygonal requis.'); }
     else {
-      const g=object(f.geometry,['type','coordinates']);
-      if (g.type==='Point') point(g.coordinates);
-      else if (g.type==='Polygon') polygon(g.coordinates,budget);
-      else if (g.type==='MultiPolygon' && Array.isArray(g.coordinates) && g.coordinates.length && g.coordinates.length<=32) {
-        g.coordinates.forEach(poly => polygon(poly,budget));
-        const polys=g.coordinates as Position[][][];
-        for (let i=0;i<polys.length;i++) for (let j=0;j<i;j++) {
-          const x=polys[i]!,y=polys[j]!;
-          const inPoly=(p:Position,poly:Position[][])=>pointInRing(p,poly[0]!)&&!poly.slice(1).some(r=>pointInRing(p,r));
-          if (x.some(r=>y.some(s=>ringsIntersect(r,s))) || inPoly(x[0]![0]!,y) || inPoly(y[0]![0]!,x)) fail('Parties du multipolygone superposées ou jointives.');
-        }
-      } else fail('Géométrie non prise en charge.');
+      const g=f.geometry;
+      validateAtlasGeometry(g,budget);
       if (['water-outline','fishing-area'].includes(p.kind as string) && g.type==='Point' || p.kind==='fishing-point' && g.type!=='Point') fail('Nature du lieu et géométrie incompatibles.');
     }
     if (p.kind==='water-outline' && !['verified-dataset','fictional-demo'].includes(source.classification)) fail('Contour sans jeu vectoriel vérifié.');

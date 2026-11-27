@@ -5,7 +5,13 @@ CMakeSettings.json
 build
 compile_commands.json
 /demos
-/docs
+/docs/*
+!/docs/SIG_HYBRIDE_GUIERS_IMPLEMENTATION.md
+!/docs/SIG_HYBRIDE_GUIERS_V2.md
+!/docs/MATRICE_CAPITALISATION_VIABFISHSNG.md
+!/docs/PLAN_EXPERIMENTAL.md
+/local-sig-guiers/
+/scripts/guiers/__pycache__/
 /out
 /reports/*
 !/reports/logistic-pilot/

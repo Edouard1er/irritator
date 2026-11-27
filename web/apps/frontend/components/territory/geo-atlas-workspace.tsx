@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, type ChangeEvent } from 'react';
+import { lazy, Suspense, useRef, useState, type ChangeEvent } from 'react';
 import { activeGeoFeatures, geometryPoints, type GeoAtlasFeature, type GeoAtlasV1, type Position } from '../../../../packages/contracts/geo-atlas';
 import { applyTerritorialZone, validateRequest, type RunRequest, type TerritoryGeography } from '@contracts';
 import { exportGeoAtlas, maxAtlasBytes, parseGeoAtlas } from '@/lib/serialization/geo-atlas';
@@ -11,6 +11,7 @@ import { GeoAtlasMap, type DrawMode } from './geo-atlas-map';
 import { privateAtlasWorkspace, visibleFeaturesForContext } from '@/lib/workshop/atlas-visibility';
 
 export const geoSupportVersion='geo-discussion-2.3.B-v1';
+const GuiersSpatialWorkspace = lazy(() => import('./guiers-spatial-workspace'));
 export function geoEvidence(f:GeoAtlasFeature) {return { 'reference-outline':'Contour de référence, pas une limite de pêche','declared-unverified':'Déclaré par un participant — non vérifié','planned-unlocated':'Projet cité par le CLPA — emplacement non vérifié','illustrative-only':'Carte fictive' }[f.properties.evidence];}
 export function GeoAtlasWorkspace({controller:c,scientific,request,onApply,busy}: {controller:AtlasController;scientific:boolean;request:RunRequest;onApply:(r:RunRequest)=>void;busy:boolean}) {
   const [selected,setSelected]=useState<string>(),[mode,setMode]=useState<DrawMode>('browse'),[vertices,setVertices]=useState<Position[]>([]),[closed,setClosed]=useState(false);
@@ -18,6 +19,7 @@ export function GeoAtlasWorkspace({controller:c,scientific,request,onApply,busy}
   const [access,setAccess]=useState(''),[rationale,setRationale]=useState(''),[hypothesis,setHypothesis]=useState(false),[prepared,setPrepared]=useState<TerritoryGeography>();
   const list=useRef<HTMLHeadingElement>(null),input=useRef<HTMLInputElement>(null);
   const [draftEpoch,setDraftEpoch]=useState(-1);
+  const [spatialOpen,setSpatialOpen]=useState(false);
   const context={audience:scientific?'scientific' as const:'fisher' as const,projection:c.projection,privateWorkspaceOptIn:c.privateView};
   const privateWorkspace=privateAtlasWorkspace(context),showDraft=!c.projection&&(draftEpoch===c.privacyEpoch||privateWorkspace);
   const features=visibleFeaturesForContext(c.atlas,context),outline=features.find(f=>f.properties.kind==='water-outline'),chosen=features.find(f=>f.id===selected);
@@ -46,6 +48,11 @@ export function GeoAtlasWorkspace({controller:c,scientific,request,onApply,busy}
     <p className="geo-status">{outline?`≈ Contour du lac : ${c.atlas.sources.find(s=>s.id===outline.properties.sourceId)?.title} · ${c.atlas.sources.find(s=>s.id===outline.properties.sourceId)?.geometryValidAt}`:'Le contour du lac n’est pas encore disponible.'}</p>
     {outline&&<p className="geo-help">Dessin hydrologique de référence ; la rive peut varier avec les saisons. Ce n’est ni une limite juridique ni une zone autorisée de pêche.</p>}
     <p className="geo-privacy">{privateWorkspace?'Travail privé en petit groupe — lieux sensibles visibles, ne pas projeter.':'Projection publique protégée — les lieux privés et leurs textes sont masqués.'} {c.authorized?'Collecte cartographique autorisée par l’animateur.':'Exercice éphémère : aucun lieu sauvegardé ni exporté.'}</p>
+    {!c.projection && <div className="geo-actions">
+      <button aria-expanded={spatialOpen} onClick={()=>setSpatialOpen(value=>!value)}>{spatialOpen?'Revenir aux lieux de pêche':'Explorer le référentiel du lac'}</button>
+    </div>}
+    {!c.projection && spatialOpen && <Suspense fallback={<p role="status">Chargement du référentiel du lac…</p>}><GuiersSpatialWorkspace scientific={scientific}/></Suspense>}
+    <div hidden={!c.projection && spatialOpen}>
     <div className="geo-actions"><button disabled={!outline} onClick={()=>start('point')}>Indiquer un endroit</button><button disabled={!outline} onClick={()=>start('sector')}>Dessiner un secteur avec l’animateur</button><button onClick={()=>start('verbal')}>Je préfère le décrire</button><button onClick={()=>{reset();c.setMessage('Vous pouvez continuer sans placer ni enregistrer de lieu.');}}>Je ne sais pas</button><button onClick={()=>list.current?.focus()}>Liste des lieux</button></div>
     {!outline&&<p>Pour indiquer un point ou dessiner un secteur, l’animateur doit d’abord fournir le vrai fond du lac. La description reste possible.</p>}
     <div className="geo-layout"><div className="geo-map-card"><GeoAtlasMap features={features} selected={chosen?.id} onSelect={choose} mode={showDraft?mode:'browse'} vertices={showDraft?(closed&&vertices.length?[...vertices,vertices[0]!]:vertices):[]} onPlace={p=>{if(closed)return;c.setError('');if(vertices.length>=64&&mode==='sector'){c.setError('64 sommets maximum ; simplifiez le secteur.');return;}setVertices(v=>mode==='point'?[p]:[...v,p]);}}/>
@@ -80,5 +87,6 @@ export function GeoAtlasWorkspace({controller:c,scientific,request,onApply,busy}
       <button disabled={busy||chosen?.properties.kind!=='fishing-area'||!chosen.geometry} onClick={prepare}>Préparer l’hypothèse d’accès</button>
       {prepared&&chosen&&<div><p>Hypothèse préparée, modèle inchangé. a_z = {prepared.features[0]!.properties.accessibility}. La simulation sera déclenchée séparément.</p><button disabled={busy || !chosen} onClick={()=>{try{if(prepared.id!==`${c.atlas.id}:r${c.atlas.revision}`)throw new Error('La carte a changé. Préparez de nouveau l’hypothèse.');const next=applyTerritorialZone(request,prepared,selected!);validateRequest(next);onApply(next);setPrepared(undefined);c.setMessage('Zone confirmée pour la simulation — accès hypothétique.');}catch(e){c.setError(errorText(e));}}}>Confirmer ce secteur pour le modèle</button></div>}
     </details>}
+    </div>
   </section>;
 }

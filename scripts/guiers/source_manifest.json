@@ -1,0 +1,33 @@
+{
+  "audit_date": "2026-11-27",
+  "status": "source_review_not_field_validation",
+  "hydrolakes": {
+    "version": "1.0",
+    "object": 1520,
+    "license": "CC BY 4.0",
+    "original_repository": "https://github.com/Edouard1er/irritator/tree/anim-simu/web/apps/frontend/data/geography",
+    "original_geojson": "guiers-hydrolakes-1520.original.geojson",
+    "original_git_blob_sha1": "cd53cc57e0987127cc215765dc5ca0593088e083",
+    "display_geojson_git_blob_sha1": "1d38288d5606784c51c60fc0b416791fe2b5203b",
+    "source_archive_sha256_as_documented_in_repository": "9ef63498569dd7ccd0b8d8852da026e009a75f42d293f00e483f3b9fcfe8e1f9"
+  },
+  "viabFishSng": {
+    "repository": "https://github.com/ElCep/viabFishSng/tree/master",
+    "candidate_commit": "e17bc25f18b11d7fa6074ec411749ad606767a76",
+    "data_license": "unconfirmed",
+    "observation_date": null,
+    "git_blob_sha1": {
+      "README.md": "29c8791866fb8fb8f0e7cdc5487290edf1e8e67c",
+      "data/lac.shp": "f72c50c2b12e95c91caf5cd458dc52e3c92efa54",
+      "data/lac.dbf": "43d95e4f353911c47f54c99cdb1687b492ed58c2",
+      "data/lac.prj": "f45cbadf0074d8b7b2669559a93bc50bb95f82d4",
+      "data/lac.qmd": "e2c1736501bffe301b8089306891451ea1d7cbe9",
+      "data/envelope.shp": "d6a48c6b7a5efbdd6260063b0373b3a8d4d763f5",
+      "data/villages.shp": "c3d87dc3bebb44ccbe4367975938f584e0b0aead",
+      "data/tipha_theoric.shp": "eb37a4b54ee91de51a549106fb02d37e91ab05de",
+      "data/zoneExclusionPeche.shp": "2a89b57d40787e137eb2089c1416dde229945691",
+      "modelv0.nlogo": "c47c74e641927e758d3ba09de723a8fe31723ea3",
+      "modelv0_viab.nlogo": "5f276fb7547c45c134569646e038e6d5728cbdee"
+    }
+  }
+}

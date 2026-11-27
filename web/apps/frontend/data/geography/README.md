@@ -1,5 +1,7 @@
 # Lac de Guiers : données réellement obtenues
 
+Le référentiel métrique `guiers-metric-reference.json` conserve la géométrie originale HydroLAKES et fournit les cellules de 1 km et 500 m en UTM 28N. Depuis le niveau 2, **Explorer le référentiel du lac** permet de consulter H et d’ouvrir un fichier local H+ ou E après vérification. La procédure de régénération, l’audit sur données réelles et les conditions d’accès à Lv+ sont décrits dans le [guide du SIG hybride](../../../../../docs/SIG_HYBRIDE_GUIERS_IMPLEMENTATION.md).
+
 Le fichier `lac-de-guiers.atlas.json` contient le contour hydrologique **HydroLAKES v1.0**, objet **Hylak_id 1520**, `Lake_name=Guiers`, `Country=Senegal`, `Poly_src=SWBD`. Aucun secteur de pêche ni frontière de réserve n’est livré. Les trois références CLPA sont **sans coordonnées**.
 
 `lac-de-guiers.hydrolakes.geojson` est le sous-ensemble GeoJSON RFC 7946 directement utilisable dans un SIG, avec `sourceId` sur la feature. Ses métadonnées complètes accompagnent la même géométrie dans l’atlas.
@@ -34,3 +36,8 @@ Le plan CLPA départemental fourni (octobre 2025), pp. 8 et 10, cite Mbane, Ngni
 ## Import d’un autre fond
 
 Envelopper le GeoJSON en `GeoAtlasV1` (exemple complet : atlas joint). Déclarer explicitement EPSG:4326 et des sources `verified-dataset` avec URL producteur, licence, version, date UTC, millésime/résolution, transformations, SHA256 et attribution. Chaque feature référence une source. Importer en lecture Scientifique : examiner les différences, confirmer le remplacement, puis sauvegarder séparément. Un GeoJSON brut sans métadonnées n’est jamais promu automatiquement en donnée vérifiée. L’ancien import `TerritoryGeography` reste disponible dans l’espace séparé et ne migre pas silencieusement les modèles.
+## Référentiel candidat V2
+
+Le référentiel public H conserve sa géométrie, ses grilles et son format V1. `guiers-connectivity-h.json` ajoute le résumé public des deux graphes calculés à partir de H. Il est régénéré avec `scripts/guiers/audit_sig.py` et correspond à la même empreinte HydroLAKES que `guiers-metric-reference.json`.
+
+Le périmètre candidat Hₚ+ arrive par un paquet SIG V2 autorisé et activé dans la session. Les données dérivées d’Étienne Delay, y compris le masque et ses cartes d’audit, restent sous `local-sig-guiers/`. [Recette V2](../../../../../docs/SIG_HYBRIDE_GUIERS_V2.md)
