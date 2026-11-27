@@ -63,3 +63,12 @@
 .geo-sig-cut{fill:none;stroke:#a2294e;stroke-width:3;vector-effect:non-scaling-stroke}
 .geo-sig-villages{columns:2;overflow-wrap:anywhere}
 .geo-sig .geo-science{overflow-wrap:anywhere}
+.geo-sig-cell{fill:transparent;stroke:none;cursor:pointer}
+.geo-sig-cell-selected{fill:#f4b84266;stroke:#974000;stroke-width:2;vector-effect:non-scaling-stroke}
+.geo-sig-mask,.geo-sig-parts,.geo-sig-links{fill:none;pointer-events:none;vector-effect:non-scaling-stroke}
+.geo-sig-mask{stroke:#9d3460;stroke-width:2;stroke-dasharray:8 4}
+.geo-sig-parts{stroke:#285a63;stroke-width:1.1}
+.geo-sig-links{stroke:#a04e17;stroke-width:1;stroke-opacity:.72}
+.geo-sig-village-name{fill:#342254;stroke:white;stroke-width:2px;paint-order:stroke;pointer-events:none;vector-effect:non-scaling-stroke}
+.geo-sig-parameters input{display:block;width:9em;max-width:100%}
+.geo-sig-trajectory{display:block;width:min(100%,26rem);height:5rem;color:#145b7c}

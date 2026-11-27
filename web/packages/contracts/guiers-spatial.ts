@@ -44,6 +44,11 @@ interface ConnectivitySummary {
 export interface GuiersConnectivity {
   parts: ConnectivitySummary; legacy: ConnectivitySummary; blockedLegacyInterfaces: number;
 }
+export interface GuiersWaterParts {
+  version: 'water_parts_v1';
+  nodes: { id: string; cellId: string; waterAreaM2: number; neighbors: string[]; geometry: PolygonGeometry; labelPoint: Position }[];
+  edges: { a: string; b: string; interfaceLengthM: number }[];
+}
 type ConnectivityKey = `${GuiersConfiguration}_${GuiersResolution}`;
 interface GuiersFishingDomain {
   geometry: PolygonGeometry;

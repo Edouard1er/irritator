@@ -161,7 +161,7 @@ def version_info(folder, expected, supplied_commit):
     if supplied_commit:
         commit = supplied_commit
     else:
-        git = ["git", "-c", f"safe.directory={folder.parent.as_posix()}", "-C", str(folder.parent)]
+        git = ["git", "--no-optional-locks", "-c", f"safe.directory={folder.parent.as_posix()}", "-C", str(folder.parent)]
         commit = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
         inputs = [f"data/{path.name}" for path in folder.iterdir() if path.is_file() and
                   path.stem in LAYERS and path.suffix in (".shp", ".shx", ".dbf", ".prj", ".qmd", ".cpg")]
@@ -244,7 +244,8 @@ def water_part_graph(waters, h, cells, interfaces):
             node_id = f"{key}:p{part_id}"
             require(node_id not in nodes and poly.area > 0, "Partie aquatique vide ou identifiant répété")
             by_cell[x, y].append((node_id, poly))
-            nodes[node_id] = dict(id=node_id, cellId=key, waterPartId=part_id, waterAreaM2=poly.area, neighbors=[])
+            nodes[node_id] = dict(id=node_id, cellId=key, waterPartId=part_id, waterAreaM2=poly.area, neighbors=[],
+                                  geometry=display_geometry(poly), labelPoint=TO_WGS(*poly.representative_point().coords[0]))
         part_area = math.fsum(nodes[node_id]["waterAreaM2"] for node_id, _ in by_cell[x, y])
         require(abs(part_area - cells[key]["waterAreaM2"]) <= AREA_EPS, f"Bilan des parties de {key}")
     for here, there, side in interfaces:

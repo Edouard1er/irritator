@@ -3,6 +3,7 @@ import { ApiError } from '../../../packages/contracts/index.js';
 import { readConfig, type Config } from './config/index.js';
 import { ProcessEngine, type Engine } from './services/engine.js';
 import { routes } from './routes/v1.js';
+import { localGuiersRoutes } from './routes/local-guiers.js';
 
 export function buildApp(config: Config = readConfig(), engine: Engine = new ProcessEngine(config)) {
   const app=Fastify({logger:false,bodyLimit:config.bodyLimit,requestTimeout:config.timeoutMs+5000,
@@ -17,6 +18,7 @@ export function buildApp(config: Config = readConfig(), engine: Engine = new Pro
     return reply.code(status).send({schemaVersion:1,status:'failed',error:{code,message},requestId:request.id});
   });
   routes(app,engine);
+  if (config.localGuiers) localGuiersRoutes(app, config.localGuiers, engine);
   app.addHook('onClose',async()=>engine.close());
   return app;
 }

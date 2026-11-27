@@ -12,7 +12,8 @@ export interface GuiersLogisticResult {
 }
 
 /** Use the existing QSS3 graph and request limits. Model time is days, biomass is kg. */
-export function guiersLogisticPlan(grid: GuiersGrid, parameters: GuiersLogisticParams) {
+export function guiersLogisticPlan(grid: GuiersGrid, parameters: GuiersLogisticParams,
+  samplingInterval = single.model.observations[0]!.samplingInterval) {
   const { initialKgM2, capacityKgM2, growthPerDay, days } = parameters;
   if (![initialKgM2, capacityKgM2, growthPerDay, days].every(Number.isFinite) ||
     initialKgM2 < 0 || initialKgM2 > capacityKgM2 || capacityKgM2 <= 0 || growthPerDay < 0 ||
@@ -22,7 +23,6 @@ export function guiersLogisticPlan(grid: GuiersGrid, parameters: GuiersLogisticP
     return { cellId: cell.id, id: cell.id.replaceAll(':', '_'), initial: initialKgM2 * cell.waterAreaM2,
       capacity, quantum: Math.max(1e-9, capacity * 3e-7), growth: growthPerDay };
   });
-  const samplingInterval = single.model.observations[0]!.samplingInterval;
   const perCell = Math.ceil(days / samplingInterval) + 2;
   const batchSize = Math.min(Math.floor(caps.maxComponents / single.model.components.length),
     Math.floor(caps.maxConnections / single.model.connections.length),
@@ -31,16 +31,17 @@ export function guiersLogisticPlan(grid: GuiersGrid, parameters: GuiersLogisticP
   const batches = [];
   for (let offset = 0; offset < cells.length; offset += batchSize) {
     const members = cells.slice(offset, offset + batchSize);
-    batches.push({ members, request: buildRequest(`guiers-autonomous-${grid.resolutionM}-${batches.length+1}`,
-      members, { start: 0, end: days }) });
+    const request = buildRequest(`guiers-autonomous-${grid.resolutionM}-${batches.length+1}`, members, { start: 0, end: days });
+    for (const observation of request.model.observations) observation.samplingInterval = samplingInterval;
+    batches.push({ members, request });
   }
   return batches;
 }
 
 export async function runGuiersLogistic(grid: GuiersGrid, identity: string, parameters: GuiersLogisticParams,
-  run: (request: RunRequest) => Promise<unknown>): Promise<GuiersLogisticResult> {
+  run: (request: RunRequest) => Promise<unknown>, samplingInterval?: number): Promise<GuiersLogisticResult> {
   const cells: GuiersLogisticResult['cells'] = [];
-  for (const { members, request } of guiersLogisticPlan(grid, parameters)) {
+  for (const { members, request } of guiersLogisticPlan(grid, parameters, samplingInterval)) {
     const result = parseResult(await run(request), request);
     for (const [i, observation] of result.observations.entries()) {
       const c = members[i]!;

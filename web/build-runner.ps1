@@ -2,7 +2,8 @@ param(
     [ValidateSet('Release','Debug')][string]$Configuration='Release',
     [string]$EngineBuildDir='',
     [switch]$SkipEngineBuild,
-    [int]$Parallel=2
+    [int]$Parallel=2,
+    [string]$RunnerBuildDir=''
 )
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -12,6 +13,10 @@ if(-not [IO.Path]::IsPathRooted($EngineBuildDir)) { $EngineBuildDir=Join-Path $r
 $EngineBuildDir=[IO.Path]::GetFullPath($EngineBuildDir)
 $runnerDir=if($Configuration -eq 'Release'){Join-Path $repo 'build-web-test4/runner'}else{Join-Path $repo 'build-web-test4/runner-debug'}
 $logs=Join-Path $repo "build-web-test4/logs/build-$suffix"
+if($RunnerBuildDir) {
+    $runnerDir=[IO.Path]::GetFullPath($RunnerBuildDir,$repo)
+    $logs=Join-Path $runnerDir 'logs'
+}
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 function Invoke-Native([string]$Name,[string[]]$NativeArguments,[string]$Log) {
     $ErrorActionPreference='Continue'

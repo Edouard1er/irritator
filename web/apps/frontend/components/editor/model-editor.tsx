@@ -26,6 +26,12 @@ const nodeTypes = { irritator: IrritatorNodeView };
 const LogisticSpatialExperiment = dynamic(() => import('@/components/simulation/logistic-spatial-experiment').then(module => module.LogisticSpatialExperiment));
 type Status = 'Prêt' | 'Validation' | 'Exécution' | 'Terminé' | 'Échec';
 type EditorOptions = { level?: 1 | 2; active?: boolean };
+
+function probeBackend() {
+  return Promise.allSettled([getHealth(), getCatalog()]);
+}
+let pendingBackendProbe: ReturnType<typeof probeBackend> | undefined;
+
 export function ModelEditor(options: EditorOptions = {}) { return <ReactFlowProvider><Editor {...options}/></ReactFlowProvider>; }
 
 function Editor({ level = 1, active = true }: EditorOptions) {
@@ -99,13 +105,13 @@ function Editor({ level = 1, active = true }: EditorOptions) {
   }, [dirty]);
 
   const connectBackend = useCallback(async () => {
-    // React StrictMode replays mount effects. Avoid four simultaneous --describe
-    // processes against the Test 4 server's default two-process budget.
+    // Both editors stay mounted. Share their simultaneous catalogue and health probes.
     if (backendChecking.current) return;
     backendChecking.current = true;
     setHealth('checking'); setHealthError(undefined); setCatalogError(undefined);
     try {
-      const [h, c] = await Promise.allSettled([getHealth(), getCatalog()]);
+      pendingBackendProbe ??= probeBackend().finally(() => { pendingBackendProbe = undefined; });
+      const [h, c] = await pendingBackendProbe;
       if (h.status === 'fulfilled') { setHealth('ready'); setWrapperAvailable(h.value.wrapperAvailable); }
       else { setHealth('unavailable'); setWrapperAvailable(false); setHealthError(errorText(h.reason)); }
       if (c.status === 'fulfilled') setCatalog(c.value);

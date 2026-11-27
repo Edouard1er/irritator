@@ -7,12 +7,17 @@ export interface AtlasMapLayers {
   frame: WaterGeometry;
   water: WaterGeometry;
   alternate?: WaterGeometry;
+  mask?: WaterGeometry;
   removed?: WaterGeometry;
   cut?: Position[][];
   grid?: Position[][];
+  cells?: { id: string; corners: Position[] }[];
+  waterParts?: { id: string; geometry: WaterGeometry }[];
+  waterLinks?: Position[][];
   clipAreasToWater?: boolean;
   areas: { id: string; geometry: WaterGeometry; kind: 'reserve' | 'typha'; label: string }[];
   points: { id: string; coordinates: Position; label: string; outside?: boolean }[];
+  villageNames?: boolean;
   density?: { id: string; corners: Position[]; kgM2: number; fill: string }[];
   legend: string;
 }
@@ -54,15 +59,27 @@ export function GeoAtlasMap({features, selected, onSelect, mode='browse', vertic
         <g clipPath={`url(#${clipId})`}>
           {layers.density?.map(cell=><path key={cell.id} d={line(cell.corners)+'Z'} fill={cell.fill}><title>{cell.id} · {cell.kgM2.toPrecision(4)} kg/m²</title></path>)}
           {layers.grid && <path className="geo-sig-grid" d={layers.grid.map(line).join(' ')}/>}
+          {layers.waterParts?.length ? <path className="geo-sig-parts" fillRule="evenodd"
+            d={layers.waterParts.map(part => path(part.geometry)).join(' ')}/> : null}
         </g>
+        {layers.waterLinks?.length ? <path className="geo-sig-links" d={layers.waterLinks.map(line).join(' ')}/> : null}
         <g clipPath={layers.clipAreasToWater ? `url(#${clipId})` : undefined}>
           {layers.areas.map(area=><path key={area.id} d={path(area.geometry)} fillRule="evenodd" className={`geo-sig-${area.kind}`}><title>{area.label}</title></path>)}
         </g>
         {layers.alternate && <path d={path(layers.alternate)} className="geo-sig-alternate"><title>Contour de comparaison</title></path>}
+        {layers.mask && <path d={path(layers.mask)} className="geo-sig-mask"><title>Limite du masque candidat</title></path>}
         {layers.cut && layers.cut.length > 0 && <path d={layers.cut.map(line).join(' ')} className="geo-sig-cut"><title>Interface aquatique coupée par le masque candidat</title></path>}
+        <g clipPath={`url(#${clipId})`}>
+          {layers.cells?.map(cell => <path key={cell.id} data-feature={cell.id} d={line(cell.corners)+'Z'}
+            className={cell.id === selected ? 'geo-sig-cell geo-sig-cell-selected' : 'geo-sig-cell'}><title>{cell.id}</title></path>)}
+        </g>
         {layers.points.map(point=>{
           const [cx,cy]=projection.project(point.coordinates);
           return <circle key={point.id} cx={cx} cy={cy} r={4/zoom} className={`geo-sig-village${point.outside ? ' geo-sig-village-outside' : ''}`}><title>{point.label}{point.outside && ' · hors de l’eau'}</title></circle>;
+        })}
+        {layers.villageNames && layers.points.map(point => {
+          const [x,y] = projection.project(point.coordinates);
+          return <text key={point.id} x={x + 5/zoom} y={y - 4/zoom} fontSize={9/zoom} className="geo-sig-village-name">{point.label}</text>;
         })}
       </>}
       {features.filter(f=>f.geometry&&f.geometry.type!=='Point').map(f=><path key={f.id} data-feature={f.properties.kind==='water-outline'?undefined:f.id} d={path(f.geometry)} fillRule="evenodd" className={f.properties.kind==='water-outline'?'geo-water':`geo-area${selected===f.id?' geo-selected':''}`} role={f.properties.kind==='water-outline'?undefined:'button'} tabIndex={f.properties.kind==='water-outline'?undefined:0} aria-label={`${f.properties.kind==='water-outline'?'Lac':'Secteur déclaré'} : ${f.properties.name}`} aria-pressed={f.properties.kind==='water-outline'?undefined:selected===f.id} onClick={()=>{if(!drawing&&f.properties.kind!=='water-outline')onSelect(f.id);}} onKeyDown={e=>{if(!drawing&&(e.key==='Enter'||e.key===' ')){e.preventDefault();e.stopPropagation();onSelect(f.id);}}}><title>{f.properties.name} · {f.properties.evidence==='reference-outline'?'Contour hydrologique, pas une limite de pêche':'Limites approximatives, non officielles'}</title></path>)}
